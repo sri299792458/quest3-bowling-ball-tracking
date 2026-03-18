@@ -10,6 +10,7 @@
 - Created the first local commit after copying the standalone sample-based project and adding the ball-tracking scaffolding.
 - Ran Unity `6000.3.5f2` in batch mode, upgraded the project from the sample's editor version, resolved packages, and successfully generated `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
 - Unity upgraded `com.unity.ai.inference` from `2.2.1` to `2.4.1` and `com.unity.xr.openxr` from `1.15.1` to `1.16.1` during import. Those changes were kept because they match the installed editor.
+- Kept README instructions repo-relative instead of machine-specific so teammates can clone the project without editing local file paths.
 
 ## Current Limitations
 
