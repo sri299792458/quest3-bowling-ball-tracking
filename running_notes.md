@@ -12,6 +12,8 @@
 - Unity upgraded `com.unity.ai.inference` from `2.2.1` to `2.4.1` and `com.unity.xr.openxr` from `1.15.1` to `1.16.1` during import. Those changes were kept because they match the installed editor.
 - Kept README instructions repo-relative instead of machine-specific so teammates can clone the project without editing local file paths.
 - Documented that the active build target may still open as `Windows` on another machine. Unity stores the selected platform in local editor state rather than repo content, so teammates should switch to `Android` before building.
+- Added an auto-start path for the dedicated bowling scene because Meta's sample detection flow stays paused until an `A` press or pinch after permissions are granted, which made first-run testing ambiguous.
+- Added a head-locked runtime status HUD and periodic logs so headset testing now shows the active target class, whether inference is running, and which recent labels the sample model sees.
 
 ## Current Limitations
 

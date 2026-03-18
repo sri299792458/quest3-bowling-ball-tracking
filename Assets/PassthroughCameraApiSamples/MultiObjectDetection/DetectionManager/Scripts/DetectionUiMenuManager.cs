@@ -78,6 +78,23 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_noPermissionPanel.SetActive(false);
         }
 
+        public bool TryStartDetectionSession()
+        {
+            if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) ||
+                !OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess))
+            {
+                return false;
+            }
+
+            if (!IsPaused && !m_initialMenu)
+            {
+                return true;
+            }
+
+            OnPauseMenu(false);
+            return true;
+        }
+
         private void InitialMenuUpdate()
         {
             if (InputManager.IsButtonADownOrPinchStarted())
