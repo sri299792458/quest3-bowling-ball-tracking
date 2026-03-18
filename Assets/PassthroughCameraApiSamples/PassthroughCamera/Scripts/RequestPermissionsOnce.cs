@@ -11,21 +11,37 @@ namespace PassthroughCameraSamples
         private static void AfterSceneLoad()
         {
             bool permissionsRequestedOnce = false;
-            SceneManager.sceneLoaded += (scene, _) =>
+
+            void TryRequestPermissions(Scene scene)
             {
-                if (scene.name != "StartScene")
+                if (permissionsRequestedOnce || scene.name == "StartScene")
                 {
-                    if (!permissionsRequestedOnce)
-                    {
-                        permissionsRequestedOnce = true;
-                        OVRPermissionsRequester.Request(new[]
-                        {
-                            OVRPermissionsRequester.Permission.Scene,
-                            OVRPermissionsRequester.Permission.PassthroughCameraAccess
-                        });
-                    }
+                    return;
                 }
-            };
+
+                var missingPermissions = new System.Collections.Generic.List<OVRPermissionsRequester.Permission>(2);
+                if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene))
+                {
+                    missingPermissions.Add(OVRPermissionsRequester.Permission.Scene);
+                }
+
+                if (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess))
+                {
+                    missingPermissions.Add(OVRPermissionsRequester.Permission.PassthroughCameraAccess);
+                }
+
+                if (missingPermissions.Count == 0)
+                {
+                    permissionsRequestedOnce = true;
+                    return;
+                }
+
+                permissionsRequestedOnce = true;
+                OVRPermissionsRequester.Request(missingPermissions.ToArray());
+            }
+
+            SceneManager.sceneLoaded += (scene, _) => TryRequestPermissions(scene);
+            TryRequestPermissions(SceneManager.GetActiveScene());
         }
     }
 }

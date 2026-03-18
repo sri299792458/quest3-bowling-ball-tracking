@@ -14,6 +14,7 @@
 - Documented that the active build target may still open as `Windows` on another machine. Unity stores the selected platform in local editor state rather than repo content, so teammates should switch to `Android` before building.
 - Added an auto-start path for the dedicated bowling scene because Meta's sample detection flow stays paused until an `A` press or pinch after permissions are granted, which made first-run testing ambiguous.
 - Added a head-locked runtime status HUD and periodic logs so headset testing now shows the active target class, whether inference is running, and which recent labels the sample model sees.
+- Fixed the sample permission hook so it requests scene and passthrough camera access for the already-active non-start scene as well. The original sample only subscribed to future `sceneLoaded` events, which could miss the first scene if the app launched directly into `BowlingBallTracking` or `MultiObjectDetection`.
 
 ## Current Limitations
 
