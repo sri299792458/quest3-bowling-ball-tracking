@@ -13,10 +13,11 @@ This project is a standalone Unity project based on Meta's official Passthrough 
 
 1. Open the project root in Unity `6000.3.5f2`.
 2. Let Unity resolve packages.
-3. Run `Tools > Ball Tracking > Create Or Update Project Assets`.
-4. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
-5. Build and run on Quest 3. Use a subfolder such as `Builds/Android` as the build output folder. Create it first if it does not exist.
-6. Do not test the camera path over Link or XR Simulator.
+3. Switch the active platform to `Android` in `File > Build Profiles` or `Build Settings` if Unity opens the project with `Windows` active. The active platform is local editor state and is not shared through the repo.
+4. Run `Tools > Ball Tracking > Create Or Update Project Assets`.
+5. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
+6. Build and run on Quest 3. Use a subfolder such as `Builds/Android` as the build output folder. Create it first if it does not exist.
+7. Do not test the camera path over Link or XR Simulator.
 
 ## Important
 
