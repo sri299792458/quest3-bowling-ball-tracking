@@ -7,8 +7,6 @@ This project is a standalone Unity project based on Meta's official Passthrough 
 - Uses Quest 3 passthrough camera access locally on-device.
 - Runs Meta's sample `YOLOv9t` model through Unity Inference Engine.
 - Filters detections to the `sports_ball` class and overlays a tracked world-space marker.
-- Auto-starts the detection session in the dedicated bowling scene after permissions are granted.
-- Shows a head-locked status readout with the current target class and recently visible labels.
 - Adds a dedicated scene: `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
 
 ## First open
@@ -24,5 +22,4 @@ This project is a standalone Unity project based on Meta's official Passthrough 
 ## Important
 
 - The included model is still a generic object detector. For real bowling tracking, replace it with a custom-trained one-class bowling-ball YOLOv9t model.
-- The current target class is `sports_ball`, which comes from the generic COCO label set. For a quick smoke test, try objects the model is known to recognize such as `person`, `chair`, `cup`, `bottle`, or a bright `sports ball`.
 - See `running_notes.md` for implementation decisions and current gaps.

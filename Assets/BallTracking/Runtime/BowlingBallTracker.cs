@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Collections.Generic;
 using PassthroughCameraSamples.MultiObjectDetection;
 using UnityEngine;
 using UnityEngine.UI;
@@ -26,45 +25,27 @@ namespace BallTracking.Runtime
         [SerializeField] private Color targetBoxColor = new(1f, 0.5f, 0.15f, 0.9f);
         [SerializeField] private Color nonTargetBoxColor = new(1f, 1f, 1f, 0.15f);
 
-        [Header("Debug Status")]
-        [SerializeField] private Vector3 statusHudLocalPosition = new(0f, -0.14f, 1.1f);
-        [SerializeField] private Color statusTextColor = new(1f, 1f, 1f, 0.95f);
-        [SerializeField] private float statusLogIntervalSeconds = 3f;
-
         private SentisInferenceUiManager uiManager;
-        private DetectionUiMenuManager menuManager;
         private Transform markerRoot;
         private Renderer markerRenderer;
         private TrailRenderer markerTrail;
         private TextMesh markerText;
         private Material markerMaterial;
-        private Transform statusRoot;
-        private TextMesh statusText;
 
         private Vector3 smoothedPosition;
         private Vector3 lastRawPosition;
         private Vector3 smoothedVelocity;
         private float lastSeenTime = float.NegativeInfinity;
-        private float nextStatusLogTime;
         private bool hasTrack;
-        private bool hadTargetLastFrame;
 
         private IEnumerator Start()
         {
-            while ((uiManager = FindFirstObjectByType<SentisInferenceUiManager>()) == null ||
-                   (menuManager = FindFirstObjectByType<DetectionUiMenuManager>()) == null)
+            while ((uiManager = FindFirstObjectByType<SentisInferenceUiManager>()) == null)
             {
                 yield return null;
             }
 
             EnsureMarker();
-            EnsureStatusHud();
-            StartCoroutine(AutoStartDetectionSession());
-
-            Debug.Log(
-                $"[{nameof(BowlingBallTracker)}] Running Meta's sample YOLOv9t COCO detector. " +
-                $"Current target class: '{targetClassName}'. Bowling balls are not trained explicitly yet. " +
-                "Quick smoke-test classes: person, chair, cup, bottle, sports_ball.");
         }
 
         private void Update()
@@ -74,10 +55,8 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            EnsureStatusHud();
             var targetBox = SelectTargetBox();
             UpdateBoxHighlighting(targetBox);
-            UpdateStatusDisplay(targetBox);
 
             if (targetBox != null)
             {
@@ -86,22 +65,6 @@ namespace BallTracking.Runtime
             }
 
             UpdatePredictionOnly();
-        }
-
-        private IEnumerator AutoStartDetectionSession()
-        {
-            while (menuManager == null)
-            {
-                menuManager = FindFirstObjectByType<DetectionUiMenuManager>();
-                yield return null;
-            }
-
-            while (!menuManager.TryStartDetectionSession())
-            {
-                yield return null;
-            }
-
-            Debug.Log($"[{nameof(BowlingBallTracker)}] Detection session auto-started after permissions were granted.");
         }
 
         private SentisInferenceUiManager.BoundingBoxData SelectTargetBox()
@@ -199,47 +162,6 @@ namespace BallTracking.Runtime
             markerText.text = $"target: {targetClassName}\nstate: predicted\nvel: {smoothedVelocity.magnitude:F2} m/s";
         }
 
-        private void UpdateStatusDisplay(SentisInferenceUiManager.BoundingBoxData targetBox)
-        {
-            if (statusText == null)
-            {
-                return;
-            }
-
-            var recentLabels = CollectRecentLabels();
-            var sessionState = menuManager != null && !menuManager.IsPaused ? "running" : "waiting";
-            var visibleLabels = recentLabels.Count == 0 ? "none" : string.Join(", ", recentLabels);
-            var targetState = targetBox != null ? "acquired" : hasTrack ? "predicted only" : "none";
-
-            statusText.text =
-                "Quest 3 Ball Tracking\n" +
-                $"session: {sessionState}\n" +
-                "model: sample YOLOv9t COCO\n" +
-                $"target: {targetClassName}\n" +
-                $"track: {targetState}\n" +
-                $"visible: {visibleLabels}\n" +
-                "try: person, chair, cup, bottle, sports ball";
-
-            var hasTarget = targetBox != null;
-            if (hasTarget != hadTargetLastFrame)
-            {
-                Debug.Log(
-                    hasTarget
-                        ? $"[{nameof(BowlingBallTracker)}] Target '{targetClassName}' acquired."
-                        : $"[{nameof(BowlingBallTracker)}] Target '{targetClassName}' lost.");
-                hadTargetLastFrame = hasTarget;
-            }
-
-            if (Time.time < nextStatusLogTime)
-            {
-                return;
-            }
-
-            nextStatusLogTime = Time.time + statusLogIntervalSeconds;
-            Debug.Log(
-                $"[{nameof(BowlingBallTracker)}] session={sessionState}, target={targetState}, visible={visibleLabels}.");
-        }
-
         private void UpdateBoxHighlighting(SentisInferenceUiManager.BoundingBoxData targetBox)
         {
             foreach (var box in uiManager.m_boxDrawn)
@@ -262,37 +184,6 @@ namespace BallTracking.Runtime
                     text.color = box == targetBox ? targetBoxColor : Color.white;
                 }
             }
-        }
-
-        private List<string> CollectRecentLabels()
-        {
-            var labels = new List<string>();
-            if (uiManager == null)
-            {
-                return labels;
-            }
-
-            var recentDetectionWindow = Mathf.Max(maxDetectionAgeSeconds, 1f);
-            foreach (var box in uiManager.m_boxDrawn)
-            {
-                if (Time.time - box.lastUpdateTime > recentDetectionWindow)
-                {
-                    continue;
-                }
-
-                if (labels.Contains(box.ClassName))
-                {
-                    continue;
-                }
-
-                labels.Add(box.ClassName);
-                if (labels.Count >= 5)
-                {
-                    break;
-                }
-            }
-
-            return labels;
         }
 
         private void EnsureMarker()
@@ -336,52 +227,6 @@ namespace BallTracking.Runtime
             markerRoot.gameObject.SetActive(false);
         }
 
-        private void EnsureStatusHud()
-        {
-            if (statusRoot != null)
-            {
-                var cameraTransform = GetHudAnchor();
-                if (cameraTransform != null && statusRoot.parent != cameraTransform)
-                {
-                    statusRoot.SetParent(cameraTransform, false);
-                    statusRoot.localPosition = statusHudLocalPosition;
-                    statusRoot.localRotation = Quaternion.identity;
-                }
-
-                return;
-            }
-
-            var anchor = GetHudAnchor();
-            if (anchor == null)
-            {
-                return;
-            }
-
-            var rootObject = new GameObject("BowlingBallStatusHud");
-            statusRoot = rootObject.transform;
-            statusRoot.SetParent(anchor, false);
-            statusRoot.localPosition = statusHudLocalPosition;
-            statusRoot.localRotation = Quaternion.identity;
-
-            statusText = rootObject.AddComponent<TextMesh>();
-            statusText.fontSize = 48;
-            statusText.characterSize = 0.006f;
-            statusText.anchor = TextAnchor.MiddleCenter;
-            statusText.alignment = TextAlignment.Center;
-            statusText.color = statusTextColor;
-        }
-
-        private static Transform GetHudAnchor()
-        {
-            if (Camera.main != null)
-            {
-                return Camera.main.transform;
-            }
-
-            var anyCamera = UnityEngine.Object.FindFirstObjectByType<Camera>();
-            return anyCamera != null ? anyCamera.transform : null;
-        }
-
         private Material CreateMarkerMaterial()
         {
             var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
@@ -415,11 +260,6 @@ namespace BallTracking.Runtime
             if (markerMaterial != null)
             {
                 Destroy(markerMaterial);
-            }
-
-            if (statusRoot != null)
-            {
-                Destroy(statusRoot.gameObject);
             }
         }
     }
