@@ -116,10 +116,29 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 yield break;
             }
 
-            var cachedCameraPose = m_cameraAccess.GetCameraPose();
+            Pose cachedCameraPose;
+            try
+            {
+                cachedCameraPose = m_cameraAccess.GetCameraPose();
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("get-camera-pose", ex);
+                yield break;
+            }
 
             // Update Capture data
-            Texture targetTexture = m_cameraAccess.GetTexture();
+            Texture targetTexture;
+            try
+            {
+                targetTexture = m_cameraAccess.GetTexture();
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("get-texture", ex);
+                yield break;
+            }
+
             if (targetTexture == null)
             {
                 ReportDebug("camera-wait", "Passthrough texture is null");
@@ -129,30 +148,106 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             // Convert the texture to a Tensor and schedule the inference
             var textureTransform = new TextureTransform().SetDimensions(targetTexture.width, targetTexture.height, 3);
             using var input = new Tensor<float>(new TensorShape(1, 3, m_inputSize.x, m_inputSize.y));
-            TextureConverter.ToTensor(targetTexture, input, textureTransform);
+            try
+            {
+                TextureConverter.ToTensor(targetTexture, input, textureTransform);
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("to-tensor", ex);
+                yield break;
+            }
 
             // Schedule all model layers
-            m_engine.Schedule(input);
+            try
+            {
+                m_engine.Schedule(input);
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("schedule", ex);
+                yield break;
+            }
 
             // Get the results. ReadbackAndCloneAsync waits for all layers to complete before returning the result
-            var boxesAwaiter = (m_engine.PeekOutput(0) as Tensor<float>).ReadbackAndCloneAsync().GetAwaiter();
+            Tensor<float> boxesOutput;
+            try
+            {
+                boxesOutput = m_engine.PeekOutput(0) as Tensor<float>;
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("peek-boxes", ex);
+                yield break;
+            }
+
+            if (boxesOutput == null)
+            {
+                ReportDebug("inference-error", "boxes output is null or has unexpected type");
+                yield break;
+            }
+
+            var boxesAwaiter = boxesOutput.ReadbackAndCloneAsync().GetAwaiter();
             while (!boxesAwaiter.IsCompleted)
             {
                 yield return null;
             }
-            using var boxes = boxesAwaiter.GetResult();
+
+            Tensor<float> boxes;
+            try
+            {
+                boxes = boxesAwaiter.GetResult();
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("readback-boxes", ex);
+                yield break;
+            }
+
+            using (boxes)
+            {
             if (boxes.shape[0] == 0)
             {
                 ReportDebug("inference-empty", $"boxes=0 texture={targetTexture.width}x{targetTexture.height}");
                 yield break;
             }
 
-            var classIDsAwaiter = (m_engine.PeekOutput(1) as Tensor<int>).ReadbackAndCloneAsync().GetAwaiter();
+            Tensor<int> classIdsOutput;
+            try
+            {
+                classIdsOutput = m_engine.PeekOutput(1) as Tensor<int>;
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("peek-classids", ex);
+                yield break;
+            }
+
+            if (classIdsOutput == null)
+            {
+                ReportDebug("inference-error", "classIDs output is null or has unexpected type");
+                yield break;
+            }
+
+            var classIDsAwaiter = classIdsOutput.ReadbackAndCloneAsync().GetAwaiter();
             while (!classIDsAwaiter.IsCompleted)
             {
                 yield return null;
             }
-            using var classIDs = classIDsAwaiter.GetResult();
+
+            Tensor<int> classIDs;
+            try
+            {
+                classIDs = classIDsAwaiter.GetResult();
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("readback-classids", ex);
+                yield break;
+            }
+
+            using (classIDs)
+            {
             if (classIDs.shape[0] == 0)
             {
                 ReportDebug("inference-error", $"classIDs=0 boxes={boxes.shape[0]}");
@@ -160,12 +255,42 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 yield break;
             }
 
-            var scoresAwaiter = (m_engine.PeekOutput(2) as Tensor<float>).ReadbackAndCloneAsync().GetAwaiter();
+            Tensor<float> scoresOutput;
+            try
+            {
+                scoresOutput = m_engine.PeekOutput(2) as Tensor<float>;
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("peek-scores", ex);
+                yield break;
+            }
+
+            if (scoresOutput == null)
+            {
+                ReportDebug("inference-error", "scores output is null or has unexpected type");
+                yield break;
+            }
+
+            var scoresAwaiter = scoresOutput.ReadbackAndCloneAsync().GetAwaiter();
             while (!scoresAwaiter.IsCompleted)
             {
                 yield return null;
             }
-            using var scores = scoresAwaiter.GetResult();
+
+            Tensor<float> scores;
+            try
+            {
+                scores = scoresAwaiter.GetResult();
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("readback-scores", ex);
+                yield break;
+            }
+
+            using (scores)
+            {
             if (scores.shape[0] == 0)
             {
                 ReportDebug("inference-error", $"scores=0 boxes={boxes.shape[0]} classIDs={classIDs.shape[0]}");
@@ -173,7 +298,16 @@ namespace PassthroughCameraSamples.MultiObjectDetection
                 yield break;
             }
 
-            NonMaxSuppression(m_detections, boxes, classIDs, scores, m_iouThreshold, m_scoreThreshold);
+            try
+            {
+                NonMaxSuppression(m_detections, boxes, classIDs, scores, m_iouThreshold, m_scoreThreshold);
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("nms", ex);
+                yield break;
+            }
+
             if (m_detections.Count == 0)
             {
                 ReportDebug("no-detections", $"boxes={boxes.shape[0]} classIDs={classIDs.shape[0]} scores={scores.shape[0]} kept=0 tex={targetTexture.width}x{targetTexture.height}");
@@ -189,7 +323,18 @@ namespace PassthroughCameraSamples.MultiObjectDetection
 
             // Update UI.
             ReportDebug("drawing", $"kept={m_detections.Count} labels={DescribeDetections()} anchor={DescribeAnchorState()}");
-            m_uiInference.DrawUIBoxes(m_detections, m_inputSize, cachedCameraPose);
+            try
+            {
+                m_uiInference.DrawUIBoxes(m_detections, m_inputSize, cachedCameraPose);
+            }
+            catch (System.Exception ex)
+            {
+                ReportException("draw-ui", ex);
+                yield break;
+            }
+            }
+            }
+            }
         }
 
         private string DescribeAnchorState()
@@ -248,6 +393,14 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_lastDebugDetail = detail;
             m_lastDebugLogTime = Time.unscaledTime;
             Debug.Log($"{LogPrefix} {status} :: {detail}");
+        }
+
+        private void ReportException(string step, System.Exception exception)
+        {
+            var detail = $"{step} :: {exception.GetType().Name}: {exception.Message}";
+            ReportDebug("exception", detail);
+            Debug.LogError($"{LogPrefix} {detail}");
+            Debug.LogException(exception);
         }
 
         private static void NonMaxSuppression(List<(int classId, Vector4 boundingBox)> outDetections, Tensor<float> boxes, Tensor<int> classIDs, Tensor<float> scores, float iouThreshold, float scoreThreshold)
