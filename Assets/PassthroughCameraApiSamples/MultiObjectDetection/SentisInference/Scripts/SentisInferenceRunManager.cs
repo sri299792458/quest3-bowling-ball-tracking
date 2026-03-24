@@ -14,6 +14,8 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     [MetaCodeSample("PassthroughCameraApiSamples-MultiObjectDetection")]
     public class SentisInferenceRunManager : MonoBehaviour
     {
+        private const string LogPrefix = "[SentisInferenceRunManager]";
+
         [SerializeField] private PassthroughCameraAccess m_cameraAccess;
         [SerializeField] private DetectionUiMenuManager m_uiMenuManager;
         [SerializeField] private DetectionManager m_detectionManager;
@@ -35,6 +37,10 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         private Worker m_engine;
         private Vector2Int m_inputSize;
         private readonly List<(int classId, Vector4 boundingBox)> m_detections = new List<(int classId, Vector4 boundingBox)>();
+        private string[] m_labels;
+        private string m_lastDebugStatus;
+        private string m_lastDebugDetail;
+        private float m_lastDebugLogTime;
 
         private void Awake()
         {
@@ -42,16 +48,20 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             var inputShape = model.inputs[0].shape;
             m_inputSize = new Vector2Int(inputShape.Get(2), inputShape.Get(3));
             m_engine = new Worker(model, m_backend);
+            m_labels = m_labelsAsset != null ? m_labelsAsset.text.Split('\n') : System.Array.Empty<string>();
+            ReportDebug("model-ready", $"backend={m_backend} input={m_inputSize.x}x{m_inputSize.y} model={(m_sentisModel != null ? m_sentisModel.name : "null")}");
         }
 
         private IEnumerator Start()
         {
             m_uiInference.SetLabels(m_labelsAsset);
+            ReportDebug("paused", "waiting for A or pinch to start inference");
 
             while (true)
             {
                 while (m_uiMenuManager.IsPaused)
                 {
+                    ReportDebug("paused", "waiting for A or pinch to start inference");
                     yield return null;
                 }
                 yield return RunInference();
@@ -93,6 +103,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         {
             if (!m_cameraAccess.IsPlaying)
             {
+                ReportDebug("camera-wait", "PassthroughCameraAccess.IsPlaying is false");
                 yield break;
             }
 
@@ -100,6 +111,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             static extern OVRPlugin.Result ovrp_GetNodePoseStateAtTime(double time, OVRPlugin.Node nodeId, out OVRPlugin.PoseStatef nodePoseState);
             if (!ovrp_GetNodePoseStateAtTime(OVRPlugin.GetTimeInSeconds(), OVRPlugin.Node.Head, out _).IsSuccess())
             {
+                ReportDebug("pose-error", "OVR head pose not available for camera pose");
                 Debug.Log("ovrp_GetNodePoseStateAtTime failed, which means 'm_cameraAccess.GetCameraPose()' is not reliable, skipping.");
                 yield break;
             }
@@ -108,6 +120,11 @@ namespace PassthroughCameraSamples.MultiObjectDetection
 
             // Update Capture data
             Texture targetTexture = m_cameraAccess.GetTexture();
+            if (targetTexture == null)
+            {
+                ReportDebug("camera-wait", "Passthrough texture is null");
+                yield break;
+            }
 
             // Convert the texture to a Tensor and schedule the inference
             var textureTransform = new TextureTransform().SetDimensions(targetTexture.width, targetTexture.height, 3);
@@ -126,6 +143,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             using var boxes = boxesAwaiter.GetResult();
             if (boxes.shape[0] == 0)
             {
+                ReportDebug("inference-empty", $"boxes=0 texture={targetTexture.width}x{targetTexture.height}");
                 yield break;
             }
 
@@ -137,6 +155,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             using var classIDs = classIDsAwaiter.GetResult();
             if (classIDs.shape[0] == 0)
             {
+                ReportDebug("inference-error", $"classIDs=0 boxes={boxes.shape[0]}");
                 Debug.LogError("classIDs.shape[0] == 0");
                 yield break;
             }
@@ -149,20 +168,86 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             using var scores = scoresAwaiter.GetResult();
             if (scores.shape[0] == 0)
             {
+                ReportDebug("inference-error", $"scores=0 boxes={boxes.shape[0]} classIDs={classIDs.shape[0]}");
                 Debug.LogError("scores.shape[0] == 0");
                 yield break;
             }
 
             NonMaxSuppression(m_detections, boxes, classIDs, scores, m_iouThreshold, m_scoreThreshold);
+            if (m_detections.Count == 0)
+            {
+                ReportDebug("no-detections", $"boxes={boxes.shape[0]} classIDs={classIDs.shape[0]} scores={scores.shape[0]} kept=0 tex={targetTexture.width}x{targetTexture.height}");
+                yield break;
+            }
 
             // Checking if spatial anchor is tracked ensures bounding boxes are placed at correct world space positIons.
             if (!m_cameraAccess.IsPlaying || m_detectionManager.m_spatialAnchor == null || !m_detectionManager.m_spatialAnchor.IsTracked)
             {
+                ReportDebug("anchor-wait", $"kept={m_detections.Count} labels={DescribeDetections()} anchor={DescribeAnchorState()}");
                 yield break;
             }
 
             // Update UI.
+            ReportDebug("drawing", $"kept={m_detections.Count} labels={DescribeDetections()} anchor={DescribeAnchorState()}");
             m_uiInference.DrawUIBoxes(m_detections, m_inputSize, cachedCameraPose);
+        }
+
+        private string DescribeAnchorState()
+        {
+            if (m_detectionManager == null)
+            {
+                return "manager-null";
+            }
+
+            if (m_detectionManager.m_spatialAnchor == null)
+            {
+                return "missing";
+            }
+
+            return $"tracked={m_detectionManager.m_spatialAnchor.IsTracked} localized={m_detectionManager.m_spatialAnchor.Localized}";
+        }
+
+        private string DescribeDetections(int maxCount = 3)
+        {
+            if (m_detections.Count == 0)
+            {
+                return "none";
+            }
+
+            var count = Mathf.Min(maxCount, m_detections.Count);
+            var labels = new string[count];
+            for (var i = 0; i < count; i++)
+            {
+                labels[i] = GetLabel(m_detections[i].classId);
+            }
+
+            return string.Join(", ", labels);
+        }
+
+        private string GetLabel(int classId)
+        {
+            if (m_labels == null || classId < 0 || classId >= m_labels.Length)
+            {
+                return $"class:{classId}";
+            }
+
+            return m_labels[classId].Replace(" ", "_");
+        }
+
+        private void ReportDebug(string status, string detail)
+        {
+            m_uiMenuManager?.SetDebugStatus(status, detail);
+
+            var shouldLog = status != m_lastDebugStatus || detail != m_lastDebugDetail || Time.unscaledTime - m_lastDebugLogTime > 2f;
+            if (!shouldLog)
+            {
+                return;
+            }
+
+            m_lastDebugStatus = status;
+            m_lastDebugDetail = detail;
+            m_lastDebugLogTime = Time.unscaledTime;
+            Debug.Log($"{LogPrefix} {status} :: {detail}");
         }
 
         private static void NonMaxSuppression(List<(int classId, Vector4 boundingBox)> outDetections, Tensor<float> boxes, Tensor<int> classIDs, Tensor<float> scores, float iouThreshold, float scoreThreshold)
