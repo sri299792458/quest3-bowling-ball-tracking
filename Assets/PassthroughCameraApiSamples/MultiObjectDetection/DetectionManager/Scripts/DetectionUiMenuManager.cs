@@ -11,8 +11,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
     [MetaCodeSample("PassthroughCameraApiSamples-MultiObjectDetection")]
     public class DetectionUiMenuManager : MonoBehaviour
     {
-        private const string LogPrefix = "[DetectionUiMenuManager]";
-
         [Header("Ui elements ref.")]
         [SerializeField] private GameObject m_loadingPanel;
         [SerializeField] private GameObject m_initialPanel;
@@ -28,8 +26,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         // start menu
         private int m_objectsDetected = 0;
         private int m_objectsIdentified = 0;
-        private string m_debugStatus = "startup";
-        private string m_debugDetail = "booting";
 
         // pause menu
         public bool IsPaused { get; private set; } = true;
@@ -42,14 +38,11 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_loadingPanel.SetActive(false);
 
             // Wait for permissions
-            SetDebugStatus("permissions", "waiting for Scene + PassthroughCameraAccess");
             OnNoPermissionMenu();
             while (!OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) || !OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess))
             {
                 yield return null;
             }
-
-            Debug.Log($"{LogPrefix} Required permissions granted.");
             OnInitialMenu();
         }
 
@@ -72,7 +65,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             IsPaused = true;
             m_initialPanel.SetActive(false);
             m_noPermissionPanel.SetActive(true);
-            SetDebugStatus("permissions", "waiting for required permissions");
         }
         #endregion
 
@@ -84,7 +76,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             IsPaused = true;
             m_initialPanel.SetActive(true);
             m_noPermissionPanel.SetActive(false);
-            SetDebugStatus("paused", "press A or pinch to start inference");
         }
 
         private void InitialMenuUpdate()
@@ -103,7 +94,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             m_initialPanel.SetActive(false);
             m_noPermissionPanel.SetActive(false);
 
-            SetDebugStatus(visible ? "paused" : "running", visible ? "detection paused" : "detection loop active");
             OnPause?.Invoke(visible);
         }
         #endregion
@@ -111,7 +101,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         #region Ui state: detection information
         private void UpdateLabelInformation()
         {
-            m_labelInformation.text = $"Unity Sentis version: 2.1.3\nAI model: Yolo\nDetecting objects: {m_objectsDetected}\nObjects identified: {m_objectsIdentified}\nStatus: {m_debugStatus}\nDetail: {m_debugDetail}";
+            m_labelInformation.text = $"Unity Sentis version: 2.1.3\nAI model: Yolo\nDetecting objects: {m_objectsDetected}\nObjects identified: {m_objectsIdentified}";
         }
 
         public void OnObjectsDetected(int objects)
@@ -131,13 +121,6 @@ namespace PassthroughCameraSamples.MultiObjectDetection
             {
                 m_objectsIdentified += objects;
             }
-            UpdateLabelInformation();
-        }
-
-        public void SetDebugStatus(string status, string detail)
-        {
-            m_debugStatus = status;
-            m_debugDetail = detail;
             UpdateLabelInformation();
         }
         #endregion
