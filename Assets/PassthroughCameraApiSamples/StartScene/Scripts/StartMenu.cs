@@ -16,15 +16,34 @@ namespace PassthroughCameraSamples.StartScene
     [MetaCodeSample("PassthroughCameraApiSamples-StartScene")]
     public class StartMenu : MonoBehaviour
     {
+        private const string LogPrefix = "[StartMenu]";
+
         public OVROverlay Overlay;
         public OVROverlay Text;
         public OVRCameraRig VrRig;
         [SerializeField] private ModelAsset m_objectDetectionModel;
+        private OVRManager m_ovrManager;
+        private OVRPassthroughLayer[] m_passthroughLayers;
 
-        private void Awake() => SentisInferenceRunManager.PreloadModel(m_objectDetectionModel);
+        private void Awake()
+        {
+            CachePassthroughObjects();
+            DisableLauncherPassthrough();
+
+            try
+            {
+                SentisInferenceRunManager.PreloadModel(m_objectDetectionModel);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"{LogPrefix} Model preload failed, continuing without preload: {ex.Message}");
+            }
+        }
 
         private void Start()
         {
+            DisableLauncherPassthrough();
+
             var generalScenes = new List<Tuple<int, string>>();
             var passthroughScenes = new List<Tuple<int, string>>();
             var proControllerScenes = new List<Tuple<int, string>>();
@@ -79,6 +98,48 @@ namespace PassthroughCameraSamples.StartScene
             }
 
             uiBuilder.Show();
+        }
+
+        private void Update()
+        {
+            if (!SceneManager.GetActiveScene().name.Equals("StartScene", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            DisableLauncherPassthrough();
+        }
+
+        private void CachePassthroughObjects()
+        {
+            m_ovrManager ??= VrRig != null ? VrRig.GetComponent<OVRManager>() : FindFirstObjectByType<OVRManager>();
+            m_passthroughLayers = FindObjectsByType<OVRPassthroughLayer>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        }
+
+        private void DisableLauncherPassthrough()
+        {
+            CachePassthroughObjects();
+
+            if (m_ovrManager != null)
+            {
+                m_ovrManager.isInsightPassthroughEnabled = false;
+            }
+
+            if (m_passthroughLayers == null)
+            {
+                return;
+            }
+
+            foreach (var passthroughLayer in m_passthroughLayers)
+            {
+                if (passthroughLayer == null)
+                {
+                    continue;
+                }
+
+                passthroughLayer.hidden = true;
+                passthroughLayer.enabled = false;
+            }
         }
 
         private static void LoadScene(int idx)

@@ -12,6 +12,7 @@
 - Unity upgraded `com.unity.ai.inference` from `2.2.1` to `2.4.1` and `com.unity.xr.openxr` from `1.15.1` to `1.16.1` during import. Those changes were kept because they match the installed editor.
 - Kept README instructions repo-relative instead of machine-specific so teammates can clone the project without editing local file paths.
 - Documented that the active build target may still open as `Windows` on another machine. Unity stores the selected platform in local editor state rather than repo content, so teammates should switch to `Android` before building.
+- Confirmed on-device that `StartScene` was not actually empty. The launcher existed, but Quest was returning the scene to passthrough-only mode immediately after startup. Added a minimal `StartMenu` fix that keeps passthrough disabled while `StartScene` is active so the launcher remains visible.
 
 ## Current Limitations
 
