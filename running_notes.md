@@ -15,6 +15,7 @@
 - Confirmed on-device that `StartScene` was not actually empty. The launcher existed, but Quest was returning the scene to passthrough-only mode immediately after startup. Added a minimal `StartMenu` fix that keeps passthrough disabled while `StartScene` is active so the launcher remains visible.
 - The next blocker is in the detection scene rather than the launcher. Reverted the temporary raw-count UI change and instead added detailed runtime status/debug to the detection panel and logcat so we can distinguish pause state, camera feed availability, raw inference output, and spatial-anchor gating without changing scene behavior.
 - The first pass of detection debug showed the coroutine was still failing before those later status checkpoints. Added step-specific exception logging around texture capture, tensor conversion, scheduling, output peeks, and readback so Logcat can identify the exact failing inference stage on device.
+- The step-specific exception logs narrowed the runtime failure to `Worker.Schedule(input)` while the inference manager was configured for `BackendType.CPU`. The installed `com.unity.ai.inference 2.4.1` package appears to have a null path there for this texture-driven model, so the project backend was switched to `GPUCompute` as the next single fix while keeping the detailed logs in place.
 
 ## Current Limitations
 

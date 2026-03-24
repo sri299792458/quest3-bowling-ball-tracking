@@ -21,7 +21,7 @@ namespace PassthroughCameraSamples.MultiObjectDetection
         [SerializeField] private DetectionManager m_detectionManager;
 
         [Header("Sentis Model config")]
-        [SerializeField] private BackendType m_backend = BackendType.CPU;
+        [SerializeField] private BackendType m_backend = BackendType.GPUCompute;
         [SerializeField] private ModelAsset m_sentisModel;
         [SerializeField] private TextAsset m_labelsAsset;
         [SerializeField, Range(0, 1)] private float m_iouThreshold = 0.6f;

@@ -125,7 +125,7 @@ MonoBehaviour:
   m_cameraAccess: {fileID: 0}
   m_uiMenuManager: {fileID: 0}
   m_detectionManager: {fileID: 0}
-  m_backend: 512
+  m_backend: 256
   m_sentisModel: {fileID: 5022602860645237092, guid: 69ab50aef18ae412cac4b305492d527c, type: 3}
   m_labelsAsset: {fileID: 4900000, guid: c01c64149c7930b45a76559caabd5c78, type: 3}
   m_iouThreshold: 0.4
