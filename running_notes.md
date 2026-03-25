@@ -23,3 +23,10 @@
 - The bundled model is not trained specifically for bowling balls. Expect false positives and misses until it is replaced with a one-class bowling-ball YOLOv9t model.
 - The current tracker uses world-space positions from the sample's environment raycast pipeline. It does not yet estimate a lane plane, release timing, or ballistic motion.
 - The current implementation is a Quest 3 test harness, not a production app. It is intended to prove local PCA + YOLOv9t + world-space marker tracking on device before training or calibrating a bowling-specific model.
+
+## 2026-03-25
+
+- Added `BALL_TRACKING_SPEC.md` as the main project spec so the repo has one concrete reference for scope, algorithm choices, verification strategy, and v1 non-goals.
+- Locked the baseline algorithm decision to a custom one-class `YOLOv9t` detector plus a single-ball Kalman tracker, with TrackNet-style temporal tracking reserved as the main benchmark alternative rather than the first implementation target.
+- Wrote the verification plan explicitly as offline-first: public bowling videos and Quest-recorded passthrough clips should be used to validate detector / tracker changes before alley testing.
+- Kept the spec honest about v1 boundaries: no spin estimation, no production-grade claims, and no assumption that full-lane reliable breakpoint measurement is solved from the current sample-model baseline.

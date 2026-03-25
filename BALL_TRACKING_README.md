@@ -39,4 +39,5 @@ This project is a standalone Unity project based on Meta's official Passthrough 
 ## Important
 
 - The included model is still a generic object detector. For real bowling tracking, replace it with a custom-trained one-class bowling-ball YOLOv9t model.
+- See `BALL_TRACKING_SPEC.md` for the product spec, algorithm choice, verification plan, and v1 boundaries.
 - See `running_notes.md` for implementation decisions and current gaps.
