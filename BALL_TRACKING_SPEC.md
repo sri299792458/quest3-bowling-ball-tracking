@@ -1,440 +1,457 @@
 # Quest 3 Bowling Ball Tracking Spec
 
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 
 ## 1. Goal
 
-Build a Quest 3 mixed reality research prototype that turns a real bowling lane into a live analytics system. The bowler wears the headset, rolls a real ball, and then sees a post-shot replay that visualizes:
+Build a mixed reality bowling analytics research prototype where:
 
-- visible ball path
-- release speed
-- continuous speed estimate over the tracked segment
-- breakpoint estimate
-- confidence / loss markers when tracking becomes weak
+- the bowler wears a Quest 3
+- the headset captures the real throw using its front cameras
+- analysis runs quickly enough to return results immediately after the shot
+- the user then sees a replay path and metrics anchored to the real lane in mixed reality
 
-This is a research prototype, not a production scorer.
+This is a research prototype, not a production scoring system.
 
-## 2. Product Scope
+## 2. User Experience
+
+The user story is the most important part of the project.
+
+### v1 target experience
+
+1. The bowler puts on the Quest 3.
+2. The app starts a bowling session and asks for a quick calibration.
+3. The bowler faces downlane and confirms the lane direction.
+4. The bowler throws normally.
+5. During the throw, the system captures frames and tracking data in the background.
+6. Immediately after the shot, the user sees:
+   - the path of the ball over the real lane
+   - release speed
+   - a speed curve over the tracked segment
+   - breakpoint estimate
+   - confidence or loss markers if the track was weak
+
+### What v1 is not
+
+v1 is not:
+
+- a flat video-analysis app
+- a cloud service
+- a live coaching overlay during the approach
+- a spin-analysis product
+
+The mixed reality part matters because the replay should appear attached to the real lane, not just shown on a floating 2D panel.
+
+## 3. Product Definition
+
+This project has two layers:
+
+### Analytics engine
+
+- detect the ball
+- track it over time
+- estimate path, speed, and breakpoint
+- log data for evaluation and debugging
+
+### MR presentation layer
+
+- place the replay back onto the real lane
+- show analytics from the bowler's current viewpoint
+- keep the replay spatially anchored as the user moves their head
+
+The product is MR because the results are presented in the real bowling environment, not because Quest is merely used as a camera.
+
+## 4. Core Architecture
+
+### 4.1 Sensor source
+
+Sensor input comes from the Quest 3 front cameras through Meta's Passthrough Camera API / Camera2 path.
+
+We should treat this as:
+
+- CV-usable camera data
+- headset pose and motion data
+- mixed reality display capability
+
+We should not treat it as high-quality cinematic video.
+
+### 4.2 v1 compute split
+
+The v1 architecture is hybrid:
+
+- `Quest`
+  - capture camera frames
+  - capture timestamps and headset pose
+  - control calibration and session flow
+  - render the replay in MR
+
+- `PC`
+  - run the heavier ball-tracking pipeline
+  - compute path and metrics
+  - return structured replay data to the headset
+
+### 4.3 Why hybrid is the baseline
+
+This split is the best first product architecture because:
+
+- it preserves the MR user experience
+- it avoids overcommitting to Quest-only inference too early
+- it leaves room for heavier models and fast iteration on PC
+- it still allows us to move more logic onto Quest later if the pipeline proves lightweight enough
+
+## 5. Runtime Data Flow
+
+### Upstream: Quest to PC
+
+During the shot, Quest streams:
+
+- camera frames
+- timestamps
+- headset pose / motion data
+- calibration metadata
+
+The system should stream during capture rather than wait to upload the full video at the end.
+
+### Downstream: PC to Quest
+
+The PC should send back structured replay data, not rendered video frames.
+
+That payload should include:
+
+- trajectory points
+- replay timestamps
+- release point
+- breakpoint point
+- speed samples
+- confidence values
+- failure flags if needed
+
+Quest then renders the replay locally in MR.
+
+This keeps the bandwidth low and preserves true spatial replay instead of turning the result into a flat returned video.
+
+## 6. Timing Target
+
+### v1 timing mode
+
+The target timing mode is:
+
+- `immediate post-shot MR replay`
+
+That means:
+
+- the user bowls normally
+- the system processes during capture or near-online
+- results appear shortly after the shot ends
+
+### Not the initial target
+
+The initial target is not:
+
+- fully offline video processing minutes later
+- fully live analytics during the roll
+
+Live during-roll overlays may be explored later, but the first milestone should be immediate post-shot replay.
+
+## 7. Scope
 
 ### In scope for v1
 
-- Quest 3 local-only runtime
-- passthrough-camera-based ball detection on device
+- Quest 3 as the wearable capture and MR device
+- PC-side ball-tracking analysis
 - single-ball tracking
-- post-shot replay
-- saved logs for offline analysis
-- minimal lane setup without physical markers
-- explicit confidence and failure reporting
+- immediate post-shot MR replay
+- release speed estimate
+- speed curve over the tracked segment
+- breakpoint estimate
+- saved logs for offline debugging and model improvement
+- minimal calibration without physical markers
+- confidence-aware output
 
 ### Out of scope for v1
 
 - spin / rev-rate estimation
 - pin impact analytics
-- exact oil-pattern inference
-- cloud inference
-- multi-camera external tracking
+- oil-pattern inference
+- full cloud architecture
 - coach-grade certified accuracy
+- guaranteed perfect late-lane tracking
 
-## 3. Hard Constraints
+## 8. Main Technical Decisions
 
-- Platform: Meta Quest 3
-- Runtime processing: fully local on headset
-- Camera source: Quest passthrough camera API
-- Unity runtime path: Unity Inference Engine
-- Current working backend: `GPUCompute`
-- UX mode: post-shot replay, not live overlay during approach
-- Camera setup: headset worn by the bowler
+### 8.1 Baseline tracker stack
 
-## 4. Runtime Success Criteria
+The initial baseline remains:
 
-The runtime pipeline is considered successful for v1 if:
-
-1. The app starts reliably on Quest 3.
-2. The user can enter the bowling tracking scene and start inference on device.
-3. The system can track a bowling ball for a useful portion of the roll under at least some real lane conditions.
-4. The app can render a replay path and compute a release-speed estimate when tracking is stable early in the shot.
-5. The app records enough data to debug misses and improve the detector offline.
-6. When tracking is weak, the UI shows uncertainty instead of silently pretending the estimate is exact.
-
-## 5. Problem Characterization
-
-This is a difficult small-fast-object tracking problem with extra constraints:
-
-- the ball is small relative to the full lane view
-- the ball can be glossy and reflective
-- the ball can blur after release
-- the camera is egocentric and moving with the wearer
-- the ball may be partially occluded by the body at release
-- the lane is long, so the ball becomes very small downlane
-- Quest passthrough image quality is worse than curated RGB datasets
-
-The literature and prior product work suggest that this should be treated as a structured sports-tracking problem, not a generic object-detection demo.
-
-## 6. Chosen Baseline Algorithm
-
-### 6.1 Detector
-
-Baseline detector: custom one-class `YOLOv9t`
-
-Why this is the baseline:
-
-- Meta's official Quest sample path already uses a quantized `YOLOv9t`-style model
-- the current project already has a working Quest inference path for this family
-- the model class is known in advance: bowling ball
-- a small one-class detector is a better fit than a general segmentation model on Quest
-
-Runtime requirements:
-
-- export through ONNX into Unity Inference Engine format
-- quantize to `uint8`
-- run at `640x640` first unless profiling forces a change
-- use `GPUCompute`
-
-### 6.2 Tracker
-
-Baseline tracker: single-ball constant-velocity Kalman filter
+- custom one-class `YOLOv9t` detector
+- single-ball constant-velocity Kalman filter
 
 Why:
 
-- only one ball matters
-- the ball may briefly disappear because of blur or missed detections
-- Kalman filtering gives a clean way to smooth position and bridge short misses
-- it is simple enough to debug and tune on-device
+- it is the lowest-risk path that matches our current working Unity / Quest prototype work
+- the ball class is known in advance
+- Kalman tracking is simple, debuggable, and good at bridging short misses
 
-The tracker state should include at minimum:
+### 8.2 Geometry policy
 
-- lane-frame position
-- lane-frame velocity
-- track confidence
-- frames since last accepted detection
+Depth is optional, not required.
 
-### 6.3 Geometry Layer
+The analytics engine should not fail just because scene depth or scene understanding is noisy.
 
-The detector alone is not enough. We need a geometry layer that maps image detections into bowling-lane coordinates.
+Use geometry in this priority order:
 
-v1 mapping policy:
+1. manual lane calibration + known lane geometry
+2. headset pose and motion data
+3. Depth API / MRUK / scene understanding when helpful
+4. stereo / dense geometry experiments as optional enhancements
 
-- use Depth API / MRUK raycast when available and stable
-- otherwise intersect the camera ray with the estimated lane plane
-- represent the ball trajectory in lane coordinates:
-  - lateral position
-  - downlane distance
-  - height
+### 8.3 Headset motion and IMU
 
-### 6.4 Shot Segmentation
+Headset motion should be part of the system design.
 
-The runtime flow should be:
+Use it for:
 
-- `Idle`
-- `Calibrating`
-- `Armed`
-- `Capturing`
-- `Replay`
-- `Review`
+- egomotion compensation
+- tracker prediction
+- ROI stabilization
+- confidence estimation under rapid head movement
 
-Shot start:
+Do not treat headset IMU as if it directly measures the ball.
 
-- first stable ball observation inside a near-foul-line release region after the session is armed
+### 8.4 Benchmark models
 
-Shot end:
+These are benchmark candidates, not the initial product baseline:
 
-- tracking lost past timeout
-- ball reaches a downlane distance limit
-- max shot duration exceeded
+- TrackNet-style temporal ball tracker
+- `RF-DETR-N`
+- `SAM 3`
 
-### 6.5 Metrics
+SAM 3 is especially interesting for the PC-side benchmark path because it supports tracking through time, but it is not a blocker for the first spec or first implementation.
 
-Compute:
+## 9. Calibration and MR Alignment
 
-- release speed from the earliest stable tracked segment
-- continuous speed curve from filtered 3D points over time
-- breakpoint as the largest lateral excursion before the path turns back inward
+Calibration must stay minimal and understandable to the user.
 
-All metrics must carry confidence or quality flags.
+### v1 assumptions
 
-## 7. Algorithms Explicitly Not Chosen for v1
+- the user stands near the foul line
+- the user faces downlane during calibration
+- regulation lane geometry is a valid prior
 
-### Otsu / classical thresholding
+### v1 calibration actions
 
-Not chosen as the primary detector.
+1. face downlane
+2. hold still briefly
+3. confirm with `A` or pinch
+
+### Outputs
+
+- lane origin near the foul line
+- lane forward axis
+- approximate lane plane
+- handedness setting
+
+### Alignment philosophy
+
+The replay must be anchored to the real lane, but we should not assume perfect reconstruction of the entire alley.
+
+The goal is useful spatial replay, not survey-grade geometric accuracy.
+
+## 10. Algorithms Not Chosen as the Primary v1 Path
+
+### Classical thresholding / Otsu
+
+Not the main detector.
 
 Reason:
 
-- bowling-lane lighting, reflections, shadows, and passthrough image noise make simple global thresholding too brittle
-- the ball is often too small and reflective for a threshold-first approach to be reliable
+- too brittle under reflections, blur, and low-detail passthrough images
 
-Classical CV can still be used offline as a sanity baseline, but not as the main runtime method.
+### HoughCircles-only detection
 
-### SAM / promptable segmentation
-
-Not chosen as the primary runtime model.
+Not the main detector.
 
 Reason:
 
-- Quest local compute budget is tight
-- the model class is known already
-- detector-plus-tracker is a better fit than general promptable segmentation
+- useful as a classical reference and for offline experiments
+- too fragile as the primary production-tracking path for Quest-captured bowling footage
 
-SAM-style tools may still help with offline labeling or dataset bootstrapping.
+### SAM 3 as the required v1 core
+
+Not the required first implementation path.
+
+Reason:
+
+- gated model access and heavier environment requirements
+- PC-side benchmark candidate, but not something the whole project should block on
 
 ### Spin estimation
 
-Deferred out of v1.
+Deferred.
 
 Reason:
 
-- the literature suggests spin estimation usually needs stronger cues such as marked balls, event cameras, or specialized capture
-- a plain glossy bowling ball in Quest passthrough is not a good first target for robust spin estimation
+- even promising classical bowling spin work still depends on visible ball texture, noisy post-processing, and controlled enough footage
+- that makes it a poor first commitment for Quest-based MR analytics
 
-## 8. Benchmark Algorithm
+## 11. Verification Strategy
 
-The main literature-informed benchmark path is a TrackNet-style temporal ball tracker.
+We should not use the bowling alley as the first place we learn whether each algorithm change works.
 
-Why benchmark it:
+### 11.1 Offline-first development
 
-- sports literature consistently shows that tiny, fast, blurry balls benefit from temporal heatmap localization
-- it may outperform a detector-only pipeline on downlane tracking
-
-Why it is not the first runtime baseline:
-
-- it is less aligned with the current working Quest repo and sample conversion path
-- it adds more integration risk before we have a solid bowling-specific detector baseline
-
-Decision:
-
-- baseline runtime implementation: `YOLOv9t + Kalman`
-- benchmark / later experiment: TrackNet-style multi-frame tracker
-
-## 9. Calibration and Lane Frame
-
-Calibration must stay minimal.
-
-v1 assumptions:
-
-- the wearer stands near the foul line and faces downlane during calibration
-- the floor / lane plane can be estimated from Depth API or MRUK
-- a standard lane geometry prior is acceptable for v1
-
-Calibration actions:
-
-1. user faces downlane
-2. user holds still briefly
-3. user confirms with `A` or pinch
-
-Outputs:
-
-- lane origin near foul line
-- lane forward axis
-- lane plane estimate
-- handedness setting
-
-## 10. Verification Strategy
-
-We should not wait for a bowling alley to test every change.
-
-### 10.1 Offline-first verification
-
-Build an offline evaluation harness that reuses the detector + tracker logic on recorded video.
+Build and maintain an offline evaluation harness that can run the same detector / tracker logic on recorded clips.
 
 Input sources:
 
-- public bowling videos, including YouTube
-- Quest-recorded passthrough clips
+- Quest-recorded clips
+- public bowling videos
+- later, real project data from lane tests
 
 Outputs:
 
-- overlay video with detections and filtered path
-- per-frame JSON or CSV
-- summary report with success / failure reasons
+- overlaid videos
+- per-frame detections
+- filtered trajectories
+- speed / breakpoint summaries
+- error and failure reports
 
-### 10.2 Labeling strategy
+### 11.2 Labeling strategy
 
 Start with manual ball center-point labels.
 
 Why:
 
-- cheaper than full-box labeling
-- enough for tracking evaluation and path quality checks
-- enough to judge center error and continuity
+- faster than full segmentation or full-box labeling
+- enough to evaluate tracking continuity and center error
 
-### 10.3 Acceptance gate before alley testing
+### 11.3 Acceptance before alley sessions
 
-Do not treat the alley as the first real test.
+A candidate change should pass offline gating if:
 
-A candidate build should pass offline gating if:
+- it tracks a useful visible segment of the roll
+- the path is visually plausible
+- release speed is plausible when the early track is good
+- breakpoint is plausible or explicitly marked low-confidence
+- logs explain failures clearly
 
-- it keeps track through a useful segment of the roll on the offline clip set
-- the estimated path is visually plausible
-- release speed is plausible when early tracking is good
-- breakpoint is either plausible or clearly marked low-confidence
-- failure cases produce interpretable logs
+## 12. Dataset Strategy
 
-### 10.4 What offline video can and cannot validate
+### Initial data sources
 
-Useful for:
+- Quest-captured bowling clips
+- public bowling video clips
+- small public bowling datasets for bootstrapping only
 
-- detector sanity
-- tracker tuning
-- replay logic
-- failure analysis
+### Training target
 
-Not sufficient for:
+Train a one-class bowling-ball detector first.
 
-- final Quest passthrough quality
-- exact MR alignment
-- headset-motion effects during real wear
-- final on-lane UX
+The first objective is:
 
-## 11. Runtime Architecture
+- reliable early-lane acquisition
+- useful mid-lane continuity
+- enough stability to support replay and release-speed estimation
 
-Planned modules:
+### Hard examples to collect
+
+- glossy balls
+- dark balls
+- motion blur
+- release occlusion
+- low-light lanes
+- different handedness
+- head motion during the shot
+
+## 13. Planned Modules
+
+### Quest side
+
+- `SessionController`
+- `LaneCalibrationController`
+- `FrameStreamer`
+- `PoseLogger`
+- `ReplayPresenter`
+- `MetricsHud`
+
+### PC side
 
 - `BallDetector`
-  - camera frame -> bounding boxes / scores
 - `BallMeasurementSelector`
-  - select the most plausible one-ball measurement for this frame
-- `LaneProjector`
-  - 2D detection -> 3D lane-frame point
 - `BallKalmanTracker`
-  - filtered state, prediction, confidence
+- `LaneProjector`
 - `RollSegmenter`
-  - shot start / end logic
 - `RollMetricsComputer`
-  - release speed, speed curve, breakpoint
-- `ReplayPresenter`
-  - post-shot visualization and HUD
+- `ReplayResultBuilder`
 - `RollLogger`
-  - save raw and derived data for offline analysis
 
-## 12. Logging Requirements
+## 14. Logging Requirements
 
-Every armed shot should produce a saved record, even if the run is bad.
+Every armed shot should produce a record, even if the result is poor.
 
 Each shot record should include:
 
 - timestamps
-- camera resolution and model version
-- detector thresholds
+- frame references
+- headset pose
+- calibration data
 - raw detections
-- selected measurement
+- selected measurements
 - filtered trajectory
 - confidence values
-- release speed result
+- release-speed result
 - breakpoint result
-- termination reason
+- failure reason when applicable
 
-Bad runs are useful training data. They should not be dropped silently.
-
-## 13. Dataset Strategy
-
-### 13.1 Initial data sources
-
-- public bowling clips for early prototyping
-- Quest passthrough captures for domain adaptation
-- real-lane clips from the team once collection is practical
-
-### 13.2 Training target
-
-Train a one-class bowling-ball detector first.
-
-The first training objective is not perfect late-lane tracking. It is:
-
-- reliable early-lane acquisition
-- useful mid-lane continuity
-- stable measurements for release speed and visible path
-
-### 13.3 Hard examples to collect
-
-- dark balls
-- reflective balls
-- motion blur
-- occlusion at release
-- low-light lanes
-- different handedness
-- different camera head poses
-
-## 14. UX Spec
-
-### 14.1 During setup
-
-Show:
-
-- headset readiness
-- permissions state
-- calibration prompt
-- handedness setting
-
-### 14.2 During capture
-
-Show very little:
-
-- capturing status
-- optional subtle confidence indicator
-
-Do not clutter the user's view during approach and release.
-
-### 14.3 During replay
-
-Show:
-
-- lane-anchored visible path
-- release speed
-- speed curve
-- breakpoint marker
-- confidence / truncation marker if tracking was incomplete
+Bad runs are valuable training and debugging data and should not be dropped silently.
 
 ## 15. Risks
 
 Highest risks:
 
-- late-lane ball size becomes too small for reliable detection
-- head motion hurts image stability and projection quality
-- depth / MRUK lane mapping may be noisy or incomplete
-- bowling-ball appearance differs significantly from common object-detection training data
+- the ball becomes too small downlane for reliable tracking
+- headset motion hurts stability
+- Quest camera quality is weaker than curated RGB datasets
+- lane alignment may be approximate rather than exact
+- a bowling-specific dataset will need to be built over time
 
-Planned mitigations:
+Mitigations:
 
 - one-class detector training
 - Kalman smoothing
-- lane ROI gating
-- offline harness and hard-example collection
-- confidence-aware UI rather than pretending the estimate is exact
+- headset-pose-aware prediction
+- confidence-aware replay
+- hybrid Quest + PC architecture
+- offline harness before lane deployment
 
-## 16. v1 Deliverables
+## 16. Deliverables
 
-- working Quest 3 on-device prototype
-- bowling tracking scene with post-shot replay
-- logged shot records
+### First meaningful deliverable
+
+- Quest captures a real shot
+- PC processes the shot during or immediately after capture
+- Quest shows an MR replay path on the real lane
+
+### v1 deliverables
+
+- working hybrid Quest + PC prototype
+- immediate post-shot MR replay
+- release speed and breakpoint estimates
+- saved logs
 - offline evaluation harness
-- first custom bowling-ball detector baseline
-- written evaluation on what works, what fails, and why
+- first bowling-specific detector baseline
 
-## 17. Literature and Product Guidance Used
+## 17. Final Baseline Decision
 
-The spec is informed by:
+If we freeze the starting product plan now, it is:
 
-- Meta Quest passthrough camera and Depth API documentation
-- Meta's Unity Inference Engine sample path
-- sports ball tracking literature such as TrackNet, TrackNetV4, TTNet, MonoTrack, and monocular 3D ball localization work
-- commercial bowling tracking systems such as USBC B.O.L.T.S., Specto Bowling, and Ruby
+- Quest 3 as capture device and MR display
+- PC as the analytics engine
+- upstream streaming during the shot
+- downstream structured replay data back to Quest
+- immediate post-shot MR replay
+- custom one-class `YOLOv9t` + Kalman baseline
+- optional depth and scene understanding, not required
+- SAM 3, RF-DETR, and TrackNet-style methods reserved for benchmark experiments rather than the first required implementation
 
-These sources strongly suggest:
-
-- small fast balls need temporal reasoning
-- monocular geometry matters
-- bowling is commercially valuable
-- Quest-side runtime must stay lightweight
-
-## 18. Final Baseline Decision
-
-If we had to freeze the starting implementation now, it would be:
-
-- Quest 3 local-only
-- custom one-class `YOLOv9t`
-- `GPUCompute`
-- single-ball Kalman filter
-- lane-plane / depth-based projection
-- post-shot replay
-- offline verification gate before alley testing
-
-That is the baseline we should build first before trying more ambitious alternatives.
+That is the clearest version of the project we should build first.

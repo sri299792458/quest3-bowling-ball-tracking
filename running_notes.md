@@ -30,3 +30,11 @@
 - Locked the baseline algorithm decision to a custom one-class `YOLOv9t` detector plus a single-ball Kalman tracker, with TrackNet-style temporal tracking reserved as the main benchmark alternative rather than the first implementation target.
 - Wrote the verification plan explicitly as offline-first: public bowling videos and Quest-recorded passthrough clips should be used to validate detector / tracker changes before alley testing.
 - Kept the spec honest about v1 boundaries: no spin estimation, no production-grade claims, and no assumption that full-lane reliable breakpoint measurement is solved from the current sample-model baseline.
+
+## 2026-03-26
+
+- Rewrote the project spec around the user-perspective product flow rather than around the current Unity sample architecture.
+- The agreed v1 target is now a hybrid system: Quest 3 captures the shot and renders the MR replay, while a nearby PC performs the heavier analysis and returns structured replay data.
+- Clarified that the intended timing mode is immediate post-shot MR replay, not fully offline batch processing and not live during-roll coaching overlays.
+- Marked depth and scene understanding as optional geometry aids rather than hard dependencies. The replay should still work from manual lane calibration, headset pose, and known lane geometry.
+- Kept `YOLOv9t + Kalman` as the first baseline, while moving `SAM 3`, `RF-DETR`, and TrackNet-style models into the benchmark / later-experiment category.
