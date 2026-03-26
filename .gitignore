@@ -23,3 +23,5 @@ PerformanceTestRun*.*
 StreamingAssets*
 buildInfo.txt
 Packages/packages-lock.json
+pc_tracking_prototype/.venv/
+pc_tracking_prototype/outputs/

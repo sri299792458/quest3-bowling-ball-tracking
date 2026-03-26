@@ -38,3 +38,6 @@
 - Clarified that the intended timing mode is immediate post-shot MR replay, not fully offline batch processing and not live during-roll coaching overlays.
 - Marked depth and scene understanding as optional geometry aids rather than hard dependencies. The replay should still work from manual lane calibration, headset pose, and known lane geometry.
 - Kept `YOLOv9t + Kalman` as the first baseline, while moving `SAM 3`, `RF-DETR`, and TrackNet-style models into the benchmark / later-experiment category.
+- Updated the plan again once the dataset bottleneck became clear: we should not block the project on collecting a bowling dataset before we can test the full idea.
+- The first research baseline is now `classical seed + SAM 2`, with `XMem++` as an optional follow-up if SAM 2 needs stronger long-range memory.
+- `YOLOv9t + Kalman` remains in the spec, but only as the later deployment path after bootstrapped bowling data exists.

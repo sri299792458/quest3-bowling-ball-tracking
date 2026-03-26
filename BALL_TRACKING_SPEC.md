@@ -179,20 +179,40 @@ Live during-roll overlays may be explored later, but the first milestone should 
 
 ## 8. Main Technical Decisions
 
-### 8.1 Baseline tracker stack
+### 8.1 First research baseline
 
-The initial baseline remains:
+The initial research baseline is:
 
-- custom one-class `YOLOv9t` detector
-- single-ball constant-velocity Kalman filter
+- classical bowling-ball auto-seeding
+- PC-side `SAM 2` video tracking
+- single-ball temporal smoothing and metric extraction
 
 Why:
 
-- it is the lowest-risk path that matches our current working Unity / Quest prototype work
-- the ball class is known in advance
-- Kalman tracking is simple, debuggable, and good at bridging short misses
+- no strong public bowling dataset can be assumed
+- this path lets us start immediately without waiting for large-scale training data
+- `SAM 2` already supports video prediction and is available now
+- classical seeding can give the tracker a useful initial localization without manual prompting on every clip
 
-### 8.2 Geometry policy
+The classical seed is not the full tracker. Its role is to provide:
+
+- an initial frame
+- an initial point / box / mask hint
+- a fallback sanity check when the promptable tracker drifts
+
+### 8.2 Later deployment baseline
+
+The later automatic deployment path remains:
+
+- custom one-class `YOLOv9t`
+- single-ball constant-velocity Kalman filter
+
+Why it is later rather than first:
+
+- it still depends on bowling-specific data
+- that data is best created by bootstrapping from the earlier promptable-tracking pipeline
+
+### 8.3 Geometry policy
 
 Depth is optional, not required.
 
@@ -205,7 +225,7 @@ Use geometry in this priority order:
 3. Depth API / MRUK / scene understanding when helpful
 4. stereo / dense geometry experiments as optional enhancements
 
-### 8.3 Headset motion and IMU
+### 8.4 Headset motion and IMU
 
 Headset motion should be part of the system design.
 
@@ -218,15 +238,21 @@ Use it for:
 
 Do not treat headset IMU as if it directly measures the ball.
 
-### 8.4 Benchmark models
+### 8.5 Benchmark models
 
-These are benchmark candidates, not the initial product baseline:
+These are benchmark candidates around the first research baseline:
 
+- `SAM 2 + XMem++`
 - TrackNet-style temporal ball tracker
 - `RF-DETR-N`
 - `SAM 3`
 
-SAM 3 is especially interesting for the PC-side benchmark path because it supports tracking through time, but it is not a blocker for the first spec or first implementation.
+Notes:
+
+- `SAM 2` is the first promptable baseline because it is available now and does not depend on gated `SAM 3` access.
+- `XMem++` is an optional follow-up if plain `SAM 2` loses the ball too easily.
+- `SAM 3` is still worth testing later, but it is not a blocker.
+- `YOLOv9t` becomes the later lightweight deployment benchmark once bootstrapped labels exist.
 
 ## 9. Calibration and MR Alignment
 
@@ -269,12 +295,12 @@ Reason:
 
 ### HoughCircles-only detection
 
-Not the main detector.
+Not the full tracker.
 
 Reason:
 
-- useful as a classical reference and for offline experiments
-- too fragile as the primary production-tracking path for Quest-captured bowling footage
+- useful as a classical seed and offline reference
+- too fragile as the sole production-tracking path for Quest-captured bowling footage
 
 ### SAM 3 as the required v1 core
 
@@ -300,7 +326,7 @@ We should not use the bowling alley as the first place we learn whether each alg
 
 ### 11.1 Offline-first development
 
-Build and maintain an offline evaluation harness that can run the same detector / tracker logic on recorded clips.
+Build and maintain an offline evaluation harness that can run the same seeding / tracker logic on recorded clips.
 
 Input sources:
 
@@ -318,12 +344,19 @@ Outputs:
 
 ### 11.2 Labeling strategy
 
-Start with manual ball center-point labels.
+Start with a minimal-label strategy.
 
 Why:
 
-- faster than full segmentation or full-box labeling
-- enough to evaluate tracking continuity and center error
+- there is no strong ready-made bowling dataset to rely on
+- full manual labeling up front would block the project
+- seeded `SAM 2` / `XMem++` propagation can generate most labels once a few frames are initialized
+
+Initial label types:
+
+- manual seed points or boxes for difficult clips
+- manual center-point labels for evaluation
+- propagated masks or boxes for dataset bootstrapping
 
 ### 11.3 Acceptance before alley sessions
 
@@ -335,23 +368,39 @@ A candidate change should pass offline gating if:
 - breakpoint is plausible or explicitly marked low-confidence
 - logs explain failures clearly
 
+For the first promptable baseline, this means:
+
+- the classical seed lands on the ball often enough to be useful
+- `SAM 2` can maintain the track for enough of the roll to support replay
+
 ## 12. Dataset Strategy
 
 ### Initial data sources
 
 - Quest-captured bowling clips
 - public bowling video clips
-- small public bowling datasets for bootstrapping only
+- small public bowling datasets only if they are helpful enough to bootstrap, not as a core dependency
 
-### Training target
+### First objective
 
-Train a one-class bowling-ball detector first.
+Do not start by training a detector.
 
-The first objective is:
+Start by proving that the system can:
+
+- auto-seed the ball with classical CV
+- maintain a useful track with `SAM 2`
+- produce a believable replay from real bowling clips
+
+### Later training target
+
+After bootstrapping enough bowling data, train a one-class bowling-ball detector.
+
+The later training objective is:
 
 - reliable early-lane acquisition
 - useful mid-lane continuity
 - enough stability to support replay and release-speed estimation
+- movement toward a lighter automatic deployment stack
 
 ### Hard examples to collect
 
@@ -376,6 +425,7 @@ The first objective is:
 
 ### PC side
 
+- `ClassicalBallSeeder`
 - `BallDetector`
 - `BallMeasurementSelector`
 - `BallKalmanTracker`
@@ -387,7 +437,7 @@ The first objective is:
 
 ## 14. Logging Requirements
 
-Every armed shot should produce a record, even if the result is poor.
+Every armed shot or offline clip run should produce a record, even if the result is poor.
 
 Each shot record should include:
 
@@ -414,10 +464,13 @@ Highest risks:
 - Quest camera quality is weaker than curated RGB datasets
 - lane alignment may be approximate rather than exact
 - a bowling-specific dataset will need to be built over time
+- the classical seed may fail on some clips before the promptable tracker even starts
 
 Mitigations:
 
-- one-class detector training
+- classical auto-seeding
+- promptable video tracking
+- later one-class detector training
 - Kalman smoothing
 - headset-pose-aware prediction
 - confidence-aware replay
@@ -429,17 +482,18 @@ Mitigations:
 ### First meaningful deliverable
 
 - Quest captures a real shot
-- PC processes the shot during or immediately after capture
+- PC seeds and tracks the ball during or immediately after capture
 - Quest shows an MR replay path on the real lane
 
 ### v1 deliverables
 
 - working hybrid Quest + PC prototype
 - immediate post-shot MR replay
+- classical seed + `SAM 2` prototype on bowling clips
 - release speed and breakpoint estimates
 - saved logs
 - offline evaluation harness
-- first bowling-specific detector baseline
+- a first bootstrapped bowling dataset
 
 ## 17. Final Baseline Decision
 
@@ -450,8 +504,9 @@ If we freeze the starting product plan now, it is:
 - upstream streaming during the shot
 - downstream structured replay data back to Quest
 - immediate post-shot MR replay
-- custom one-class `YOLOv9t` + Kalman baseline
+- classical seed + `SAM 2` as the first research baseline
+- later custom one-class `YOLOv9t` + Kalman deployment path
 - optional depth and scene understanding, not required
-- SAM 3, RF-DETR, and TrackNet-style methods reserved for benchmark experiments rather than the first required implementation
+- `SAM 2 + XMem++`, `SAM 3`, `RF-DETR`, and TrackNet-style methods reserved for benchmark experiments around that baseline rather than first blockers
 
 That is the clearest version of the project we should build first.

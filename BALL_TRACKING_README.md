@@ -38,7 +38,8 @@ This project is a standalone Unity project based on Meta's official Passthrough 
 
 ## Important
 
-- The included model is still a generic object detector. For real bowling tracking, replace it with a custom-trained one-class bowling-ball YOLOv9t model.
+- The included model is still a generic object detector. It is useful only as a Quest-side sample baseline, not as the planned bowling tracker.
 - The current Unity project is still a Quest-side test harness. The target product spec now assumes a hybrid architecture: Quest capture + PC analysis + immediate post-shot MR replay.
+- The first research baseline no longer assumes a trained bowling detector up front. The mainline plan is now `classical seed + SAM 2` on PC, with `YOLOv9t` moved to the later deployment path once bootstrapped bowling data exists.
 - See `BALL_TRACKING_SPEC.md` for the product spec, architecture, algorithm choice, verification plan, and v1 boundaries.
 - See `running_notes.md` for implementation decisions and current gaps.
