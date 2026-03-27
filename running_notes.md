@@ -41,3 +41,13 @@
 - Updated the plan again once the dataset bottleneck became clear: we should not block the project on collecting a bowling dataset before we can test the full idea.
 - The first research baseline is now `classical seed + SAM 2`, with `XMem++` as an optional follow-up if SAM 2 needs stronger long-range memory.
 - `YOLOv9t + Kalman` remains in the spec, but only as the later deployment path after bootstrapped bowling data exists.
+
+## 2026-03-27
+
+- Tightened the promptable-tracking plan again after the manual SAM2 runs. Manual seeding proved feasibility, but it is not acceptable for the intended replay workflow.
+- Added [BALL_TRACKING_AUTO_INIT_SPEC.md](C:/Users/student/Quest3BowlingBallTracking/BALL_TRACKING_AUTO_INIT_SPEC.md) to document the first automatic-initializer path: `Grounding DINO` picks the initial bowling-ball box and `SAM2` propagates it through the short clip.
+- Updated the main spec and README so the short-term baseline now reads `Grounding DINO + SAM2`, while classical bowling-analysis heuristics are kept as fallback/ranking ideas rather than the primary initializer.
+- The working implementation direction moved again after the offline initializer experiments: the current implemented path is now `classical seed + SAM2`, not `Grounding DINO + SAM2`.
+- Brought the Quest-to-laptop transport work into this repo after realizing the previous round of implementation had been done in the coursework Unity workspace instead of `Quest3BowlingBallTracking`.
+- Added the Quest streaming client, debug shot controller, laptop receiver, online classical seed bridge, and live SAM2 handoff here so future work stays in the correct repository.
+- Added `QUEST_LAPTOP_PIPELINE_SPEC.md` to document the current runtime architecture: Quest streams frames, the laptop seeds during capture, live SAM2 starts once the seed is confirmed, and Quest receives compact replay data back.

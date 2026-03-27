@@ -1,6 +1,6 @@
 # Quest 3 Bowling Ball Tracking Spec
 
-Last updated: 2026-03-26
+Last updated: 2026-03-27
 
 ## 1. Goal
 
@@ -12,6 +12,13 @@ Build a mixed reality bowling analytics research prototype where:
 - the user then sees a replay path and metrics anchored to the real lane in mixed reality
 
 This is a research prototype, not a production scoring system.
+
+Implementation note:
+
+- the current implemented Quest-to-laptop path is `classical seed + SAM2`
+- the seed runs during capture on the laptop
+- live SAM2 now starts once the seed is confirmed
+- see `QUEST_LAPTOP_PIPELINE_SPEC.md` for the current transport and runtime behavior
 
 ## 2. User Experience
 
@@ -181,24 +188,26 @@ Live during-roll overlays may be explored later, but the first milestone should 
 
 ### 8.1 First research baseline
 
-The initial research baseline is:
+The current implemented research baseline is:
 
-- classical bowling-ball auto-seeding
-- PC-side `SAM 2` video tracking
+- classical automatic seed initialization
+- PC-side `SAM 2` tracking
 - single-ball temporal smoothing and metric extraction
 
 Why:
 
 - no strong public bowling dataset can be assumed
 - this path lets us start immediately without waiting for large-scale training data
-- `SAM 2` already supports video prediction and is available now
-- classical seeding can give the tracker a useful initial localization without manual prompting on every clip
+- `SAM 2` already supports strong short-clip tracking
+- the current classical seed path is faster and cheaper than the earlier open-vocabulary detector route on our current bowling clips
 
-The classical seed is not the full tracker. Its role is to provide:
+The automatic initializer is not the full tracker. Its role is to provide:
 
 - an initial frame
-- an initial point / box / mask hint
-- a fallback sanity check when the promptable tracker drifts
+- an initial box hint
+- a fallback point where later heuristics or a trained detector can take over
+
+The classical seed stage is still only the initializer. It exists to hand off to `SAM 2`, not to replace the tracker.
 
 ### 8.2 Later deployment baseline
 
@@ -250,6 +259,7 @@ These are benchmark candidates around the first research baseline:
 Notes:
 
 - `SAM 2` is the first promptable baseline because it is available now and does not depend on gated `SAM 3` access.
+- `Grounding DINO` is the first automatic initializer because it removes manual seeding without requiring bowling-specific training data.
 - `XMem++` is an optional follow-up if plain `SAM 2` loses the ball too easily.
 - `SAM 3` is still worth testing later, but it is not a blocker.
 - `YOLOv9t` becomes the later lightweight deployment benchmark once bootstrapped labels exist.
@@ -370,7 +380,7 @@ A candidate change should pass offline gating if:
 
 For the first promptable baseline, this means:
 
-- the classical seed lands on the ball often enough to be useful
+- the automatic `Grounding DINO` seed lands on the ball often enough to be useful
 - `SAM 2` can maintain the track for enough of the roll to support replay
 
 ## 12. Dataset Strategy
@@ -387,7 +397,7 @@ Do not start by training a detector.
 
 Start by proving that the system can:
 
-- auto-seed the ball with classical CV
+- auto-seed the ball with an open-vocabulary detector
 - maintain a useful track with `SAM 2`
 - produce a believable replay from real bowling clips
 
@@ -464,11 +474,12 @@ Highest risks:
 - Quest camera quality is weaker than curated RGB datasets
 - lane alignment may be approximate rather than exact
 - a bowling-specific dataset will need to be built over time
-- the classical seed may fail on some clips before the promptable tracker even starts
+- the automatic initializer may fail on some clips before the promptable tracker even starts
 
 Mitigations:
 
-- classical auto-seeding
+- `Grounding DINO` automatic initialization
+- classical seeding heuristics as fallback
 - promptable video tracking
 - later one-class detector training
 - Kalman smoothing
@@ -489,7 +500,7 @@ Mitigations:
 
 - working hybrid Quest + PC prototype
 - immediate post-shot MR replay
-- classical seed + `SAM 2` prototype on bowling clips
+- `Grounding DINO` + `SAM 2` prototype on bowling clips
 - release speed and breakpoint estimates
 - saved logs
 - offline evaluation harness
@@ -504,9 +515,11 @@ If we freeze the starting product plan now, it is:
 - upstream streaming during the shot
 - downstream structured replay data back to Quest
 - immediate post-shot MR replay
-- classical seed + `SAM 2` as the first research baseline
+- `Grounding DINO` + `SAM 2` as the first research baseline
 - later custom one-class `YOLOv9t` + Kalman deployment path
 - optional depth and scene understanding, not required
 - `SAM 2 + XMem++`, `SAM 3`, `RF-DETR`, and TrackNet-style methods reserved for benchmark experiments around that baseline rather than first blockers
+
+For the focused automatic-initializer plan, see [BALL_TRACKING_AUTO_INIT_SPEC.md](C:/Users/student/Quest3BowlingBallTracking/BALL_TRACKING_AUTO_INIT_SPEC.md).
 
 That is the clearest version of the project we should build first.

@@ -17,6 +17,10 @@ class SeedConfig:
     max_lost_frames: int = 2
     position_tolerance_px: float = 35.0
     radius_tolerance_px: float = 10.0
+    max_tracking_step_px: float = 140.0
+    max_radius_growth_px: int = 8
+    max_seed_radius_scale: float = 1.35
+    max_downward_drift_px: int = 25
     roi_scale_factor: float = 0.6
     min_roi_margin_px: int = 10
     global_dp: float = 1.2
@@ -170,6 +174,30 @@ def is_consistent(
     )
 
 
+def is_track_candidate_valid(
+    candidate: np.ndarray,
+    last_detection: CircleDetection,
+    seed_detection: CircleDetection,
+    config: SeedConfig,
+) -> bool:
+    position_delta = np.linalg.norm(
+        np.array([candidate[0] - last_detection.x, candidate[1] - last_detection.y], dtype=float)
+    )
+    radius = float(candidate[2])
+    radius_growth = radius - last_detection.radius
+    downward_drift = float(candidate[1] - last_detection.y)
+
+    if position_delta > config.max_tracking_step_px:
+        return False
+    if radius_growth > config.max_radius_growth_px:
+        return False
+    if radius > (seed_detection.radius * config.max_seed_radius_scale):
+        return False
+    if downward_drift > config.max_downward_drift_px:
+        return False
+    return True
+
+
 def make_roi(
     detection: CircleDetection, frame_shape: tuple[int, int, int], config: SeedConfig
 ) -> tuple[int, int, int, int]:
@@ -272,6 +300,7 @@ def process_clip(
     warmup_count = 0
     last_detection: CircleDetection | None = None
     lost_count = 0
+    tracking_terminated = False
 
     lane_mask = None
     frame_index = 0
@@ -288,7 +317,10 @@ def process_clip(
         roi = None
         candidate_circle = None
 
-        if last_detection is None or lost_count > config.max_lost_frames:
+        if tracking_terminated:
+            candidate_circle = None
+            mode = "terminated"
+        elif last_detection is None or lost_count > config.max_lost_frames:
             masked = cv2.bitwise_and(frame, frame, mask=lane_mask)
             gray = preprocess_bgr(masked)
             min_radius = max(8, int(min(width, height) * 0.01))
@@ -350,11 +382,21 @@ def process_clip(
                 elif warmup_count > 0:
                     lost_count = 0
             else:
-                detection.stable = True
-                last_detection = detection
-                lost_count = 0
+                if is_track_candidate_valid(
+                    candidate_circle, last_detection, stable_seed, config
+                ):
+                    detection.stable = True
+                    last_detection = detection
+                    lost_count = 0
+                else:
+                    detection = None
+                    lost_count += 1
+                    if lost_count > config.max_lost_frames:
+                        tracking_terminated = True
         else:
             lost_count += 1
+            if stable_seed is not None and lost_count > config.max_lost_frames:
+                tracking_terminated = True
 
         if detection is not None:
             detections.append(detection)
