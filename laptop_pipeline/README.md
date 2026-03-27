@@ -2,98 +2,76 @@
 
 This folder contains the current Quest-to-laptop receiver for the bowling MR pipeline.
 
-## What it does
+## What It Does
 
 - listens for the Quest TCP stream
-- parses the custom binary packet protocol
-- receives Quest shot markers
-- stores each shot as a JPEG frame sequence
-- runs the classical seed heuristics incrementally while the shot is still streaming
-- starts a live SAM2 camera predictor as soon as the seed is confirmed
-- keeps a warm batch SAM2 path only as fallback
-- sends status or result JSON back to Quest
+- parses the custom binary protocol
+- records each shot as a JPEG frame sequence
+- runs the classical seed detector incrementally while the shot is still streaming
+- starts a live `SAM2` camera predictor as soon as the seed is confirmed
+- falls back to warm batch `SAM2` only if the live path never starts or fails
+- sends status and final result JSON back to Quest
 
-## Current analysis path
+## Current Analysis Path
 
 The current receiver uses:
 
+- `quest_bowling_server.py`
 - `sam2_bowling_bridge.py`
 - `online_classical_seed.py`
 - `live_sam2_camera_tracker.py`
 - `warm_sam2_tracker.py`
 
-That bridge:
+## Repo-Local Dependencies
 
-- records Quest shot frames into `laptop_pipeline/runs/.../raw/frames/000000.jpg`
-- stores per-frame metadata in `frames.jsonl`
-- keeps a small pre-roll buffer and flushes it into the shot when recording starts
-- runs the same classical heuristics from the external `sam2_bowling_eval` workspace, but in-process and incrementally
-- writes `analysis/seed.json`, `best_detection.jpg`, `detections.csv`, and `pipeline_summary.txt`
-- when the seed is confirmed, starts a live SAM2 camera predictor from the seed frame and catches up through already-saved frames
-- then keeps tracking each incoming frame during the rest of the shot
-- only falls back to the older warm batch SAM2 path if the live path fails or never starts
+This pipeline uses the vendored `SAM2` source in:
 
-## External dependency
+- [`../third_party/sam2`](../third_party/sam2)
 
-This repo currently depends on the external SAM2 evaluation workspace at:
+The setup script downloads the `sam2.1_hiera_tiny.pt` checkpoint into:
 
-- `C:\Users\student\sam2_bowling_eval`
+- `../third_party/sam2/checkpoints`
 
-Override that path with:
+## Shot Lifecycle
 
-```powershell
-$env:SAM2_BOWLING_EVAL_ROOT='C:\path\to\sam2_bowling_eval'
-```
+1. Quest streams frames continuously once armed.
+2. Laptop keeps a short pre-roll buffer.
+3. On `shot_started`, the laptop begins recording JPEG frames for that shot.
+4. The classical seed detector runs online while frames arrive.
+5. As soon as the seed is confirmed, live `SAM2` starts.
+6. Live `SAM2` catches up through already-saved frames, then tracks new incoming frames.
+7. On `shot_ended`, the laptop finalizes outputs and sends a compact result payload back to Quest.
 
-That external workspace currently contains:
-
-- the optimized SAM2 runtime setup
-- the classical seed code
-- the patched local SAM2 checkout with the live camera predictor
-
-## Shot lifecycle
-
-The receiver expects Quest to send `ShotMarker` packets:
-
-- `shot_started` (`2`)
-- `shot_ended` (`3`)
-
-When `shot_started` arrives:
-
-- the server opens a JPEG-frame recorder
-- flushes a small pre-roll buffer into the shot folder
-- continues appending all incoming shot frames
-- samples frames for online seed detection while the shot is still in progress
-
-When the seed is confirmed:
-
-- the server initializes the live SAM2 camera predictor from the seed frame
-- catches up through any already-saved post-seed frames
-- continues tracking each new frame as it arrives
-
-When `shot_ended` arrives:
-
-- the server closes the frame recorder
-- finalizes the already-running seed detector outputs
-- if live SAM2 was running, only writes out its accumulated results
-- otherwise falls back to warm batch SAM2 against the saved frame folder
-- sends the parsed result JSON back to Quest
-
-## Run
+## Setup
 
 ```powershell
-C:\Users\student\sam2_bowling_eval\.venv\Scripts\python.exe .\laptop_pipeline\quest_bowling_server.py --host 0.0.0.0 --port 5799
+powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
+.\laptop_pipeline\start_quest_bowling_server.cmd
 ```
 
-Or use:
+If setup fails at the CUDA check, install a CUDA-enabled PyTorch build for that machine and rerun `setup_laptop_env.ps1`.
 
-- `start_quest_bowling_server.cmd`
+## Output Layout
 
-## Dependencies
+Each shot writes a run under:
 
-- Python 3.10+
-- `numpy`
-- `opencv-python`
-- `Pillow`
+- `laptop_pipeline/runs/<session>_<shot>_<timestamp>/`
 
-The actual SAM2 analysis runs through the existing `sam2_bowling_eval` virtual environment.
+Important outputs include:
+
+- `raw/frames/*.jpg`
+- `raw/frames.jsonl`
+- `analysis/seed.json`
+- `analysis/detections.csv`
+- `analysis/pipeline_summary.txt`
+- `analysis/sam2/track.csv`
+- `analysis/sam2/summary.txt`
+- `analysis/sam2/preview.mp4` when preview saving is enabled
+
+## Requirements
+
+- Python `3.10+`
+- `laptop_pipeline/.venv`
+- NVIDIA GPU with CUDA-enabled `torch`
+- vendored `SAM2` source in `third_party/sam2`
+- `sam2.1_hiera_tiny.pt` in `third_party/sam2/checkpoints`

@@ -11,9 +11,9 @@ import numpy as np
 from PIL import Image
 
 try:
-    from .path_config import DEFAULT_EVAL_ROOT
+    from .path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
 except ImportError:
-    from path_config import DEFAULT_EVAL_ROOT
+    from path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
 
 
 def bbox_from_mask(mask: np.ndarray):
@@ -88,8 +88,8 @@ def iter_source_frames(source_path: str, start_frame: int = 0):
 
 @dataclass
 class WarmSam2Config:
-    eval_root: Path = DEFAULT_EVAL_ROOT
-    checkpoint: Path = DEFAULT_EVAL_ROOT / "sam2" / "checkpoints" / "sam2.1_hiera_tiny.pt"
+    sam2_root: Path = DEFAULT_SAM2_ROOT
+    checkpoint: Path = DEFAULT_CHECKPOINTS_ROOT / "sam2.1_hiera_tiny.pt"
     model_cfg: str = "configs/sam2.1/sam2.1_hiera_t.yaml"
     object_id: int = 1
     vos_optimized: bool = True
@@ -98,11 +98,11 @@ class WarmSam2Config:
 
     @property
     def repo_root(self) -> Path:
-        return self.eval_root / "sam2"
+        return self.sam2_root
 
     @property
     def cache_root(self) -> Path:
-        return self.eval_root / "cache"
+        return self.sam2_root / "cache"
 
 
 class WarmSam2Tracker:

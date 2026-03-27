@@ -6,7 +6,13 @@ Last updated: 2026-03-27
 
 Remove manual seeding from the PC tracking prototype so a short bowling clip can be processed automatically enough to support immediate post-shot MR replay.
 
-This spec only covers the **PC-side automatic initializer** that chooses the first bowling-ball box and hands it to SAM2. It does not replace the larger project spec in [BALL_TRACKING_SPEC.md](C:/Users/student/Quest3BowlingBallTracking/BALL_TRACKING_SPEC.md).
+This spec only covers the **PC-side automatic initializer** that chooses the first bowling-ball box and hands it to `SAM2`. It does not replace the larger project spec in [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md).
+
+Status note:
+
+- this file documents the earlier `Grounding DINO + SAM2` plan
+- the current implemented path in the repo is now `classical seed + live SAM2`
+- we are keeping this spec as a record of the rejected automatic-initializer branch
 
 ## Why This Exists
 

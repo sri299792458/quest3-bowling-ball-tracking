@@ -1,7 +1,5 @@
 import csv
-import importlib.util
 import json
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,30 +8,13 @@ from typing import Any, Optional
 import numpy as np
 
 try:
-    from .path_config import DEFAULT_EVAL_ROOT
+    from . import classical_seed_core as classical_core
 except ImportError:
-    from path_config import DEFAULT_EVAL_ROOT
-
-
-def _load_classical_module(eval_root: Path):
-    module_name = "_sam2_classical_auto_init"
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-
-    script_path = eval_root / "auto_init_pipeline" / "run_classical_sam2_auto.py"
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load classical seed module from {script_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    import classical_seed_core as classical_core
 
 
 @dataclass
 class OnlineClassicalSeedConfig:
-    eval_root: Path = DEFAULT_EVAL_ROOT
     scan_start: int = 0
     scan_step: int = 2
     motion_threshold: float = 18.0
@@ -60,7 +41,7 @@ class OnlineClassicalSeedConfig:
 class OnlineClassicalSeedDetector:
     def __init__(self, frame_width: int, frame_height: int, config: Optional[OnlineClassicalSeedConfig] = None):
         self.config = config or OnlineClassicalSeedConfig()
-        self.classical = _load_classical_module(self.config.eval_root)
+        self.classical = classical_core
         self.args = SimpleNamespace(
             motion_threshold=self.config.motion_threshold,
             min_area=self.config.min_area,

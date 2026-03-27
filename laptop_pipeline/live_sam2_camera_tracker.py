@@ -10,9 +10,9 @@ import cv2
 import numpy as np
 
 try:
-    from .path_config import DEFAULT_EVAL_ROOT
+    from .path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
 except ImportError:
-    from path_config import DEFAULT_EVAL_ROOT
+    from path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
 
 
 def bbox_from_mask(mask: np.ndarray):
@@ -39,19 +39,19 @@ def read_jpeg_frame(frame_dir: Path, frame_idx: int) -> np.ndarray:
 
 @dataclass
 class LiveSam2CameraConfig:
-    eval_root: Path = DEFAULT_EVAL_ROOT
-    checkpoint: Path = DEFAULT_EVAL_ROOT / "sam2" / "checkpoints" / "sam2.1_hiera_tiny.pt"
+    sam2_root: Path = DEFAULT_SAM2_ROOT
+    checkpoint: Path = DEFAULT_CHECKPOINTS_ROOT / "sam2.1_hiera_tiny.pt"
     model_cfg: str = "configs/sam2.1/sam2.1_hiera_t.yaml"
     object_id: int = 1
     use_vos_optimized: bool = False
 
     @property
     def cache_root(self) -> Path:
-        return self.eval_root / "cache"
+        return self.sam2_root / "cache"
 
     @property
     def repo_root(self) -> Path:
-        return self.eval_root / "sam2"
+        return self.sam2_root
 
 
 class LiveSam2CameraTracker:

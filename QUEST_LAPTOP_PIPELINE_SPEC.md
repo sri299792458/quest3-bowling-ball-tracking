@@ -87,12 +87,12 @@ Return:
 
 Quest should render the overlay locally.
 
-## Current dependency
+## Current dependency layout
 
-This repo currently depends on the external `sam2_bowling_eval` workspace for:
+This repo is now self-contained for development:
 
-- optimized SAM2 environment
-- local SAM2 live-camera patch
-- classical seed reference code
+- the laptop pipeline lives in `laptop_pipeline`
+- the vendored `SAM2` source lives in `third_party/sam2`
+- the `SAM2` tiny checkpoint is downloaded by `laptop_pipeline/setup_laptop_env.ps1`
 
-That dependency is acceptable for the current development stage, but we should eventually either vendor the patched SAM2 pieces or document the patch set more formally.
+The only required external runtime dependency is a machine with a CUDA-capable NVIDIA GPU and a working driver stack.

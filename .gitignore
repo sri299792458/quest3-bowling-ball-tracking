@@ -14,11 +14,13 @@ Builds/
 /.utmp
 *.zip
 *.apk
+*.pyc
+__pycache__/
 unity-batch.log
 RuntimeActionBindings.json
 RuntimeActionBindings.json.meta
-ProjectSettings\Packages\com.unity.testtools.codecoverage\Settings.json
-ProjectSettings\Packages\com.unity.dedicated-server\
+ProjectSettings/Packages/com.unity.testtools.codecoverage/Settings.json
+ProjectSettings/Packages/com.unity.dedicated-server/
 PerformanceTestRun*.*
 StreamingAssets*
 buildInfo.txt
@@ -26,5 +28,6 @@ Packages/packages-lock.json
 pc_tracking_prototype/.venv/
 pc_tracking_prototype/outputs/
 laptop_pipeline/runs/
-laptop_pipeline/__pycache__/
-laptop_pipeline/*.pyc
+laptop_pipeline/.venv/
+third_party/sam2/checkpoints/*.pt
+third_party/sam2/cache/

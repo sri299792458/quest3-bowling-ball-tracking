@@ -1,105 +1,133 @@
-# Unity-PassthroughCameraAPISamples
+# Quest 3 Bowling Ball Tracking
 
-## Project Overview
+This repo is the full project for the Quest 3 mixed-reality bowling prototype.
 
-The **Unity-PassthroughCameraAPISamples** project helps Unity developers access Quest camera data using the **PassthroughCameraAccess** component from the Mixed Reality Utility Kit (MRUK). This component provides direct access to headset cameras with enhanced functionality including:
-- **Precise timestamps** for better camera-world alignment
-- **Simultaneous access to both cameras** (left and right)
-- **Complete camera metadata** including intrinsics, extrinsics, and pose information
+It contains:
 
-The project includes **five sample scenes** demonstrating various use cases:
+- the Unity Quest app
+- the Quest-to-laptop transport layer
+- the laptop tracking pipeline
+- the vendored `SAM2` source used by the laptop pipeline
 
-| CameraToWorld | BrightnessEstimation | MultiObjectDectection | ShaderSample |
-|:-------------:|:--------------------:|:---------------------:|:------------:|
-| ![GIF 1](./Media/CameraToWorld.gif) | ![GIF 2](./Media/BrightnessEstimation.gif) | ![GIF 3](./Media/ObjectDetectionSentis.gif) | ![GIF 4](./Media/ShaderSample.gif) |
+The current implemented tracking path is:
 
-## Documentation
+- `classical seed + live SAM2`
 
-For comprehensive guides, API reference, and tutorials, visit the official Meta Developers documentation:
+The seed is found on the laptop during capture. As soon as the seed is confirmed, live `SAM2` starts tracking. Quest receives compact tracking results back for replay rendering.
 
-- **[Passthrough Camera API Overview](https://developers.meta.com/horizon/documentation/unity/unity-pca-overview)** - Introduction and key concepts
-- **[Getting Started Guide](https://developers.meta.com/horizon/documentation/unity/unity-pca-documentation)** - Setup, configuration, and usage instructions
-- **[Unity Inference Engine Integration](https://developers.meta.com/horizon/documentation/unity/unity-pca-sentis)** - Using ML/CV models with PCA
-- **[Migration Guide](https://developers.meta.com/horizon/documentation/unity/unity-pca-migration-from-webcamtexture)** - Migrating from WebCamTexture
+## Repo Layout
 
-## Requirements
+- [`Assets/BallTracking`](Assets/BallTracking)
+  - Unity runtime and editor code for the bowling project
+- [`laptop_pipeline`](laptop_pipeline)
+  - Quest receiver, online seed logic, and `SAM2` bridge
+- [`third_party/sam2`](third_party/sam2)
+  - vendored `SAM2` source and configs
+- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
+  - main product and research spec
+- [`QUEST_LAPTOP_PIPELINE_SPEC.md`](QUEST_LAPTOP_PIPELINE_SPEC.md)
+  - transport and runtime pipeline spec
 
-- **Unity:** 6000.0.38f1 or newer
-- **Packages:**
-  - [Meta MRUK](https://assetstore.unity.com/packages/tools/integration/meta-mr-utility-kit-272450) (v81 or higher)
-  - [Unity Inference Engine](https://unity.com/sentis) (v2.2.1 for MultiObjectDetection sample)
-- **Hardware:** Quest 3 / Quest 3S with Horizon OS v74 or higher
-- **Permissions:** `horizonos.permission.HEADSET_CAMERA`
-- **Passthrough:** Must be enabled in your project
+## Prerequisites
 
-> [!NOTE]
-> You must use a physical headset to preview the passthrough camera. XR Simulator and Meta Horizon Link do not currently support passthrough cameras.
+Quest / Unity:
 
-## Download the Project
+- Unity `6000.3.5f2`
+- Quest 3 or Quest 3S
+- Android build target
 
-First, ensure you have Git LFS installed by running this command:
+Laptop:
 
-```bash
-git lfs install
+- Windows machine with an NVIDIA GPU
+- Python `3.10+`
+- CUDA-capable driver
+
+## Clone
+
+```powershell
+git clone <your-repo-url>
+cd Quest3BowlingBallTracking
 ```
 
-Then, clone this repo using the "Code" button above, or this command:
+## Unity Setup
 
-```bash
-git clone https://github.com/oculus-samples/Unity-PassthroughCameraApiSamples
+1. Open the repo in Unity `6000.3.5f2`.
+2. Let Unity finish package import.
+3. Switch the active platform to `Android`.
+4. Run `Tools > Ball Tracking > Create Or Update Project Assets`.
+5. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
+
+Notes:
+
+- Do not test passthrough camera access over Link or XR Simulator.
+- Grant Quest scene and passthrough camera permissions on device when prompted.
+
+## Laptop Setup
+
+Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
 ```
 
-## Project Content
+That script will:
 
-The project contains **five sample scenes** that demonstrate how to use the **PassthroughCameraAccess** component to access Quest camera data. All sample code and resources are located in the [**`PassthroughCameraApiSamples`**](./Assets/PassthroughCameraApiSamples/) folder:
+- create `laptop_pipeline/.venv`
+- install the Python dependencies
+- verify that `torch.cuda.is_available()` is true in that venv
+- download `sam2.1_hiera_tiny.pt` into `third_party/sam2/checkpoints`
 
-### Samples
+If the script stops at the CUDA check, install a CUDA-enabled PyTorch build for that machine and rerun the setup script.
 
-* **[`CameraViewer`](./Assets/PassthroughCameraApiSamples/CameraViewer)** - Displays a 2D canvas with camera feed
-* **[`CameraToWorld`](./Assets/PassthroughCameraApiSamples/CameraToWorld)** - Aligns RGB camera pose with Passthrough and transforms 2D coordinates to 3D world space rays
-* **[`BrightnessEstimation`](./Assets/PassthroughCameraApiSamples/BrightnessEstimation)** - Adapts the experience based on environment brightness
-* **[`MultiObjectDetection`](./Assets/PassthroughCameraApiSamples/MultiObjectDetection)** - Uses Unity Inference Engine for real-world object recognition
-* **[`ShaderSample`](./Assets/PassthroughCameraApiSamples/ShaderSample)** - Applies custom GPU effects to camera texture
+Then start the receiver:
 
-### Additional Components
+```powershell
+.\laptop_pipeline\start_quest_bowling_server.cmd
+```
 
-* **[`PassthroughCamera`](./Assets/PassthroughCameraApiSamples/PassthroughCamera)** - C# classes and utilities for camera access
-* **[`StartScene`](./Assets/PassthroughCameraApiSamples/StartScene)** - Menu scene for switching between samples
+## First End-to-End Test
 
-## Getting Started
+1. Start the laptop receiver.
+2. In Unity, add `QuestBowlingStreamClient` to a scene object.
+3. Add `QuestBowlingSessionDebugController` to a scene object.
+4. Assign:
+   - `cameraAccess`
+   - laptop IP / port
+   - `laneReference`
+5. Build and run on Quest.
+6. Use the current debug controls:
+   - `A`: start shot
+   - `B`: end shot
+   - `X`: resend lane calibration
+   - `Y`: tracker reset
 
-1. Clone the GitHub project as described [above](#download-the-project)
-2. Open the project with **Unity 6000.0.38f1** or newer
-3. Open a sample scene from the **[`PassthroughCameraApiSamples`](./Assets/PassthroughCameraApiSamples/)** folder
-4. Use **Meta > Tools > Project Setup Tool** to fix any configuration issues
-5. Build and deploy to your Quest 3/3S device
+The laptop should create a run folder under:
 
-For detailed setup instructions, API reference, and usage examples, see the **[Getting Started Guide](https://developers.meta.com/horizon/documentation/unity/unity-pca-documentation)**.
+- `laptop_pipeline/runs`
 
-## Learn More
+## Current Limitations
 
-For comprehensive information about using the Passthrough Camera API:
+- The polished MR replay renderer is not finished yet.
+- The on-device `YOLOv9t` sample remains only a Quest-side baseline, not the main bowling tracker.
+- The current laptop path is tuned for a local NVIDIA GPU and the `SAM2` tiny checkpoint.
+- The classical seed stage is still heuristic and will need more validation on real Quest captures.
 
-- **Setup & Configuration** - [Getting Started Guide](https://developers.meta.com/horizon/documentation/unity/unity-pca-documentation)
-- **Unity Inference Engine Integration** - [ML/CV with PCA](https://developers.meta.com/horizon/documentation/unity/unity-pca-sentis)
-- **Troubleshooting** - See the troubleshooting section in the [Getting Started Guide](https://developers.meta.com/horizon/documentation/unity/unity-pca-documentation#troubleshooting)
+## Self-Sufficiency
 
-## Report an Issue
+This repo is now self-contained for development:
 
-If you encounter any issues, please report them with:
+- Unity project lives here
+- laptop pipeline lives here
+- vendored `SAM2` source lives here
+- setup scripts live here
 
-- **Unity Engine version**
-- **XR plugin** (Oculus XR or Open XR) and version number
-- **Quest device** model and **Horizon OS version**
-- **Logcat logs** (use `adb logcat >> log.txt`)
-- **Video or screenshot** of the issue
-- **Relevant information** about your use case
+The only large runtime artifact that is not committed is the `SAM2` checkpoint. The setup script downloads that automatically.
 
-## License
+## More Docs
 
-The [`Oculus License`](./LICENSE.txt) applies to the SDK and supporting material. The [`MIT License`](./Assets/PassthroughCameraApiSamples/LICENSE.txt) applies to only certain, clearly marked documents. If an individual file does not indicate which license it is subject to, then the Oculus License applies.
-
-However,
-* Files from [`Assets/PassthroughCameraApiSamples/MultiObjectDetection/SentisInference/Model`](./Assets/PassthroughCameraApiSamples/MultiObjectDetection/SentisInference/Model) are licensed under [`MIT`](https://github.com/MultimediaTechLab/YOLO/blob/main/LICENSE).
-
-See the [`CONTRIBUTING`](./CONTRIBUTING.md) file for how to help out.
+- [`BALL_TRACKING_README.md`](BALL_TRACKING_README.md)
+- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
+- [`BALL_TRACKING_AUTO_INIT_SPEC.md`](BALL_TRACKING_AUTO_INIT_SPEC.md)
+- [`HOLISTIC_PIPELINE_RESEARCH.md`](HOLISTIC_PIPELINE_RESEARCH.md)
+- [`QUEST_LAPTOP_PIPELINE_SPEC.md`](QUEST_LAPTOP_PIPELINE_SPEC.md)
+- [`running_notes.md`](running_notes.md)
