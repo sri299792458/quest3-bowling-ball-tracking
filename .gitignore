@@ -31,6 +31,10 @@ laptop_pipeline/runs/
 laptop_pipeline/.venv/
 third_party/sam2/checkpoints/*.pt
 third_party/sam2/cache/
+Assets/_Recovery/
+Assets/_Recovery.meta
+third_party/sam3/
+sam3_benchmark/
 sam3_benchmark/.venv/
 sam3_benchmark/runs/
 sam3_benchmark/hf_cache/

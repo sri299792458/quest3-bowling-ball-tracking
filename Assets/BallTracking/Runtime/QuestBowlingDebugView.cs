@@ -320,8 +320,8 @@ namespace BallTracking.Runtime
 
             if (streamClient != null)
             {
-                PushStatus($"Server {streamClient.ServerHost}:{streamClient.ServerPort}");
-                PushStatus(streamClient.IsConnected ? "Connected" : "Connecting...");
+                PushStatus($"Signal {streamClient.ServerHost}:{streamClient.ServerPort}");
+                PushStatus(streamClient.IsConnected ? "WebRTC connected" : "WebRTC connecting...");
             }
             else
             {

@@ -15,6 +15,10 @@ The current implemented tracking path is:
 
 The seed is found on the laptop during capture. As soon as the seed is confirmed, live `SAM2` starts tracking. Quest receives compact tracking results back for replay rendering.
 
+The current transport direction is:
+
+- `WebRTC video + WebRTC data channel + HTTP signaling`
+
 ## Repo Layout
 
 - [`Assets/BallTracking`](Assets/BallTracking)
@@ -92,7 +96,7 @@ Then start the receiver:
 3. Run `Tools > Ball Tracking > Create Or Update Home Test Rig`.
 4. Select `QuestBowlingHomeTestRig` in the Hierarchy.
 5. In `QuestBowlingStreamClient`, set:
-   - `Server Host` = your laptop IPv4 address
+   - `Server Host` = your laptop IPv4 address on the same local network
    - `Server Port` = `5799`
 6. Build and run on Quest.
 7. Use the current debug controls:
@@ -114,11 +118,16 @@ The laptop should create a run folder under:
 
 - `laptop_pipeline/runs`
 
+Notes:
+
+- The Quest app now negotiates a WebRTC connection to the laptop receiver.
+- `Server Host` is currently only used for HTTP signaling. Automatic discovery is still a next step.
+
 ## Home Test Without a Bowling Alley
 
 You can still validate most of the system at home:
 
-1. Run the normal laptop server to test real transport and frame recording.
+1. Run the normal laptop server to test real WebRTC transport and frame recording.
 2. Run `.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd` to test full round-trip result delivery without depending on a successful seed or track.
 3. Use the auto-created `QuestBowlingHomeTestRig` to see tracker status and a normalized debug path in-headset.
 
@@ -130,6 +139,7 @@ Synthetic mode is only for transport and UX testing. It does not validate the re
 - The on-device `YOLOv9t` sample remains only a Quest-side baseline, not the main bowling tracker.
 - The current laptop path is tuned for a local NVIDIA GPU and the `SAM2` tiny checkpoint.
 - The classical seed stage is still heuristic and will need more validation on real Quest captures.
+- Automatic server discovery is not implemented yet, so the laptop signaling host still has to be set in the inspector.
 
 ## Self-Sufficiency
 

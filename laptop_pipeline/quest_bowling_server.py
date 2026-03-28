@@ -1,35 +1,19 @@
 import argparse
 import asyncio
 import json
-import struct
+import time
 from dataclasses import dataclass
-from io import BytesIO
 from typing import Optional
 
 import cv2
 import numpy as np
+from aiohttp import web
+from aiortc import RTCPeerConnection, RTCSessionDescription
 
 try:
     from .sam2_bowling_bridge import Sam2BowlingBridge, Sam2BridgeConfig
 except ImportError:
     from sam2_bowling_bridge import Sam2BowlingBridge, Sam2BridgeConfig
-
-
-MAGIC = 0x424F574C
-VERSION = 1
-
-
-class PacketType:
-    HELLO = 1
-    SESSION_CONFIG = 2
-    LANE_CALIBRATION = 3
-    FRAME_PACKET = 4
-    SHOT_MARKER = 5
-    TRACKER_STATUS = 6
-    SHOT_RESULT = 7
-    PING = 8
-    PONG = 9
-    ERROR = 10
 
 
 @dataclass
@@ -47,8 +31,9 @@ class SessionConfig:
     lens_position: tuple[float, float, float]
     lens_rotation: tuple[float, float, float, float]
     target_send_fps: int
-    codec: int
-    quality: int
+    transport: str
+    video_codec: str
+    target_bitrate_kbps: int
 
 
 @dataclass
@@ -73,130 +58,6 @@ class FramePacket:
     encoded_bytes: bytes
 
 
-@dataclass
-class SessionState:
-    writer: asyncio.StreamWriter
-    session_config: Optional[SessionConfig] = None
-    lane_calibration: Optional[LaneCalibration] = None
-    received_frame_count: int = 0
-
-
-@dataclass
-class ShotMarker:
-    session_id: str
-    shot_id: str
-    marker_type: int
-    timestamp_ms: int
-
-
-class PayloadReader:
-    def __init__(self, data: bytes):
-        self._stream = BytesIO(data)
-
-    def read_bool(self) -> bool:
-        return struct.unpack("<?", self._stream.read(1))[0]
-
-    def read_u16(self) -> int:
-        return struct.unpack("<H", self._stream.read(2))[0]
-
-    def read_i32(self) -> int:
-        return struct.unpack("<i", self._stream.read(4))[0]
-
-    def read_u64(self) -> int:
-        return struct.unpack("<Q", self._stream.read(8))[0]
-
-    def read_i64(self) -> int:
-        return struct.unpack("<q", self._stream.read(8))[0]
-
-    def read_f32(self) -> float:
-        return struct.unpack("<f", self._stream.read(4))[0]
-
-    def read_string(self) -> str:
-        length = self._read_7bit_int()
-        return self._stream.read(length).decode("utf-8")
-
-    def read_bytes(self, count: int) -> bytes:
-        return self._stream.read(count)
-
-    def _read_7bit_int(self) -> int:
-        result = 0
-        shift = 0
-        while True:
-            raw = self._stream.read(1)
-            if not raw:
-                raise EOFError("Unexpected end of payload while reading 7-bit int")
-            byte = raw[0]
-            result |= (byte & 0x7F) << shift
-            if byte & 0x80 == 0:
-                return result
-            shift += 7
-
-
-async def write_text_packet(writer: asyncio.StreamWriter, packet_type: int, payload_obj: dict):
-    payload = json.dumps(payload_obj, separators=(",", ":")).encode("utf-8")
-    header = struct.pack("<IHHI", MAGIC, VERSION, packet_type, len(payload))
-    writer.write(header)
-    writer.write(payload)
-    await writer.drain()
-
-
-def parse_session_config(payload: bytes) -> SessionConfig:
-    reader = PayloadReader(payload)
-    return SessionConfig(
-        session_id=reader.read_string(),
-        camera_eye=reader.read_i32(),
-        width=reader.read_i32(),
-        height=reader.read_i32(),
-        fx=reader.read_f32(),
-        fy=reader.read_f32(),
-        cx=reader.read_f32(),
-        cy=reader.read_f32(),
-        sensor_width=reader.read_i32(),
-        sensor_height=reader.read_i32(),
-        lens_position=(reader.read_f32(), reader.read_f32(), reader.read_f32()),
-        lens_rotation=(reader.read_f32(), reader.read_f32(), reader.read_f32(), reader.read_f32()),
-        target_send_fps=reader.read_i32(),
-        codec=reader.read_u16(),
-        quality=reader.read_i32(),
-    )
-
-
-def parse_lane_calibration(payload: bytes) -> LaneCalibration:
-    reader = PayloadReader(payload)
-    return LaneCalibration(
-        session_id=reader.read_string(),
-        timestamp_ms=reader.read_i64(),
-        is_valid=reader.read_bool(),
-        origin=(reader.read_f32(), reader.read_f32(), reader.read_f32()),
-        rotation=(reader.read_f32(), reader.read_f32(), reader.read_f32(), reader.read_f32()),
-        lane_width_m=reader.read_f32(),
-        lane_length_m=reader.read_f32(),
-    )
-
-
-def parse_frame_packet(payload: bytes) -> FramePacket:
-    reader = PayloadReader(payload)
-    session_id = reader.read_string()
-    shot_id = reader.read_string()
-    frame_id = reader.read_u64()
-    timestamp_us = reader.read_i64()
-    camera_position = (reader.read_f32(), reader.read_f32(), reader.read_f32())
-    camera_rotation = (reader.read_f32(), reader.read_f32(), reader.read_f32(), reader.read_f32())
-    encoded_length = reader.read_i32()
-    encoded_bytes = reader.read_bytes(encoded_length)
-    return FramePacket(session_id, shot_id, frame_id, timestamp_us, camera_position, camera_rotation, encoded_bytes)
-
-
-def parse_shot_marker(payload: bytes) -> ShotMarker:
-    reader = PayloadReader(payload)
-    return ShotMarker(
-        session_id=reader.read_string(),
-        shot_id=reader.read_string(),
-        marker_type=reader.read_u16(),
-        timestamp_ms=reader.read_i64(),
-    )
-
-
 def decode_jpeg(encoded_bytes: bytes) -> np.ndarray:
     array = np.frombuffer(encoded_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
@@ -205,81 +66,347 @@ def decode_jpeg(encoded_bytes: bytes) -> np.ndarray:
     return image
 
 
-async def read_packet(reader: asyncio.StreamReader):
-    header = await reader.readexactly(12)
-    magic, version, packet_type, payload_length = struct.unpack("<IHHI", header)
-    if magic != MAGIC:
-        raise ValueError(f"Invalid packet magic: 0x{magic:08X}")
-    if version != VERSION:
-        raise ValueError(f"Unsupported version: {version}")
-    payload = await reader.readexactly(payload_length) if payload_length else b""
-    return packet_type, payload
+class QuestWebRtcSession:
+    def __init__(self, bridge_config: Sam2BridgeConfig, persist_jpeg_quality: int):
+        self.bridge = Sam2BowlingBridge(config=bridge_config)
+        self.bridge_config = bridge_config
+        self.persist_jpeg_quality = int(max(40, min(95, persist_jpeg_quality)))
+        self.pc = RTCPeerConnection()
+        self.control_channel = None
+        self.session_config: Optional[SessionConfig] = None
+        self.lane_calibration: Optional[LaneCalibration] = None
+        self.session_id = "pending-session"
+        self.current_shot_id = "default-shot"
+        self.frame_counter = 0
+        self.last_frame_size = (1280, 960)
+        self.bridge_lock = asyncio.Lock()
+        self.video_task: Optional[asyncio.Task] = None
+        self.closed = False
+
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            print(f"[webrtc] peer state={self.pc.connectionState} session={self.session_id}")
+            if self.pc.connectionState in {"failed", "closed"}:
+                await self.close()
+
+        @self.pc.on("datachannel")
+        def on_datachannel(channel):
+            self.attach_data_channel(channel)
+
+        @self.pc.on("track")
+        def on_track(track):
+            print(f"[webrtc] track kind={track.kind} session={self.session_id}")
+            if track.kind == "video":
+                if self.video_task is not None:
+                    self.video_task.cancel()
+                self.video_task = asyncio.create_task(self.consume_video(track))
+
+            @track.on("ended")
+            async def on_ended():
+                print(f"[webrtc] track ended kind={track.kind} session={self.session_id}")
+
+    async def handle_offer(self, payload: dict) -> dict:
+        session_id = payload.get("session_id")
+        if session_id:
+            self.session_id = session_id
+
+        offer = RTCSessionDescription(sdp=payload["sdp"], type=payload["type"])
+        await self.pc.setRemoteDescription(offer)
+        answer = await self.pc.createAnswer()
+        await self.pc.setLocalDescription(answer)
+        return {
+            "type": self.pc.localDescription.type,
+            "sdp": self.pc.localDescription.sdp,
+        }
+
+    def attach_data_channel(self, channel) -> None:
+        self.control_channel = channel
+
+        @channel.on("open")
+        def on_open():
+            print(f"[webrtc] data channel open session={self.session_id}")
+            asyncio.create_task(
+                self.send_json(
+                    {
+                        "kind": "tracker_status",
+                        "stage": "webrtc_ready",
+                        "session_id": self.session_id,
+                    }
+                )
+            )
+
+        @channel.on("close")
+        def on_close():
+            print(f"[webrtc] data channel closed session={self.session_id}")
+
+        @channel.on("message")
+        def on_message(message):
+            asyncio.create_task(self.handle_control_message(message))
+
+    async def handle_control_message(self, message) -> None:
+        if isinstance(message, bytes):
+            message = message.decode("utf-8")
+
+        payload = json.loads(message)
+        kind = payload.get("kind", "")
+
+        if kind == "hello":
+            self.session_id = payload.get("session_id", self.session_id)
+            print(f"[webrtc] hello session={self.session_id} device={payload.get('device_name')}")
+            return
+
+        if kind == "session_config":
+            self.session_config = SessionConfig(
+                session_id=payload.get("session_id", self.session_id),
+                camera_eye=int(payload.get("camera_eye", 0)),
+                width=int(payload.get("width", self.last_frame_size[0])),
+                height=int(payload.get("height", self.last_frame_size[1])),
+                fx=float(payload.get("fx", 0.0)),
+                fy=float(payload.get("fy", 0.0)),
+                cx=float(payload.get("cx", 0.0)),
+                cy=float(payload.get("cy", 0.0)),
+                sensor_width=int(payload.get("sensor_width", 0)),
+                sensor_height=int(payload.get("sensor_height", 0)),
+                lens_position=(
+                    float(payload.get("lens_position_x", 0.0)),
+                    float(payload.get("lens_position_y", 0.0)),
+                    float(payload.get("lens_position_z", 0.0)),
+                ),
+                lens_rotation=(
+                    float(payload.get("lens_rotation_x", 0.0)),
+                    float(payload.get("lens_rotation_y", 0.0)),
+                    float(payload.get("lens_rotation_z", 0.0)),
+                    float(payload.get("lens_rotation_w", 1.0)),
+                ),
+                target_send_fps=int(payload.get("target_send_fps", 15)),
+                transport=payload.get("transport", "webrtc"),
+                video_codec=payload.get("video_codec", "vp8"),
+                target_bitrate_kbps=int(payload.get("target_bitrate_kbps", 0)),
+            )
+            self.session_id = self.session_config.session_id
+            self.last_frame_size = (self.session_config.width, self.session_config.height)
+            print(
+                f"[webrtc] session_config session={self.session_id} "
+                f"size={self.session_config.width}x{self.session_config.height} "
+                f"fps={self.session_config.target_send_fps}"
+            )
+            await self.send_json(
+                {
+                    "kind": "tracker_status",
+                    "stage": "session_ready",
+                    "session_id": self.session_id,
+                    "width": self.session_config.width,
+                    "height": self.session_config.height,
+                    "target_send_fps": self.session_config.target_send_fps,
+                    "transport": self.session_config.transport,
+                }
+            )
+            return
+
+        if kind == "lane_calibration":
+            self.lane_calibration = LaneCalibration(
+                session_id=payload.get("session_id", self.session_id),
+                timestamp_ms=int(payload.get("timestamp_ms", 0)),
+                is_valid=bool(payload.get("is_valid", False)),
+                origin=(
+                    float(payload.get("origin_x", 0.0)),
+                    float(payload.get("origin_y", 0.0)),
+                    float(payload.get("origin_z", 0.0)),
+                ),
+                rotation=(
+                    float(payload.get("rotation_x", 0.0)),
+                    float(payload.get("rotation_y", 0.0)),
+                    float(payload.get("rotation_z", 0.0)),
+                    float(payload.get("rotation_w", 1.0)),
+                ),
+                lane_width_m=float(payload.get("lane_width_m", 0.0)),
+                lane_length_m=float(payload.get("lane_length_m", 0.0)),
+            )
+            print(f"[webrtc] lane_calibration valid={self.lane_calibration.is_valid} session={self.session_id}")
+            return
+
+        if kind == "shot_marker":
+            await self.handle_shot_marker(payload)
+            return
+
+        if kind == "ping":
+            await self.send_json({"kind": "pong", "timestamp_ms": int(time.time() * 1000)})
+            return
+
+        print(f"[webrtc] unhandled control message kind={kind!r}")
+
+    async def handle_shot_marker(self, payload: dict) -> None:
+        marker_type = int(payload.get("marker_type", -1))
+        shot_id = payload.get("shot_id") or "default-shot"
+        timestamp_ms = int(payload.get("timestamp_ms", 0))
+        self.current_shot_id = shot_id
+
+        print(f"[webrtc] shot marker type={marker_type} shot={shot_id} session={self.session_id}")
+
+        if marker_type == 2:
+            fps = float(max(self.session_config.target_send_fps if self.session_config else 15, 1))
+            frame_size = self.last_frame_size
+            async with self.bridge_lock:
+                self.bridge.start_shot(
+                    session_id=self.session_id,
+                    shot_id=shot_id,
+                    fps=fps,
+                    frame_size=frame_size,
+                    decode_frame=lambda fp: decode_jpeg(fp.encoded_bytes),
+                )
+                events = self.bridge.drain_status_events()
+            await self.send_events(events)
+            return
+
+        if marker_type == 3:
+            async with self.bridge_lock:
+                task = await self.bridge.end_shot_and_launch()
+                events = self.bridge.drain_status_events()
+            await self.send_events(events)
+            if task is not None:
+                result = await task
+                result.setdefault("kind", "shot_result")
+                result.setdefault("timestamp_ms", timestamp_ms)
+                await self.send_json(result)
+            return
+
+        if marker_type == 4:
+            async with self.bridge_lock:
+                self.bridge.finish_active_recorder()
+            await self.send_json(
+                {
+                    "kind": "tracker_status",
+                    "stage": "tracker_reset",
+                    "session_id": self.session_id,
+                    "shot_id": shot_id,
+                }
+            )
+
+    async def consume_video(self, track) -> None:
+        try:
+            while True:
+                frame = await track.recv()
+                image_bgr = frame.to_ndarray(format="bgr24")
+                height, width = image_bgr.shape[:2]
+                self.last_frame_size = (width, height)
+                packet = self.build_frame_packet(image_bgr)
+
+                async with self.bridge_lock:
+                    self.bridge.buffer_frame(packet)
+                    if self.bridge.active_recorder is not None:
+                        self.bridge.add_frame(packet, decode_frame=lambda fp: decode_jpeg(fp.encoded_bytes))
+                        events = self.bridge.drain_status_events()
+                    else:
+                        events = []
+
+                if events:
+                    await self.send_events(events)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[webrtc] video consume failed session={self.session_id}: {exc}")
+            await self.send_json(
+                {
+                    "kind": "tracker_status",
+                    "stage": "video_receive_failed",
+                    "session_id": self.session_id,
+                    "shot_id": self.current_shot_id,
+                    "message": str(exc),
+                }
+            )
+
+    def build_frame_packet(self, image_bgr: np.ndarray) -> FramePacket:
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            image_bgr,
+            [int(cv2.IMWRITE_JPEG_QUALITY), self.persist_jpeg_quality],
+        )
+        if not ok:
+            raise RuntimeError("OpenCV JPEG encode failed for WebRTC frame")
+
+        timestamp_us = int(time.time() * 1_000_000)
+        packet = FramePacket(
+            session_id=self.session_id,
+            shot_id=self.current_shot_id,
+            frame_id=self.frame_counter,
+            timestamp_us=timestamp_us,
+            camera_position=(0.0, 0.0, 0.0),
+            camera_rotation=(0.0, 0.0, 0.0, 1.0),
+            encoded_bytes=encoded.tobytes(),
+        )
+        self.frame_counter += 1
+        return packet
+
+    async def send_events(self, events: list[dict]) -> None:
+        for event in events:
+            await self.send_json(event)
+
+    async def send_json(self, payload: dict) -> None:
+        if self.control_channel is None or self.control_channel.readyState != "open":
+            return
+        self.control_channel.send(json.dumps(payload, separators=(",", ":")))
+
+    async def close(self) -> None:
+        if self.closed:
+            return
+
+        self.closed = True
+        async with self.bridge_lock:
+            self.bridge.finish_active_recorder()
+
+        if self.video_task is not None:
+            self.video_task.cancel()
+            try:
+                await self.video_task
+            except asyncio.CancelledError:
+                pass
+
+        await self.pc.close()
 
 
-async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bridge_config: Sam2BridgeConfig):
-    peer = writer.get_extra_info("peername")
-    print(f"[server] connection from {peer}")
-    session = SessionState(writer=writer)
-    bridge = Sam2BowlingBridge(config=bridge_config)
-
-    try:
-        while True:
-            packet_type, payload = await read_packet(reader)
-            if packet_type == PacketType.HELLO:
-                continue
-            if packet_type == PacketType.SESSION_CONFIG:
-                session.session_config = parse_session_config(payload)
-                await write_text_packet(writer, PacketType.TRACKER_STATUS, {"kind": "tracker_status", "stage": "session_ready", "session_id": session.session_config.session_id, "width": session.session_config.width, "height": session.session_config.height, "target_send_fps": session.session_config.target_send_fps})
-            elif packet_type == PacketType.LANE_CALIBRATION:
-                session.lane_calibration = parse_lane_calibration(payload)
-            elif packet_type == PacketType.FRAME_PACKET:
-                frame = parse_frame_packet(payload)
-                session.received_frame_count += 1
-                bridge.buffer_frame(frame)
-                if bridge.active_recorder is not None:
-                    bridge.add_frame(frame, decode_frame=lambda fp: decode_jpeg(fp.encoded_bytes))
-                    for event in bridge.drain_status_events():
-                        await write_text_packet(writer, PacketType.TRACKER_STATUS, event)
-            elif packet_type == PacketType.SHOT_MARKER:
-                marker = parse_shot_marker(payload)
-                if marker.marker_type == 2:
-                    if not session.session_config:
-                        await write_text_packet(writer, PacketType.ERROR, {"kind": "error", "message": "shot_started received before session config"})
-                        continue
-                    bridge.start_shot(marker.session_id, marker.shot_id, float(max(session.session_config.target_send_fps, 1)), (session.session_config.width, session.session_config.height), decode_frame=lambda fp: decode_jpeg(fp.encoded_bytes))
-                    for event in bridge.drain_status_events():
-                        await write_text_packet(writer, PacketType.TRACKER_STATUS, event)
-                elif marker.marker_type == 3:
-                    task = await bridge.end_shot_and_launch()
-                    for event in bridge.drain_status_events():
-                        await write_text_packet(writer, PacketType.TRACKER_STATUS, event)
-                    if task is not None:
-                        await write_text_packet(writer, PacketType.SHOT_RESULT, await task)
-                elif marker.marker_type == 4:
-                    bridge.finish_active_recorder()
-                    await write_text_packet(writer, PacketType.TRACKER_STATUS, {"kind": "tracker_status", "stage": "tracker_reset", "shot_id": marker.shot_id})
-            elif packet_type == PacketType.PING:
-                await write_text_packet(writer, PacketType.PONG, {"kind": "pong"})
-    except asyncio.IncompleteReadError:
-        pass
-    finally:
-        bridge.finish_active_recorder()
-        writer.close()
-        await writer.wait_closed()
+async def handle_offer(request: web.Request) -> web.Response:
+    payload = await request.json()
+    session = QuestWebRtcSession(
+        bridge_config=request.app["bridge_config"],
+        persist_jpeg_quality=request.app["persist_jpeg_quality"],
+    )
+    request.app["sessions"].add(session)
+    answer = await session.handle_offer(payload)
+    return web.json_response(answer)
 
 
-async def main():
-    parser = argparse.ArgumentParser(description="Quest bowling TCP receiver")
+async def handle_health(_request: web.Request) -> web.Response:
+    return web.json_response({"ok": True, "transport": "webrtc"})
+
+
+async def on_shutdown(app: web.Application) -> None:
+    sessions = list(app["sessions"])
+    await asyncio.gather(*(session.close() for session in sessions), return_exceptions=True)
+
+
+def build_app(args) -> web.Application:
+    app = web.Application()
+    app["bridge_config"] = Sam2BridgeConfig(analysis_mode=args.analysis_mode)
+    app["persist_jpeg_quality"] = args.persist_jpeg_quality
+    app["sessions"] = set()
+    app.router.add_get("/health", handle_health)
+    app.router.add_post("/api/webrtc/session", handle_offer)
+    app.on_shutdown.append(on_shutdown)
+    return app
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Quest bowling WebRTC receiver")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5799)
     parser.add_argument("--analysis-mode", choices=("live", "synthetic"), default="live")
+    parser.add_argument("--persist-jpeg-quality", type=int, default=90)
     args = parser.parse_args()
 
-    bridge_config = Sam2BridgeConfig(analysis_mode=args.analysis_mode)
-    server = await asyncio.start_server(lambda reader, writer: handle_client(reader, writer, bridge_config), args.host, args.port)
-    async with server:
-        await server.serve_forever()
+    app = build_app(args)
+    print(f"[webrtc] listening on http://{args.host}:{args.port}")
+    web.run_app(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

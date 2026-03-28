@@ -4,9 +4,10 @@ This folder contains the current Quest-to-laptop receiver for the bowling MR pip
 
 ## What It Does
 
-- listens for the Quest TCP stream
-- parses the custom binary protocol
-- records each shot as a JPEG frame sequence
+- accepts Quest WebRTC signaling over HTTP
+- receives Quest video over WebRTC
+- receives control and result messages over a WebRTC data channel
+- records each shot as a JPEG frame sequence on the laptop
 - runs the classical seed detector incrementally while the shot is still streaming
 - starts a live `SAM2` camera predictor as soon as the seed is confirmed
 - falls back to warm batch `SAM2` only if the live path never starts or fails
@@ -22,6 +23,11 @@ The current receiver uses:
 - `live_sam2_camera_tracker.py`
 - `warm_sam2_tracker.py`
 
+The receiver is now a WebRTC endpoint backed by:
+
+- `aiohttp`
+- `aiortc`
+
 ## Repo-Local Dependencies
 
 This pipeline uses the vendored `SAM2` source in:
@@ -34,13 +40,14 @@ The setup script downloads the `sam2.1_hiera_tiny.pt` checkpoint into:
 
 ## Shot Lifecycle
 
-1. Quest streams frames continuously once armed.
-2. Laptop keeps a short pre-roll buffer.
-3. On `shot_started`, the laptop begins recording JPEG frames for that shot.
-4. The classical seed detector runs online while frames arrive.
-5. As soon as the seed is confirmed, live `SAM2` starts.
-6. Live `SAM2` catches up through already-saved frames, then tracks new incoming frames.
-7. On `shot_ended`, the laptop finalizes outputs and sends a compact result payload back to Quest.
+1. Quest negotiates WebRTC with the laptop.
+2. Quest sends the camera stream as a WebRTC video track.
+3. Laptop keeps a short pre-roll buffer.
+4. On `shot_started`, the laptop begins recording JPEG frames for that shot.
+5. The classical seed detector runs online while frames arrive.
+6. As soon as the seed is confirmed, live `SAM2` starts.
+7. Live `SAM2` catches up through already-saved frames, then tracks new incoming frames.
+8. On `shot_ended`, the laptop finalizes outputs and sends a compact result payload back to Quest over the data channel.
 
 ## Setup
 
@@ -50,6 +57,13 @@ powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
 ```
 
 If setup fails at the CUDA check, install a CUDA-enabled PyTorch build for that machine and rerun `setup_laptop_env.ps1`.
+
+The setup script now also verifies:
+
+- `aiohttp`
+- `aiortc`
+- repo-local `SAM2`
+- CUDA-enabled `torch`
 
 For a home test that skips real analysis and returns a fake-but-valid result payload, run:
 
@@ -79,5 +93,7 @@ Important outputs include:
 - Python `3.10+`
 - `laptop_pipeline/.venv`
 - NVIDIA GPU with CUDA-enabled `torch`
+- `aiohttp`
+- `aiortc`
 - vendored `SAM2` source in `third_party/sam2`
 - `sam2.1_hiera_tiny.pt` in `third_party/sam2/checkpoints`

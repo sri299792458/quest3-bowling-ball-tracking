@@ -35,6 +35,8 @@ def main() -> None:
     omegaconf = import_module("omegaconf")
     iopath = import_module("iopath")
     triton = import_module("triton")
+    aiohttp = import_module("aiohttp")
+    aiortc = import_module("aiortc")
 
     print(f"torch={torch.__version__}")
     print(f"torchvision={torchvision.__version__}")
@@ -42,6 +44,8 @@ def main() -> None:
     print(f"hydra={hydra.__version__}")
     print(f"omegaconf={omegaconf.__version__}")
     print(f"triton={triton.__version__}")
+    print(f"aiohttp={aiohttp.__version__}")
+    print(f"aiortc={aiortc.__version__}")
 
     require(torch.cuda.is_available(), "CUDA is not available in this venv.")
     require(torch.version.cuda is not None, "This torch build is CPU-only.")

@@ -5,6 +5,7 @@
     "com.unity.feature.development": "1.0.2",
     "com.unity.mobile.android-logcat": "1.4.6",
     "com.unity.ugui": "2.0.0",
+    "com.unity.webrtc": "https://github.com/Unity-Technologies/com.unity.webrtc.git#3.0.0-pre.8",
     "com.unity.xr.management": "4.5.3",
     "com.unity.xr.openxr": "1.16.1",
     "com.unity.modules.adaptiveperformance": "1.0.0",
