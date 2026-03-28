@@ -177,6 +177,8 @@ SkinnedMeshRenderer:
   m_RayTracingAccelStructBuildFlagsOverride: 0
   m_RayTracingAccelStructBuildFlags: 1
   m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -198,9 +200,11 @@ SkinnedMeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   serializedVersion: 2
   m_Quality: 0
   m_UpdateWhenOffscreen: 0
@@ -345,6 +349,10 @@ PrefabInstance:
     - target: {fileID: 2073883202203575103, guid: 6c8f51c0c4ebe4902a313954838e1de9, type: 3}
       propertyPath: m_Name
       value: ReturnToStartScene
+      objectReference: {fileID: 0}
+    - target: {fileID: 2073883202203575103, guid: 6c8f51c0c4ebe4902a313954838e1de9, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -615,6 +623,112 @@ Transform:
   m_Children:
   - {fileID: 204397962}
   m_Father: {fileID: 256469436}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &866842963
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 866842967}
+  - component: {fileID: 866842966}
+  - component: {fileID: 866842965}
+  - component: {fileID: 866842964}
+  m_Layer: 0
+  m_Name: QuestBowlingHomeTestRig
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &866842964
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866842963}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3b5f1d31d4ea4f9bb926f74f8b1b9891, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BallTracking.Runtime.QuestBowlingDebugView
+  streamClient: {fileID: 866842966}
+  anchor: {fileID: 1744462753}
+  localOffset: {x: 0, y: 0.25, z: 0.6}
+  faceMainCamera: 1
+  maxStatusLines: 6
+  fontSize: 42
+  characterSize: 0.008
+  statusColor: {r: 1, g: 1, b: 1, a: 1}
+  drawDebugPath: 1
+  debugPathWidthMeters: 0.5
+  debugPathLengthMeters: 1
+  debugPathHeightMeters: 0.05
+  lineWidth: 0.01
+  successPathColor: {r: 0.2, g: 1, b: 0.35, a: 0.95}
+  failurePathColor: {r: 1, g: 0.35, b: 0.2, a: 0.95}
+--- !u!114 &866842965
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866842963}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 95256dbfc9724a10a6a5075f7fb3fbb7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BallTracking.Runtime.QuestBowlingSessionDebugController
+  streamClient: {fileID: 866842966}
+  laneReference: {fileID: 2008168296}
+  laneWidthMeters: 1.0541
+  laneLengthMeters: 18.288
+  sendCalibrationOnStart: 1
+  verboseLogging: 1
+--- !u!114 &866842966
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866842963}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d58d7f09ff7441888d6c9d4519c1dbf6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BallTracking.Runtime.QuestBowlingStreamClient
+  cameraAccess: {fileID: 1373946501}
+  cameraPosition: 0
+  serverHost: 10.1.248.31
+  serverPort: 5799
+  reconnectDelaySeconds: 2
+  targetSendFps: 15
+  jpegQuality: 65
+  autoStreamWhenConnected: 1
+  verboseLogging: 0
+  onTrackerStatus:
+    m_PersistentCalls:
+      m_Calls: []
+  onShotResultJson:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!4 &866842967
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 866842963}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &875434744
 GameObject:
@@ -1478,6 +1592,8 @@ SkinnedMeshRenderer:
   m_RayTracingAccelStructBuildFlagsOverride: 0
   m_RayTracingAccelStructBuildFlags: 1
   m_SmallMeshCulling: 1
+  m_ForceMeshLod: -1
+  m_MeshLodSelectionBias: 0
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
@@ -1499,9 +1615,11 @@ SkinnedMeshRenderer:
   m_AutoUVMaxDistance: 0.5
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
+  m_GlobalIlluminationMeshLod: 0
   m_SortingLayerID: 0
   m_SortingLayer: 0
   m_SortingOrder: 0
+  m_MaskInteraction: 0
   serializedVersion: 2
   m_Quality: 0
   m_UpdateWhenOffscreen: 0
@@ -1727,6 +1845,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 883777609}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &2008168295
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2008168296}
+  m_Layer: 0
+  m_Name: LaneReference
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2008168296
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2008168295}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 2}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &1019656467722773290
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1742,6 +1891,10 @@ PrefabInstance:
     - target: {fileID: 8722207748505512710, guid: 259c0c899b7e0c14aa431eefdc0aacc6, type: 3}
       propertyPath: m_Name
       value: DetectionUiMenuPrefab
+      objectReference: {fileID: 0}
+    - target: {fileID: 8722207748505512710, guid: 259c0c899b7e0c14aa431eefdc0aacc6, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 8722207748505512711, guid: 259c0c899b7e0c14aa431eefdc0aacc6, type: 3}
       propertyPath: m_Pivot.x
@@ -1854,6 +2007,10 @@ PrefabInstance:
     - target: {fileID: 7042133912099342345, guid: 946c4bcf5ee78c2438bd71dd2f9fe1f9, type: 3}
       propertyPath: m_Name
       value: DetectionManagerPrefab
+      objectReference: {fileID: 0}
+    - target: {fileID: 7042133912099342345, guid: 946c4bcf5ee78c2438bd71dd2f9fe1f9, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 7042133912099342452, guid: 946c4bcf5ee78c2438bd71dd2f9fe1f9, type: 3}
       propertyPath: m_LocalPosition.x
@@ -1984,6 +2141,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: SentisInferenceManagerPrefab
       objectReference: {fileID: 0}
+    - target: {fileID: 5228241647023865434, guid: 927c1b782bb796b4b9b433d533cbccca, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 7913708705614608778, guid: 927c1b782bb796b4b9b433d533cbccca, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -2045,3 +2206,5 @@ SceneRoots:
   - {fileID: 1721288808}
   - {fileID: 1373946500}
   - {fileID: 1884619606}
+  - {fileID: 866842967}
+  - {fileID: 2008168296}

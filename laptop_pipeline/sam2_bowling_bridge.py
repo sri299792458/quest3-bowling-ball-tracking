@@ -24,6 +24,7 @@ class Sam2BridgeConfig:
     runs_root: Path = LAPTOP_PIPELINE_ROOT / "runs"
     save_preview: bool = False
     pre_roll_frames: int = 12
+    analysis_mode: str = "live"
     seed_config: OnlineClassicalSeedConfig = field(default_factory=OnlineClassicalSeedConfig)
 
 
@@ -216,6 +217,11 @@ class Sam2BowlingBridge:
         analysis_dir.mkdir(parents=True, exist_ok=True)
         raw_frames_dir = shot_dir / "raw" / "frames"
 
+        if self.config.analysis_mode == "synthetic":
+            synthetic_result = self._build_synthetic_result(session_id, shot_id, shot_dir, analysis_dir, raw_frames_dir, fps, total_frames)
+            (shot_dir / "synthetic_result.json").write_text(json.dumps(synthetic_result, indent=2), encoding="utf-8")
+            return synthetic_result
+
         if seed_detector is None:
             return {"kind": "shot_result", "success": False, "session_id": session_id, "shot_id": shot_id, "failure_reason": "seed_detector_missing"}
 
@@ -258,6 +264,63 @@ class Sam2BowlingBridge:
             "tracked_frames": len(path_samples),
             "first_frame": path_samples[0]["frame_idx"] if path_samples else None,
             "last_frame": path_samples[-1]["frame_idx"] if path_samples else None,
+        }
+
+    def _build_synthetic_result(self, session_id: str, shot_id: str, shot_dir: Path, analysis_dir: Path, raw_frames_dir: Path, fps: float, total_frames: int):
+        sample_count = max(12, min(36, total_frames if total_frames > 0 else 24))
+        path_samples = []
+        for index in range(sample_count):
+            t = index / float(max(sample_count - 1, 1))
+            centroid_x = 640.0 + 180.0 * (t - 0.5)
+            centroid_y = 760.0 - 420.0 * t + 55.0 * (t * (1.0 - t))
+            half_size = 52.0 - 18.0 * t
+            path_samples.append(
+                {
+                    "frame_idx": index,
+                    "centroid_x": centroid_x,
+                    "centroid_y": centroid_y,
+                    "bbox_x1": centroid_x - half_size,
+                    "bbox_y1": centroid_y - half_size,
+                    "bbox_x2": centroid_x + half_size,
+                    "bbox_y2": centroid_y + half_size,
+                    "area": float((half_size * 2.0) ** 2),
+                }
+            )
+
+        summary = {
+            "mode": "synthetic",
+            "fps": f"{fps:.3f}",
+            "total_frames": str(total_frames),
+            "tracked_frames": str(len(path_samples)),
+        }
+
+        return {
+            "kind": "shot_result",
+            "success": True,
+            "session_id": session_id,
+            "shot_id": shot_id,
+            "raw_source": str(raw_frames_dir),
+            "raw_frames_dir": str(raw_frames_dir),
+            "analysis_dir": str(analysis_dir),
+            "warm_sam2_summary": "",
+            "live_sam2_summary": "",
+            "preview_path": "",
+            "seed": {
+                "frame_idx": 0,
+                "box": [
+                    path_samples[0]["bbox_x1"],
+                    path_samples[0]["bbox_y1"],
+                    path_samples[0]["bbox_x2"],
+                    path_samples[0]["bbox_y2"],
+                ],
+                "center": [path_samples[0]["centroid_x"], path_samples[0]["centroid_y"]],
+                "initializer": "synthetic",
+            },
+            "summary": summary,
+            "path_samples": path_samples,
+            "tracked_frames": len(path_samples),
+            "first_frame": path_samples[0]["frame_idx"],
+            "last_frame": path_samples[-1]["frame_idx"],
         }
 
 

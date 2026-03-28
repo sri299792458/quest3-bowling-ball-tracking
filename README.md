@@ -88,22 +88,41 @@ Then start the receiver:
 ## First End-to-End Test
 
 1. Start the laptop receiver.
-2. In Unity, add `QuestBowlingStreamClient` to a scene object.
-3. Add `QuestBowlingSessionDebugController` to a scene object.
-4. Assign:
-   - `cameraAccess`
-   - laptop IP / port
-   - `laneReference`
-5. Build and run on Quest.
-6. Use the current debug controls:
-   - `A`: start shot
-   - `B`: end shot
-   - `X`: resend lane calibration
-   - `Y`: tracker reset
+2. In Unity, open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
+3. Run `Tools > Ball Tracking > Create Or Update Home Test Rig`.
+4. Select `QuestBowlingHomeTestRig` in the Hierarchy.
+5. In `QuestBowlingStreamClient`, set:
+   - `Server Host` = your laptop IPv4 address
+   - `Server Port` = `5799`
+6. Build and run on Quest.
+7. Use the current debug controls:
+   - `X`: start shot
+   - `Y`: end shot
+   - `Menu/Start`: resend lane calibration
+   - `Left thumbstick click`: tracker reset
+
+The home test rig tool also disables the inherited sample objects:
+
+- `DetectionUiMenuPrefab`
+- `DetectionManagerPrefab`
+- `SentisInferenceManagerPrefab`
+
+and moves `Assets/BallTracking/Scenes/BowlingBallTracking.unity` to build index `0`,
+so the old YOLO / Sentis start menu should no longer appear in the home-test build.
 
 The laptop should create a run folder under:
 
 - `laptop_pipeline/runs`
+
+## Home Test Without a Bowling Alley
+
+You can still validate most of the system at home:
+
+1. Run the normal laptop server to test real transport and frame recording.
+2. Run `.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd` to test full round-trip result delivery without depending on a successful seed or track.
+3. Use the auto-created `QuestBowlingHomeTestRig` to see tracker status and a normalized debug path in-headset.
+
+Synthetic mode is only for transport and UX testing. It does not validate the real tracking pipeline.
 
 ## Current Limitations
 

@@ -10,9 +10,9 @@ import cv2
 import numpy as np
 
 try:
-    from .sam2_bowling_bridge import Sam2BowlingBridge
+    from .sam2_bowling_bridge import Sam2BowlingBridge, Sam2BridgeConfig
 except ImportError:
-    from sam2_bowling_bridge import Sam2BowlingBridge
+    from sam2_bowling_bridge import Sam2BowlingBridge, Sam2BridgeConfig
 
 
 MAGIC = 0x424F574C
@@ -216,11 +216,11 @@ async def read_packet(reader: asyncio.StreamReader):
     return packet_type, payload
 
 
-async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bridge_config: Sam2BridgeConfig):
     peer = writer.get_extra_info("peername")
     print(f"[server] connection from {peer}")
     session = SessionState(writer=writer)
-    bridge = Sam2BowlingBridge()
+    bridge = Sam2BowlingBridge(config=bridge_config)
 
     try:
         while True:
@@ -272,9 +272,11 @@ async def main():
     parser = argparse.ArgumentParser(description="Quest bowling TCP receiver")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5799)
+    parser.add_argument("--analysis-mode", choices=("live", "synthetic"), default="live")
     args = parser.parse_args()
 
-    server = await asyncio.start_server(handle_client, args.host, args.port)
+    bridge_config = Sam2BridgeConfig(analysis_mode=args.analysis_mode)
+    server = await asyncio.start_server(lambda reader, writer: handle_client(reader, writer, bridge_config), args.host, args.port)
     async with server:
         await server.serve_forever()
 

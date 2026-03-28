@@ -16,6 +16,12 @@ namespace BallTracking.Runtime
         private string _currentShotId;
         private bool _shotActive;
 
+        public void ConfigureForRuntime(QuestBowlingStreamClient client, Transform laneTransform)
+        {
+            streamClient = client;
+            laneReference = laneTransform;
+        }
+
         private void Start()
         {
             if (sendCalibrationOnStart)
@@ -31,22 +37,22 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.One))
+            if (OVRInput.GetDown(OVRInput.Button.Three, OVRInput.Controller.LTouch))
             {
                 StartShot();
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Two))
+            if (OVRInput.GetDown(OVRInput.Button.Four, OVRInput.Controller.LTouch))
             {
                 EndShot();
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Three))
+            if (OVRInput.GetDown(OVRInput.Button.Start))
             {
                 SendLaneCalibration();
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Four))
+            if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch))
             {
                 streamClient.SendShotMarker(BowlingShotMarkerType.TrackerReset);
                 _shotActive = false;

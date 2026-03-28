@@ -36,6 +36,9 @@ namespace BallTracking.Runtime
         [SerializeField] private StringEvent onTrackerStatus = new();
         [SerializeField] private StringEvent onShotResultJson = new();
 
+        public event Action<string> TrackerStatusReceived;
+        public event Action<string> ShotResultReceived;
+
         private readonly object _latestFrameLock = new();
         private readonly SemaphoreSlim _sendSignal = new(0);
         private PendingFrame _latestFrame;
@@ -56,6 +59,30 @@ namespace BallTracking.Runtime
         private BowlingLaneCalibration _laneCalibration;
 
         public bool IsConnected => _tcpClient != null && _tcpClient.Connected && _networkStream != null;
+        public string ServerHost => serverHost;
+        public int ServerPort => serverPort;
+
+        public void ConfigureForRuntime(
+            PassthroughCameraAccess passthroughCameraAccess,
+            string host = null,
+            int? port = null)
+        {
+            cameraAccess = passthroughCameraAccess;
+            if (cameraAccess != null)
+            {
+                cameraAccess.CameraPosition = cameraPosition;
+            }
+
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                serverHost = host;
+            }
+
+            if (port.HasValue)
+            {
+                serverPort = port.Value;
+            }
+        }
 
         private void Awake()
         {
@@ -251,10 +278,22 @@ namespace BallTracking.Runtime
                 switch (packet.Value.type)
                 {
                     case BowlingPacketType.TrackerStatus:
-                        onTrackerStatus.Invoke(BowlingProtocol.DecodeUtf8Payload(packet.Value.payload));
+                        var trackerStatusJson = BowlingProtocol.DecodeUtf8Payload(packet.Value.payload);
+                        if (verboseLogging)
+                        {
+                            Debug.Log($"[QuestBowlingStreamClient] TrackerStatus: {trackerStatusJson}");
+                        }
+                        onTrackerStatus.Invoke(trackerStatusJson);
+                        TrackerStatusReceived?.Invoke(trackerStatusJson);
                         break;
                     case BowlingPacketType.ShotResult:
-                        onShotResultJson.Invoke(BowlingProtocol.DecodeUtf8Payload(packet.Value.payload));
+                        var shotResultJson = BowlingProtocol.DecodeUtf8Payload(packet.Value.payload);
+                        if (verboseLogging)
+                        {
+                            Debug.Log($"[QuestBowlingStreamClient] ShotResult: {shotResultJson}");
+                        }
+                        onShotResultJson.Invoke(shotResultJson);
+                        ShotResultReceived?.Invoke(shotResultJson);
                         break;
                     case BowlingPacketType.Ping:
                         await BowlingProtocol.WritePacketAsync(_networkStream, BowlingPacketType.Pong, Array.Empty<byte>(), cancellationToken);

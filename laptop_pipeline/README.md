@@ -51,6 +51,12 @@ powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
 
 If setup fails at the CUDA check, install a CUDA-enabled PyTorch build for that machine and rerun `setup_laptop_env.ps1`.
 
+For a home test that skips real analysis and returns a fake-but-valid result payload, run:
+
+```powershell
+.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd
+```
+
 ## Output Layout
 
 Each shot writes a run under:
