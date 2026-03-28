@@ -24,6 +24,8 @@ namespace BallTracking.Runtime
 
         private void Start()
         {
+            Debug.Log("[QuestBowlingSessionDebugController] Start");
+            streamClient?.ShowLocalStatus("controller_ready", "X start | Y end | L-stick calibrate");
             if (sendCalibrationOnStart)
             {
                 SendLaneCalibration();
@@ -37,29 +39,28 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Three, OVRInput.Controller.LTouch))
+            var startPressed =
+                OVRInput.GetDown(OVRInput.Button.Three, OVRInput.Controller.LTouch) ||
+                OVRInput.GetDown(OVRInput.RawButton.X);
+            if (startPressed)
             {
                 StartShot();
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Four, OVRInput.Controller.LTouch))
+            var endPressed =
+                OVRInput.GetDown(OVRInput.Button.Four, OVRInput.Controller.LTouch) ||
+                OVRInput.GetDown(OVRInput.RawButton.Y);
+            if (endPressed)
             {
                 EndShot();
             }
 
-            if (OVRInput.GetDown(OVRInput.Button.Start))
+            var calibratePressed =
+                OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch) ||
+                OVRInput.GetDown(OVRInput.RawButton.LThumbstick);
+            if (calibratePressed)
             {
                 SendLaneCalibration();
-            }
-
-            if (OVRInput.GetDown(OVRInput.Button.PrimaryThumbstick, OVRInput.Controller.LTouch))
-            {
-                streamClient.SendShotMarker(BowlingShotMarkerType.TrackerReset);
-                _shotActive = false;
-                if (verboseLogging)
-                {
-                    Debug.Log("[QuestBowlingSessionDebugController] Sent tracker reset.");
-                }
             }
         }
 
@@ -74,6 +75,7 @@ namespace BallTracking.Runtime
                 new Pose(laneReference.position, laneReference.rotation),
                 laneWidthMeters,
                 laneLengthMeters);
+            streamClient.ShowLocalStatus("local_calibration", "lane calibration updated");
 
             if (verboseLogging)
             {
@@ -90,8 +92,9 @@ namespace BallTracking.Runtime
 
             _currentShotId = $"shot_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             streamClient.SetShotId(_currentShotId);
-            streamClient.SendShotMarker(BowlingShotMarkerType.ShotStarted);
+            var sent = streamClient.SendShotMarker(BowlingShotMarkerType.ShotStarted);
             _shotActive = true;
+            streamClient.ShowLocalStatus(sent ? "local_start_sent" : "local_start_queued", _currentShotId);
 
             if (verboseLogging)
             {
@@ -106,8 +109,9 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            streamClient.SendShotMarker(BowlingShotMarkerType.ShotEnded);
+            var sent = streamClient.SendShotMarker(BowlingShotMarkerType.ShotEnded);
             _shotActive = false;
+            streamClient.ShowLocalStatus(sent ? "local_end_sent" : "local_end_dropped", _currentShotId);
 
             if (verboseLogging)
             {

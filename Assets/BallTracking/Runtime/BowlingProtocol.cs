@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -53,7 +52,25 @@ namespace BallTracking.Runtime.Transport
         public const uint Magic = 0x424F574C;
         public const ushort Version = 1;
 
-        public static async Task WritePacketAsync(NetworkStream stream, BowlingPacketType type, byte[] payload, CancellationToken cancellationToken)
+        public static void WritePacket(Stream stream, BowlingPacketType type, byte[] payload)
+        {
+            payload ??= Array.Empty<byte>();
+            var header = new byte[12];
+            WriteUInt32(header, 0, Magic);
+            WriteUInt16(header, 4, Version);
+            WriteUInt16(header, 6, (ushort)type);
+            WriteUInt32(header, 8, (uint)payload.Length);
+
+            stream.Write(header, 0, header.Length);
+            if (payload.Length > 0)
+            {
+                stream.Write(payload, 0, payload.Length);
+            }
+
+            stream.Flush();
+        }
+
+        public static async Task WritePacketAsync(Stream stream, BowlingPacketType type, byte[] payload, CancellationToken cancellationToken)
         {
             payload ??= Array.Empty<byte>();
             var header = new byte[12];
@@ -71,7 +88,41 @@ namespace BallTracking.Runtime.Transport
             await stream.FlushAsync(cancellationToken);
         }
 
-        public static async Task<(BowlingPacketType type, byte[] payload)?> ReadPacketAsync(NetworkStream stream, CancellationToken cancellationToken)
+        public static (BowlingPacketType type, byte[] payload)? ReadPacket(Stream stream)
+        {
+            var header = ReadExact(stream, 12);
+            if (header == null)
+            {
+                return null;
+            }
+
+            var magic = ReadUInt32(header, 0);
+            if (magic != Magic)
+            {
+                throw new InvalidDataException($"Invalid packet magic 0x{magic:X8}");
+            }
+
+            var version = ReadUInt16(header, 4);
+            if (version != Version)
+            {
+                throw new InvalidDataException($"Unsupported protocol version {version}");
+            }
+
+            var type = (BowlingPacketType)ReadUInt16(header, 6);
+            var payloadLength = ReadUInt32(header, 8);
+            var payload = payloadLength > 0
+                ? ReadExact(stream, (int)payloadLength)
+                : Array.Empty<byte>();
+
+            if (payload == null)
+            {
+                return null;
+            }
+
+            return (type, payload);
+        }
+
+        public static async Task<(BowlingPacketType type, byte[] payload)?> ReadPacketAsync(Stream stream, CancellationToken cancellationToken)
         {
             var header = await ReadExactAsync(stream, 12, cancellationToken);
             if (header == null)
@@ -193,7 +244,25 @@ namespace BallTracking.Runtime.Transport
         public static string DecodeUtf8Payload(byte[] payload)
             => payload == null || payload.Length == 0 ? string.Empty : Encoding.UTF8.GetString(payload);
 
-        private static async Task<byte[]> ReadExactAsync(NetworkStream stream, int count, CancellationToken cancellationToken)
+        private static byte[] ReadExact(Stream stream, int count)
+        {
+            var buffer = new byte[count];
+            var offset = 0;
+            while (offset < count)
+            {
+                var read = stream.Read(buffer, offset, count - offset);
+                if (read <= 0)
+                {
+                    return null;
+                }
+
+                offset += read;
+            }
+
+            return buffer;
+        }
+
+        private static async Task<byte[]> ReadExactAsync(Stream stream, int count, CancellationToken cancellationToken)
         {
             var buffer = new byte[count];
             var offset = 0;

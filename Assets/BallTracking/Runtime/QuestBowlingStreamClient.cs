@@ -1,17 +1,35 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using BallTracking.Runtime.Transport;
 using Meta.XR;
-using Unity.WebRTC;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.Networking;
+using UnityEngine.Serialization;
 
 namespace BallTracking.Runtime
 {
     public sealed class QuestBowlingStreamClient : MonoBehaviour
     {
+        private const int UdpFrameHeaderSize = 26;
+
+        public enum StreamSourceMode
+        {
+            PassthroughCamera = 0,
+            SyntheticPattern = 1,
+        }
+
+        public enum ConnectionMode
+        {
+            RemoteLaptop = 0,
+            LocalLoopback = 1,
+        }
+
         [Serializable]
         public sealed class StringEvent : UnityEvent<string> { }
 
@@ -19,23 +37,6 @@ namespace BallTracking.Runtime
         private sealed class IncomingEnvelope
         {
             public string kind;
-        }
-
-        [Serializable]
-        private sealed class OfferRequest
-        {
-            public string session_id;
-            public string type;
-            public string sdp;
-            public string app_version;
-            public string device_name;
-        }
-
-        [Serializable]
-        private sealed class AnswerResponse
-        {
-            public string type;
-            public string sdp;
         }
 
         [Serializable]
@@ -109,22 +110,50 @@ namespace BallTracking.Runtime
             public long timestamp_ms;
         }
 
+        [Serializable]
+        private sealed class LocalTrackerStatusMessage
+        {
+            public string kind;
+            public string stage;
+            public string shot_id;
+            public string message;
+        }
+
+        [Serializable]
+        private sealed class ShotResultSummaryMessage
+        {
+            public string kind;
+            public bool success;
+            public string shot_id;
+            public string failure_reason;
+            public int tracked_frames;
+            public int first_frame;
+            public int last_frame;
+        }
+
+        private readonly ConcurrentQueue<QueuedInboundPacket> _inboundPackets = new();
+        private readonly ConcurrentQueue<QueuedStatus> _queuedStatuses = new();
+        private readonly object _controlSendGate = new();
+
         [Header("Camera")]
         [SerializeField] private PassthroughCameraAccess cameraAccess;
         [SerializeField] private PassthroughCameraAccess.CameraPositionType cameraPosition = PassthroughCameraAccess.CameraPositionType.Left;
 
-        [Header("Signaling")]
+        [Header("Connection")]
+        [SerializeField] private ConnectionMode connectionMode = ConnectionMode.RemoteLaptop;
         [SerializeField] private string serverHost = "192.168.1.2";
         [SerializeField] private int serverPort = 5799;
-        [SerializeField] private string signalingPath = "/api/webrtc/session";
         [SerializeField] private float reconnectDelaySeconds = 2f;
-        [SerializeField] private float iceGatherTimeoutSeconds = 3f;
-        [SerializeField] private bool useGoogleStun = false;
-        [SerializeField] private string stunServerUrl = "stun:stun.l.google.com:19302";
+        [FormerlySerializedAs("signalingTimeoutSeconds")]
+        [SerializeField] private float connectTimeoutSeconds = 4f;
 
         [Header("Streaming")]
+        [SerializeField] private StreamSourceMode streamSource = StreamSourceMode.PassthroughCamera;
+        [SerializeField] private Vector2Int syntheticResolution = new(1280, 960);
         [SerializeField] private int targetSendFps = 15;
         [SerializeField] private int targetBitrateKbps = 3500;
+        [SerializeField] private int jpegQuality = 80;
+        [SerializeField] private int maxDatagramPayloadBytes = 1200;
         [SerializeField] private bool autoStreamWhenConnected = true;
         [SerializeField] private bool verboseLogging;
 
@@ -135,30 +164,34 @@ namespace BallTracking.Runtime
         public event Action<string> TrackerStatusReceived;
         public event Action<string> ShotResultReceived;
 
-        private Coroutine _webrtcUpdateCoroutine;
         private Coroutine _connectionLoopCoroutine;
-        private RTCPeerConnection _peerConnection;
-        private RTCDataChannel _controlChannel;
-        private VideoStreamTrack _videoTrack;
-        private RTCRtpSender _videoSender;
+        private TcpClient _controlClient;
+        private NetworkStream _controlStream;
+        private UdpClient _frameClient;
+        private Task _controlReadTask;
+        private CancellationTokenSource _connectionCts;
         private RenderTexture _streamTexture;
+        private Texture2D _readbackTexture;
+        private Camera _syntheticSenderCamera;
         private bool _connecting;
+        private bool _controlConnected;
         private bool _helloSent;
         private bool _sessionConfigSent;
         private bool _laneCalibrationSent;
-        private double _lastBlitTime;
+        private bool _permissionsRequested;
+        private double _lastFrameSendTime;
+        private int _localStreamFrameCount;
+        private ulong _nextFrameId;
         private string _sessionId;
         private string _shotId = "default-shot";
+        private string _latestStatusLine = "client_not_started";
         private BowlingLaneCalibration _laneCalibration;
+        private string _statusLogPath;
 
-        public bool IsConnected =>
-            _peerConnection != null &&
-            _peerConnection.ConnectionState == RTCPeerConnectionState.Connected &&
-            _controlChannel != null &&
-            _controlChannel.ReadyState == RTCDataChannelState.Open;
-
+        public bool IsConnected => _controlConnected && _controlStream != null;
         public string ServerHost => serverHost;
         public int ServerPort => serverPort;
+        public string LatestStatusLine => _latestStatusLine;
 
         public void ConfigureForRuntime(
             PassthroughCameraAccess passthroughCameraAccess,
@@ -185,59 +218,69 @@ namespace BallTracking.Runtime
         private void Awake()
         {
             _sessionId = Guid.NewGuid().ToString("N");
+            _statusLogPath = Path.Combine(Application.persistentDataPath, "quest_bowling_status.log");
             if (cameraAccess != null)
             {
                 cameraAccess.CameraPosition = cameraPosition;
             }
+
+            EmitLocalStatus("client_awake", _sessionId);
         }
 
         private void OnEnable()
         {
-            _webrtcUpdateCoroutine = StartCoroutine(WebRTC.Update());
+            EmitLocalStatus("client_on_enable");
+            if (UsesPassthroughCamera())
+            {
+                RequestCameraPermissionsIfNeeded();
+            }
+
             _connectionLoopCoroutine = StartCoroutine(ConnectionLoop());
         }
 
         private void OnDisable()
         {
+            EmitLocalStatus("client_on_disable");
             if (_connectionLoopCoroutine != null)
             {
                 StopCoroutine(_connectionLoopCoroutine);
                 _connectionLoopCoroutine = null;
             }
 
-            if (_webrtcUpdateCoroutine != null)
-            {
-                StopCoroutine(_webrtcUpdateCoroutine);
-                _webrtcUpdateCoroutine = null;
-            }
-
-            CleanupPeerConnection();
+            CleanupConnection();
             DisposeStreamTexture();
+            DisposeReadbackTexture();
+            DisposeSyntheticSenderCamera();
+            _localStreamFrameCount = 0;
         }
 
         private void Update()
         {
-            if (!autoStreamWhenConnected || !IsConnected || cameraAccess == null || !cameraAccess.IsPlaying)
+            DrainQueuedStatuses();
+            DrainInboundPackets();
+
+            if (!autoStreamWhenConnected || !IsConnected)
             {
                 return;
             }
-
-            var sourceTexture = cameraAccess.GetTexture();
-            if (sourceTexture == null)
-            {
-                return;
-            }
-
-            EnsureStreamTexture(sourceTexture.width, sourceTexture.height);
 
             var minInterval = 1.0 / Mathf.Max(1, targetSendFps);
-            if (!cameraAccess.IsUpdatedThisFrame || Time.unscaledTimeAsDouble - _lastBlitTime < minInterval)
+            if (Time.unscaledTimeAsDouble - _lastFrameSendTime < minInterval)
             {
                 return;
             }
 
-            Graphics.Blit(sourceTexture, _streamTexture);
-            _lastBlitTime = Time.unscaledTimeAsDouble;
+            if (!TrySendCurrentFrame(out var frameNote))
+            {
+                return;
+            }
+
+            _lastFrameSendTime = Time.unscaledTimeAsDouble;
+            _localStreamFrameCount++;
+            if (_localStreamFrameCount == 1 || _localStreamFrameCount % 30 == 0)
+            {
+                EmitLocalStatus("local_stream_frames", $"{_localStreamFrameCount} | {frameNote}");
+            }
 
             if (!_sessionConfigSent)
             {
@@ -270,21 +313,29 @@ namespace BallTracking.Runtime
             _shotId = string.IsNullOrWhiteSpace(shotId) ? "default-shot" : shotId;
         }
 
-        public void SendShotMarker(BowlingShotMarkerType markerType)
+        public bool SendShotMarker(BowlingShotMarkerType markerType)
         {
             if (!CanSendControlMessages())
             {
-                return;
+                EmitLocalStatus("marker_dropped", $"{markerType} while control closed");
+                return false;
             }
 
-            SendJsonMessage(new ShotMarkerMessage
-            {
-                kind = "shot_marker",
-                session_id = _sessionId,
-                shot_id = _shotId,
-                marker_type = (int)markerType,
-                timestamp_ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-            });
+            return SendControlJsonPacket(
+                BowlingPacketType.ShotMarker,
+                new ShotMarkerMessage
+                {
+                    kind = "shot_marker",
+                    session_id = _sessionId,
+                    shot_id = _shotId,
+                    marker_type = (int)markerType,
+                    timestamp_ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                });
+        }
+
+        public void ShowLocalStatus(string stage, string message = null)
+        {
+            EmitLocalStatus(stage, message);
         }
 
         private IEnumerator ConnectionLoop()
@@ -310,257 +361,240 @@ namespace BallTracking.Runtime
         private IEnumerator ConnectOnce()
         {
             _connecting = true;
+            CleanupConnection();
+            EmitLocalStatus("connecting", $"{serverHost}:{serverPort}");
 
-            if (cameraAccess == null)
+            if (connectionMode == ConnectionMode.LocalLoopback)
             {
-                Debug.LogWarning("[QuestBowlingStreamClient] Missing PassthroughCameraAccess.");
+                EmitLocalStatus("loopback_unsupported", "UDP transport uses the remote laptop path only.");
+                connectionMode = ConnectionMode.RemoteLaptop;
+            }
+
+            if (UsesPassthroughCamera() && !AreCameraPermissionsGranted())
+            {
+                RequestCameraPermissionsIfNeeded();
+                EmitLocalStatus("waiting_permissions", "Grant Scene and Passthrough Camera permissions on Quest.");
                 _connecting = false;
                 yield break;
             }
 
-            if (!cameraAccess.IsPlaying || cameraAccess.GetTexture() == null)
+            if (UsesPassthroughCamera() && cameraAccess == null)
             {
-                if (verboseLogging)
-                {
-                    Debug.Log("[QuestBowlingStreamClient] Waiting for passthrough camera before WebRTC connect.");
-                }
+                EmitLocalStatus("camera_missing", "PassthroughCameraAccess is not assigned.");
                 _connecting = false;
                 yield break;
             }
 
-            var sourceTexture = cameraAccess.GetTexture();
-            EnsureStreamTexture(sourceTexture.width, sourceTexture.height);
-            CleanupPeerConnection();
-            CreatePeerConnection();
-
-            var offerOp = _peerConnection.CreateOffer();
-            yield return offerOp;
-            if (offerOp.IsError)
+            if (!TryGetStreamSetup(out var streamWidth, out var streamHeight, out var sourceNote))
             {
-                Debug.LogWarning($"[QuestBowlingStreamClient] CreateOffer failed: {offerOp.Error.message}");
-                CleanupPeerConnection();
+                EmitLocalStatus("waiting_camera", sourceNote);
                 _connecting = false;
                 yield break;
             }
 
-            var offer = offerOp.Desc;
-            var setLocalOp = _peerConnection.SetLocalDescription(ref offer);
-            yield return setLocalOp;
-            if (setLocalOp.IsError)
-            {
-                Debug.LogWarning($"[QuestBowlingStreamClient] SetLocalDescription failed: {setLocalOp.Error.message}");
-                CleanupPeerConnection();
-                _connecting = false;
-                yield break;
-            }
+            EmitLocalStatus("stream_source", sourceNote);
+            EnsureStreamTexture(streamWidth, streamHeight);
+            EmitLocalStatus("stream_texture_ready", $"{streamWidth}x{streamHeight}");
 
-            yield return WaitForIceGatheringComplete();
-
-            var answerRequest = new OfferRequest
+            var tcpClient = new TcpClient
             {
-                session_id = _sessionId,
-                type = _peerConnection.LocalDescription.type.ToString().ToLowerInvariant(),
-                sdp = _peerConnection.LocalDescription.sdp,
-                app_version = Application.version,
-                device_name = SystemInfo.deviceName,
+                NoDelay = true,
             };
 
-            var signalingUrl = BuildSignalingUrl();
-            var body = Encoding.UTF8.GetBytes(JsonUtility.ToJson(answerRequest));
-            var request = new UnityWebRequest(signalingUrl, UnityWebRequest.kHttpVerbPOST)
+            var connectTask = tcpClient.ConnectAsync(serverHost, serverPort);
+            var deadline = Time.realtimeSinceStartup + Mathf.Max(0.5f, connectTimeoutSeconds);
+            while (!connectTask.IsCompleted && Time.realtimeSinceStartup < deadline)
             {
-                uploadHandler = new UploadHandlerRaw(body),
-                downloadHandler = new DownloadHandlerBuffer(),
-            };
-            request.SetRequestHeader("Content-Type", "application/json");
-
-            if (verboseLogging)
-            {
-                Debug.Log($"[QuestBowlingStreamClient] Posting WebRTC offer to {signalingUrl}");
+                yield return null;
             }
 
-            yield return request.SendWebRequest();
-            if (request.result != UnityWebRequest.Result.Success)
+            if (!connectTask.IsCompleted)
             {
-                Debug.LogWarning($"[QuestBowlingStreamClient] Signaling failed: {request.error}");
-                request.Dispose();
-                CleanupPeerConnection();
+                tcpClient.Dispose();
+                EmitLocalStatus("control_connect_timeout", $"{connectTimeoutSeconds:0.0}s");
                 _connecting = false;
                 yield break;
             }
 
-            var answer = JsonUtility.FromJson<AnswerResponse>(request.downloadHandler.text);
-            request.Dispose();
-            if (answer == null || string.IsNullOrWhiteSpace(answer.sdp))
+            if (connectTask.IsFaulted)
             {
-                Debug.LogWarning("[QuestBowlingStreamClient] Signaling returned an empty WebRTC answer.");
-                CleanupPeerConnection();
+                tcpClient.Dispose();
+                var message = connectTask.Exception?.GetBaseException().Message ?? "unknown";
+                EmitLocalStatus("control_connect_failed", message);
                 _connecting = false;
                 yield break;
             }
 
-            var remoteDescription = new RTCSessionDescription
+            try
             {
-                type = ParseSdpType(answer.type),
-                sdp = answer.sdp,
-            };
-
-            var setRemoteOp = _peerConnection.SetRemoteDescription(ref remoteDescription);
-            yield return setRemoteOp;
-            if (setRemoteOp.IsError)
+                tcpClient.SendTimeout = (int)(Mathf.Max(0.5f, connectTimeoutSeconds) * 1000f);
+                tcpClient.ReceiveTimeout = (int)(Mathf.Max(0.5f, connectTimeoutSeconds) * 1000f);
+                _controlClient = tcpClient;
+                _controlStream = tcpClient.GetStream();
+                _frameClient = new UdpClient();
+                _frameClient.Connect(serverHost, serverPort);
+                _connectionCts = new CancellationTokenSource();
+                _controlConnected = true;
+                _helloSent = false;
+                _sessionConfigSent = false;
+                _laneCalibrationSent = false;
+                _controlReadTask = Task.Run(() => ControlReadLoop(_connectionCts.Token));
+            }
+            catch (Exception ex)
             {
-                Debug.LogWarning($"[QuestBowlingStreamClient] SetRemoteDescription failed: {setRemoteOp.Error.message}");
-                CleanupPeerConnection();
+                tcpClient.Dispose();
+                CleanupConnection();
+                EmitLocalStatus("transport_open_failed", ex.GetType().Name + ": " + ex.Message);
                 _connecting = false;
                 yield break;
             }
 
+            EmitLocalStatus("transport_ready", $"tcp+udp {serverHost}:{serverPort}");
+            TrySendHello();
+            TrySendSessionConfig();
+            TrySendLaneCalibration();
             _connecting = false;
         }
 
-        private void CreatePeerConnection()
+        private void ControlReadLoop(CancellationToken cancellationToken)
         {
-            RTCConfiguration configuration = default;
-            configuration.bundlePolicy = RTCBundlePolicy.BundlePolicyMaxBundle;
-            configuration.iceTransportPolicy = RTCIceTransportPolicy.All;
-
-            if (useGoogleStun && !string.IsNullOrWhiteSpace(stunServerUrl))
+            try
             {
-                configuration.iceServers = new[]
+                while (!cancellationToken.IsCancellationRequested && _controlStream != null)
                 {
-                    new RTCIceServer
+                    var packet = BowlingProtocol.ReadPacket(_controlStream);
+                    if (packet == null)
                     {
-                        urls = new[] { stunServerUrl },
-                    },
-                };
-            }
+                        break;
+                    }
 
-            _peerConnection = new RTCPeerConnection(ref configuration);
-            _peerConnection.OnConnectionStateChange = state =>
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log($"[QuestBowlingStreamClient] Peer state: {state}");
-                }
-
-                if (state is RTCPeerConnectionState.Failed or RTCPeerConnectionState.Disconnected or RTCPeerConnectionState.Closed)
-                {
-                    _helloSent = false;
-                    _sessionConfigSent = false;
-                    _laneCalibrationSent = false;
-                }
-            };
-            _peerConnection.OnIceConnectionChange = state =>
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log($"[QuestBowlingStreamClient] ICE state: {state}");
-                }
-            };
-            _peerConnection.OnIceGatheringStateChange = state =>
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log($"[QuestBowlingStreamClient] ICE gathering: {state}");
-                }
-            };
-            _peerConnection.OnDataChannel = BindControlChannel;
-
-            var dataChannelInit = new RTCDataChannelInit
-            {
-                ordered = true,
-                protocol = "bowling-control",
-            };
-            _controlChannel = _peerConnection.CreateDataChannel("bowling-control", dataChannelInit);
-            BindControlChannel(_controlChannel);
-
-            _videoTrack = new VideoStreamTrack(_streamTexture);
-            _videoSender = _peerConnection.AddTrack(_videoTrack);
-            _videoSender.SyncApplicationFramerate = true;
-            var parameters = _videoSender.GetParameters();
-            if (parameters.encodings != null && parameters.encodings.Length > 0)
-            {
-                parameters.encodings[0].maxFramerate = (uint)Mathf.Max(1, targetSendFps);
-                parameters.encodings[0].maxBitrate = (ulong)Mathf.Max(250_000, targetBitrateKbps * 1000);
-                var error = _videoSender.SetParameters(parameters);
-                if (error.errorType != RTCErrorType.None)
-                {
-                    Debug.LogWarning($"[QuestBowlingStreamClient] Failed to set RTP parameters: {error.message}");
+                    _inboundPackets.Enqueue(new QueuedInboundPacket
+                    {
+                        type = packet.Value.type,
+                        json = BowlingProtocol.DecodeUtf8Payload(packet.Value.payload),
+                    });
                 }
             }
-
-            _helloSent = false;
-            _sessionConfigSent = false;
-            _laneCalibrationSent = false;
+            catch (Exception ex)
+            {
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    QueueStatus("control_read_failed", ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+            finally
+            {
+                _controlConnected = false;
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    QueueStatus("control_disconnected");
+                }
+            }
         }
 
-        private void BindControlChannel(RTCDataChannel channel)
+        private void DrainQueuedStatuses()
         {
-            _controlChannel = channel;
-            _controlChannel.OnOpen = () =>
+            while (_queuedStatuses.TryDequeue(out var status))
             {
-                if (verboseLogging)
-                {
-                    Debug.Log("[QuestBowlingStreamClient] Control channel open.");
-                }
-
-                TrySendHello();
-                TrySendSessionConfig();
-                TrySendLaneCalibration();
-            };
-            _controlChannel.OnClose = () =>
-            {
-                if (verboseLogging)
-                {
-                    Debug.Log("[QuestBowlingStreamClient] Control channel closed.");
-                }
-            };
-            _controlChannel.OnError = error =>
-            {
-                Debug.LogWarning($"[QuestBowlingStreamClient] Control channel error: {error.message}");
-            };
-            _controlChannel.OnMessage = bytes =>
-            {
-                var json = Encoding.UTF8.GetString(bytes);
-                if (verboseLogging)
-                {
-                    Debug.Log($"[QuestBowlingStreamClient] Control message: {json}");
-                }
-                HandleIncomingJson(json);
-            };
+                EmitLocalStatus(status.stage, status.message);
+            }
         }
 
-        private void HandleIncomingJson(string json)
+        private void DrainInboundPackets()
+        {
+            while (_inboundPackets.TryDequeue(out var packet))
+            {
+                HandleIncomingPacket(packet.type, packet.json);
+            }
+        }
+
+        private void HandleIncomingPacket(BowlingPacketType type, string json)
+        {
+            switch (type)
+            {
+                case BowlingPacketType.TrackerStatus:
+                    HandleTrackerStatusJson(json);
+                    break;
+                case BowlingPacketType.ShotResult:
+                    HandleShotResultJson(json);
+                    break;
+                case BowlingPacketType.Pong:
+                    break;
+                case BowlingPacketType.Error:
+                    EmitLocalStatus("remote_error", json);
+                    break;
+                default:
+                    if (verboseLogging)
+                    {
+                        Debug.Log($"[QuestBowlingStreamClient] Ignored inbound packet {type}: {json}");
+                    }
+                    break;
+            }
+        }
+
+        private void HandleTrackerStatusJson(string json)
         {
             IncomingEnvelope envelope = null;
             try
             {
                 envelope = JsonUtility.FromJson<IncomingEnvelope>(json);
             }
-            catch (Exception ex)
+            catch
             {
-                Debug.LogWarning($"[QuestBowlingStreamClient] Failed to parse inbound JSON: {ex.Message}");
             }
 
-            switch (envelope?.kind)
+            if (envelope?.kind == "tracker_status")
             {
-                case "tracker_status":
-                    onTrackerStatus.Invoke(json);
-                    TrackerStatusReceived?.Invoke(json);
-                    break;
-                case "shot_result":
-                    onShotResultJson.Invoke(json);
-                    ShotResultReceived?.Invoke(json);
-                    break;
-                case "pong":
-                    break;
-                default:
-                    if (verboseLogging)
+                try
+                {
+                    var status = JsonUtility.FromJson<LocalTrackerStatusMessage>(json);
+                    var summary = status != null && !string.IsNullOrWhiteSpace(status.stage)
+                        ? status.stage
+                        : "tracker_status";
+                    if (!string.IsNullOrWhiteSpace(status?.message))
                     {
-                        Debug.Log($"[QuestBowlingStreamClient] Ignored inbound message: {json}");
+                        summary += $" | {status.message}";
                     }
-                    break;
+
+                    EmitLocalStatus("remote_tracker_status", summary);
+                }
+                catch
+                {
+                    EmitLocalStatus("remote_tracker_status", "parse_failed");
+                }
             }
+
+            onTrackerStatus.Invoke(json);
+            TrackerStatusReceived?.Invoke(json);
+        }
+
+        private void HandleShotResultJson(string json)
+        {
+            try
+            {
+                var result = JsonUtility.FromJson<ShotResultSummaryMessage>(json);
+                if (result == null)
+                {
+                    EmitLocalStatus("shot_result_received", "null");
+                }
+                else if (result.success)
+                {
+                    EmitLocalStatus(
+                        "shot_result_received",
+                        $"ok | tracked {result.tracked_frames} | {result.first_frame}->{result.last_frame}");
+                }
+                else
+                {
+                    EmitLocalStatus("shot_result_received", $"failed | {result.failure_reason}");
+                }
+            }
+            catch
+            {
+                EmitLocalStatus("shot_result_received", "parse_failed");
+            }
+
+            onShotResultJson.Invoke(json);
+            ShotResultReceived?.Invoke(json);
         }
 
         private void TrySendHello()
@@ -570,57 +604,96 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            SendJsonMessage(new HelloMessage
+            if (SendControlJsonPacket(
+                    BowlingPacketType.Hello,
+                    new HelloMessage
+                    {
+                        kind = "hello",
+                        session_id = _sessionId,
+                        device_name = SystemInfo.deviceName,
+                        app_version = Application.version,
+                    }))
             {
-                kind = "hello",
-                session_id = _sessionId,
-                device_name = SystemInfo.deviceName,
-                app_version = Application.version,
-            });
-            _helloSent = true;
+                _helloSent = true;
+                EmitLocalStatus("hello_sent");
+            }
         }
 
         private void TrySendSessionConfig()
         {
-            if (_sessionConfigSent || !CanSendControlMessages() || cameraAccess == null || !cameraAccess.IsPlaying)
+            if (_sessionConfigSent || !CanSendControlMessages())
             {
                 return;
             }
 
-            var intrinsics = cameraAccess.Intrinsics;
-            var resolution = cameraAccess.CurrentResolution;
-            if (resolution.x <= 0 || resolution.y <= 0)
+            if (!TryGetStreamSetup(out var streamWidth, out var streamHeight, out _))
             {
                 return;
             }
 
-            SendJsonMessage(new SessionConfigMessage
-            {
-                kind = "session_config",
-                session_id = _sessionId,
-                camera_eye = cameraAccess.CameraPosition == PassthroughCameraAccess.CameraPositionType.Left ? 0 : 1,
-                width = resolution.x,
-                height = resolution.y,
-                fx = intrinsics.FocalLength.x,
-                fy = intrinsics.FocalLength.y,
-                cx = intrinsics.PrincipalPoint.x,
-                cy = intrinsics.PrincipalPoint.y,
-                sensor_width = intrinsics.SensorResolution.x,
-                sensor_height = intrinsics.SensorResolution.y,
-                lens_position_x = intrinsics.LensOffset.position.x,
-                lens_position_y = intrinsics.LensOffset.position.y,
-                lens_position_z = intrinsics.LensOffset.position.z,
-                lens_rotation_x = intrinsics.LensOffset.rotation.x,
-                lens_rotation_y = intrinsics.LensOffset.rotation.y,
-                lens_rotation_z = intrinsics.LensOffset.rotation.z,
-                lens_rotation_w = intrinsics.LensOffset.rotation.w,
-                target_send_fps = targetSendFps,
-                transport = "webrtc",
-                video_codec = "vp8",
-                target_bitrate_kbps = targetBitrateKbps,
-            });
+            float fx = 0f;
+            float fy = 0f;
+            float cx = streamWidth * 0.5f;
+            float cy = streamHeight * 0.5f;
+            int sensorWidth = streamWidth;
+            int sensorHeight = streamHeight;
+            float lensPositionX = 0f;
+            float lensPositionY = 0f;
+            float lensPositionZ = 0f;
+            float lensRotationX = 0f;
+            float lensRotationY = 0f;
+            float lensRotationZ = 0f;
+            float lensRotationW = 1f;
 
-            _sessionConfigSent = true;
+            if (UsesPassthroughCamera() && cameraAccess != null && cameraAccess.IsPlaying)
+            {
+                var intrinsics = cameraAccess.Intrinsics;
+                fx = intrinsics.FocalLength.x;
+                fy = intrinsics.FocalLength.y;
+                cx = intrinsics.PrincipalPoint.x;
+                cy = intrinsics.PrincipalPoint.y;
+                sensorWidth = intrinsics.SensorResolution.x;
+                sensorHeight = intrinsics.SensorResolution.y;
+                lensPositionX = intrinsics.LensOffset.position.x;
+                lensPositionY = intrinsics.LensOffset.position.y;
+                lensPositionZ = intrinsics.LensOffset.position.z;
+                lensRotationX = intrinsics.LensOffset.rotation.x;
+                lensRotationY = intrinsics.LensOffset.rotation.y;
+                lensRotationZ = intrinsics.LensOffset.rotation.z;
+                lensRotationW = intrinsics.LensOffset.rotation.w;
+            }
+
+            if (SendControlJsonPacket(
+                    BowlingPacketType.SessionConfig,
+                    new SessionConfigMessage
+                    {
+                        kind = "session_config",
+                        session_id = _sessionId,
+                        camera_eye = cameraAccess != null && cameraAccess.CameraPosition == PassthroughCameraAccess.CameraPositionType.Left ? 0 : 1,
+                        width = streamWidth,
+                        height = streamHeight,
+                        fx = fx,
+                        fy = fy,
+                        cx = cx,
+                        cy = cy,
+                        sensor_width = sensorWidth,
+                        sensor_height = sensorHeight,
+                        lens_position_x = lensPositionX,
+                        lens_position_y = lensPositionY,
+                        lens_position_z = lensPositionZ,
+                        lens_rotation_x = lensRotationX,
+                        lens_rotation_y = lensRotationY,
+                        lens_rotation_z = lensRotationZ,
+                        lens_rotation_w = lensRotationW,
+                        target_send_fps = targetSendFps,
+                        transport = "udp",
+                        video_codec = "jpeg",
+                        target_bitrate_kbps = targetBitrateKbps,
+                    }))
+            {
+                _sessionConfigSent = true;
+                EmitLocalStatus("session_config_sent", $"{streamWidth}x{streamHeight}");
+            }
         }
 
         private void TrySendLaneCalibration()
@@ -630,61 +703,275 @@ namespace BallTracking.Runtime
                 return;
             }
 
-            SendJsonMessage(new LaneCalibrationMessage
+            if (SendControlJsonPacket(
+                    BowlingPacketType.LaneCalibration,
+                    new LaneCalibrationMessage
+                    {
+                        kind = "lane_calibration",
+                        session_id = _sessionId,
+                        timestamp_ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        is_valid = _laneCalibration.isValid,
+                        origin_x = _laneCalibration.origin.x,
+                        origin_y = _laneCalibration.origin.y,
+                        origin_z = _laneCalibration.origin.z,
+                        rotation_x = _laneCalibration.rotation.x,
+                        rotation_y = _laneCalibration.rotation.y,
+                        rotation_z = _laneCalibration.rotation.z,
+                        rotation_w = _laneCalibration.rotation.w,
+                        lane_width_m = _laneCalibration.laneWidthMeters,
+                        lane_length_m = _laneCalibration.laneLengthMeters,
+                    }))
             {
-                kind = "lane_calibration",
-                session_id = _sessionId,
-                timestamp_ms = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                is_valid = _laneCalibration.isValid,
-                origin_x = _laneCalibration.origin.x,
-                origin_y = _laneCalibration.origin.y,
-                origin_z = _laneCalibration.origin.z,
-                rotation_x = _laneCalibration.rotation.x,
-                rotation_y = _laneCalibration.rotation.y,
-                rotation_z = _laneCalibration.rotation.z,
-                rotation_w = _laneCalibration.rotation.w,
-                lane_width_m = _laneCalibration.laneWidthMeters,
-                lane_length_m = _laneCalibration.laneLengthMeters,
-            });
-
-            _laneCalibrationSent = true;
+                _laneCalibrationSent = true;
+                EmitLocalStatus("lane_calibration_sent");
+            }
         }
 
-        private void SendJsonMessage(object payload)
+        private bool SendControlJsonPacket(BowlingPacketType type, object payload)
         {
             if (!CanSendControlMessages())
             {
-                return;
+                return false;
             }
 
-            var json = JsonUtility.ToJson(payload);
-            _controlChannel.Send(Encoding.UTF8.GetBytes(json));
+            try
+            {
+                var json = JsonUtility.ToJson(payload);
+                var bytes = Encoding.UTF8.GetBytes(json);
+                lock (_controlSendGate)
+                {
+                    if (_controlStream == null)
+                    {
+                        return false;
+                    }
+
+                    BowlingProtocol.WritePacket(_controlStream, type, bytes);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _controlConnected = false;
+                QueueStatus("control_send_failed", ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
         }
 
         private bool CanSendControlMessages()
         {
-            return _controlChannel != null && _controlChannel.ReadyState == RTCDataChannelState.Open;
+            return _controlConnected && _controlStream != null;
         }
 
-        private IEnumerator WaitForIceGatheringComplete()
+        private bool TrySendCurrentFrame(out string note)
         {
-            var deadline = Time.realtimeSinceStartup + iceGatherTimeoutSeconds;
-            while (_peerConnection != null &&
-                   _peerConnection.IceGatheringState != RTCIceGatheringState.Complete &&
-                   Time.realtimeSinceStartup < deadline)
+            note = "unknown";
+            if (!CanSendControlMessages() || _frameClient == null)
             {
-                yield return null;
+                note = "transport_not_ready";
+                return false;
+            }
+
+            if (!TryRenderStreamFrame(out var sourceNote))
+            {
+                note = sourceNote;
+                return false;
+            }
+
+            if (!TryEncodeCurrentFrame(out var encodedJpeg, out var encodeNote))
+            {
+                note = encodeNote;
+                return false;
+            }
+
+            var frameId = _nextFrameId++;
+            var framePayload = BowlingProtocol.EncodeFramePacket(
+                _sessionId,
+                _shotId,
+                frameId,
+                DateTime.UtcNow,
+                new Pose(Vector3.zero, Quaternion.identity),
+                encodedJpeg);
+
+            if (!TrySendUdpFrame(frameId, framePayload, out var udpNote))
+            {
+                note = udpNote;
+                return false;
+            }
+
+            note = $"{sourceNote} | jpeg {encodedJpeg.Length} | {udpNote}";
+            return true;
+        }
+
+        private bool TryEncodeCurrentFrame(out byte[] encodedJpeg, out string note)
+        {
+            encodedJpeg = null;
+            note = "readback_unavailable";
+
+            if (_streamTexture == null)
+            {
+                note = "stream_texture_missing";
+                return false;
+            }
+
+            EnsureReadbackTexture(_streamTexture.width, _streamTexture.height);
+            var previousActive = RenderTexture.active;
+            try
+            {
+                RenderTexture.active = _streamTexture;
+                _readbackTexture.ReadPixels(new Rect(0, 0, _streamTexture.width, _streamTexture.height), 0, 0, false);
+                _readbackTexture.Apply(false, false);
+                encodedJpeg = ImageConversion.EncodeToJPG(_readbackTexture, Mathf.Clamp(jpegQuality, 1, 100));
+                if (encodedJpeg == null || encodedJpeg.Length == 0)
+                {
+                    note = "jpeg_encode_failed";
+                    return false;
+                }
+
+                note = $"jpeg {encodedJpeg.Length}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                note = "jpeg_encode_exception";
+                QueueStatus("frame_encode_failed", ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                RenderTexture.active = previousActive;
             }
         }
 
-        private string BuildSignalingUrl()
+        private bool TrySendUdpFrame(ulong frameId, byte[] payload, out string note)
         {
-            var trimmedPath = string.IsNullOrWhiteSpace(signalingPath) ? "/api/webrtc/session" : signalingPath.Trim();
-            if (!trimmedPath.StartsWith("/"))
+            note = "udp_send_failed";
+            if (_frameClient == null)
             {
-                trimmedPath = "/" + trimmedPath;
+                note = "udp_client_missing";
+                return false;
             }
-            return $"http://{serverHost}:{serverPort}{trimmedPath}";
+
+            payload ??= Array.Empty<byte>();
+            var datagramLimit = Mathf.Max(UdpFrameHeaderSize + 256, maxDatagramPayloadBytes);
+            var chunkPayloadSize = datagramLimit - UdpFrameHeaderSize;
+            var chunkCount = Math.Max(1, (payload.Length + chunkPayloadSize - 1) / chunkPayloadSize);
+            if (chunkCount > ushort.MaxValue)
+            {
+                note = $"frame_too_large {payload.Length}";
+                return false;
+            }
+
+            try
+            {
+                for (var chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+                {
+                    var payloadOffset = chunkIndex * chunkPayloadSize;
+                    var payloadLength = Math.Min(chunkPayloadSize, payload.Length - payloadOffset);
+                    var datagram = new byte[UdpFrameHeaderSize + payloadLength];
+                    WriteUInt32(datagram, 0, BowlingProtocol.Magic);
+                    WriteUInt16(datagram, 4, BowlingProtocol.Version);
+                    WriteUInt16(datagram, 6, (ushort)BowlingPacketType.FramePacket);
+                    WriteUInt64(datagram, 8, frameId);
+                    WriteUInt16(datagram, 16, (ushort)chunkIndex);
+                    WriteUInt16(datagram, 18, (ushort)chunkCount);
+                    WriteUInt16(datagram, 20, (ushort)payloadLength);
+                    WriteUInt32(datagram, 22, (uint)payload.Length);
+                    Buffer.BlockCopy(payload, payloadOffset, datagram, UdpFrameHeaderSize, payloadLength);
+                    _frameClient.Send(datagram, datagram.Length);
+                }
+
+                note = $"{payload.Length} bytes | {chunkCount} udp";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _controlConnected = false;
+                QueueStatus("udp_send_failed", ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool UsesPassthroughCamera()
+        {
+            return streamSource == StreamSourceMode.PassthroughCamera;
+        }
+
+        private bool TryGetStreamSetup(out int width, out int height, out string note)
+        {
+            if (UsesPassthroughCamera())
+            {
+                width = 0;
+                height = 0;
+                if (cameraAccess == null)
+                {
+                    note = "PassthroughCameraAccess is not assigned.";
+                    return false;
+                }
+
+                if (!cameraAccess.IsPlaying)
+                {
+                    note = "Passthrough camera is not playing yet.";
+                    return false;
+                }
+
+                var sourceTexture = cameraAccess.GetTexture();
+                if (sourceTexture == null)
+                {
+                    note = "Passthrough camera texture is still null.";
+                    return false;
+                }
+
+                width = sourceTexture.width;
+                height = sourceTexture.height;
+                note = "passthrough";
+                return true;
+            }
+
+            width = Mathf.Max(64, syntheticResolution.x);
+            height = Mathf.Max(64, syntheticResolution.y);
+            note = "synthetic";
+            return true;
+        }
+
+        private bool TryRenderStreamFrame(out string note)
+        {
+            note = "unknown";
+            if (!TryGetStreamSetup(out var width, out var height, out var sourceNote))
+            {
+                note = sourceNote;
+                return false;
+            }
+
+            EnsureStreamTexture(width, height);
+
+            if (UsesPassthroughCamera())
+            {
+                if (cameraAccess == null || !cameraAccess.IsUpdatedThisFrame)
+                {
+                    note = "passthrough_not_updated";
+                    return false;
+                }
+
+                var sourceTexture = cameraAccess.GetTexture();
+                if (sourceTexture == null)
+                {
+                    note = "passthrough_texture_null";
+                    return false;
+                }
+
+                Graphics.Blit(sourceTexture, _streamTexture);
+                note = sourceNote;
+                return true;
+            }
+
+            EnsureSyntheticSenderCamera(width, height);
+            var hue = Mathf.Repeat(_localStreamFrameCount / 90f, 1f);
+            _syntheticSenderCamera.backgroundColor = Color.HSVToRGB(hue, 0.85f, 1f);
+            _syntheticSenderCamera.targetTexture = _streamTexture;
+            _syntheticSenderCamera.Render();
+            note = "synthetic_camera";
+            return true;
         }
 
         private void EnsureStreamTexture(int width, int height)
@@ -697,9 +984,78 @@ namespace BallTracking.Runtime
             DisposeStreamTexture();
             _streamTexture = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32)
             {
-                name = "QuestBowlingWebRtcStream",
+                name = "QuestBowlingUdpStream",
+                useMipMap = false,
+                autoGenerateMips = false,
+                antiAliasing = 1,
             };
             _streamTexture.Create();
+            if (_syntheticSenderCamera != null)
+            {
+                _syntheticSenderCamera.targetTexture = _streamTexture;
+            }
+        }
+
+        private void EnsureReadbackTexture(int width, int height)
+        {
+            if (_readbackTexture != null && _readbackTexture.width == width && _readbackTexture.height == height)
+            {
+                return;
+            }
+
+            DisposeReadbackTexture();
+            _readbackTexture = new Texture2D(width, height, TextureFormat.RGB24, false);
+        }
+
+        private void EnsureSyntheticSenderCamera(int width, int height)
+        {
+            if (_syntheticSenderCamera != null)
+            {
+                _syntheticSenderCamera.aspect = width > 0 && height > 0 ? (float)width / height : 1f;
+                return;
+            }
+
+            var go = new GameObject("QuestBowlingSyntheticSenderCamera");
+            go.hideFlags = HideFlags.HideAndDontSave;
+            go.transform.SetParent(transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+
+            _syntheticSenderCamera = go.AddComponent<Camera>();
+            _syntheticSenderCamera.enabled = false;
+            _syntheticSenderCamera.clearFlags = CameraClearFlags.SolidColor;
+            _syntheticSenderCamera.backgroundColor = Color.black;
+            _syntheticSenderCamera.cullingMask = 0;
+            _syntheticSenderCamera.orthographic = true;
+            _syntheticSenderCamera.nearClipPlane = 0.01f;
+            _syntheticSenderCamera.farClipPlane = 10f;
+            _syntheticSenderCamera.allowHDR = false;
+            _syntheticSenderCamera.allowMSAA = false;
+            _syntheticSenderCamera.aspect = width > 0 && height > 0 ? (float)width / height : 1f;
+            _syntheticSenderCamera.targetTexture = _streamTexture;
+        }
+
+        private void DisposeSyntheticSenderCamera()
+        {
+            if (_syntheticSenderCamera == null)
+            {
+                return;
+            }
+
+            _syntheticSenderCamera.targetTexture = null;
+            Destroy(_syntheticSenderCamera.gameObject);
+            _syntheticSenderCamera = null;
+        }
+
+        private void DisposeReadbackTexture()
+        {
+            if (_readbackTexture == null)
+            {
+                return;
+            }
+
+            Destroy(_readbackTexture);
+            _readbackTexture = null;
         }
 
         private void DisposeStreamTexture()
@@ -718,41 +1074,152 @@ namespace BallTracking.Runtime
             _streamTexture = null;
         }
 
-        private void CleanupPeerConnection()
+        private void CleanupConnection()
         {
+            _controlConnected = false;
+            _connectionCts?.Cancel();
+            _connectionCts?.Dispose();
+            _connectionCts = null;
+
             try
             {
-                _controlChannel?.Close();
+                _controlStream?.Dispose();
             }
             catch
             {
             }
 
-            _controlChannel?.Dispose();
-            _controlChannel = null;
+            try
+            {
+                _controlClient?.Close();
+            }
+            catch
+            {
+            }
 
-            _videoTrack?.Dispose();
-            _videoTrack = null;
-            _videoSender = null;
+            try
+            {
+                _frameClient?.Close();
+            }
+            catch
+            {
+            }
 
-            _peerConnection?.Close();
-            _peerConnection?.Dispose();
-            _peerConnection = null;
-
+            _controlStream = null;
+            _controlClient = null;
+            _frameClient = null;
+            _controlReadTask = null;
             _helloSent = false;
             _sessionConfigSent = false;
             _laneCalibrationSent = false;
         }
 
-        private static RTCSdpType ParseSdpType(string value)
+        private static bool AreCameraPermissionsGranted()
         {
-            return value?.ToLowerInvariant() switch
+            return OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.Scene) &&
+                   OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess);
+        }
+
+        private void RequestCameraPermissionsIfNeeded()
+        {
+            if (_permissionsRequested || AreCameraPermissionsGranted())
             {
-                "answer" => RTCSdpType.Answer,
-                "pranswer" => RTCSdpType.Pranswer,
-                "rollback" => RTCSdpType.Rollback,
-                _ => RTCSdpType.Offer,
+                return;
+            }
+
+            _permissionsRequested = true;
+            OVRPermissionsRequester.Request(new[]
+            {
+                OVRPermissionsRequester.Permission.Scene,
+                OVRPermissionsRequester.Permission.PassthroughCameraAccess,
+            });
+        }
+
+        private void QueueStatus(string stage, string message = null)
+        {
+            _queuedStatuses.Enqueue(new QueuedStatus
+            {
+                stage = stage,
+                message = message,
+            });
+        }
+
+        private void EmitLocalStatus(string stage, string message = null)
+        {
+            var payload = new LocalTrackerStatusMessage
+            {
+                kind = "tracker_status",
+                stage = stage,
+                shot_id = _shotId,
+                message = message,
             };
+
+            _latestStatusLine = string.IsNullOrWhiteSpace(message) ? stage : $"{stage} | {message}";
+            var json = JsonUtility.ToJson(payload);
+            onTrackerStatus.Invoke(json);
+            TrackerStatusReceived?.Invoke(json);
+            Debug.Log($"[QuestBowlingStreamClient] status={stage} message={message}");
+            AppendStatusLog(stage, message);
+        }
+
+        private void AppendStatusLog(string stage, string message)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_statusLogPath))
+                {
+                    _statusLogPath = Path.Combine(Application.persistentDataPath, "quest_bowling_status.log");
+                }
+
+                var line = $"{DateTimeOffset.UtcNow:O} | {stage}";
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    line += $" | {message}";
+                }
+
+                File.AppendAllText(_statusLogPath, line + Environment.NewLine);
+            }
+            catch
+            {
+            }
+        }
+
+        private static void WriteUInt16(byte[] buffer, int offset, ushort value)
+        {
+            buffer[offset + 0] = (byte)(value & 0xFF);
+            buffer[offset + 1] = (byte)((value >> 8) & 0xFF);
+        }
+
+        private static void WriteUInt32(byte[] buffer, int offset, uint value)
+        {
+            buffer[offset + 0] = (byte)(value & 0xFF);
+            buffer[offset + 1] = (byte)((value >> 8) & 0xFF);
+            buffer[offset + 2] = (byte)((value >> 16) & 0xFF);
+            buffer[offset + 3] = (byte)((value >> 24) & 0xFF);
+        }
+
+        private static void WriteUInt64(byte[] buffer, int offset, ulong value)
+        {
+            buffer[offset + 0] = (byte)(value & 0xFF);
+            buffer[offset + 1] = (byte)((value >> 8) & 0xFF);
+            buffer[offset + 2] = (byte)((value >> 16) & 0xFF);
+            buffer[offset + 3] = (byte)((value >> 24) & 0xFF);
+            buffer[offset + 4] = (byte)((value >> 32) & 0xFF);
+            buffer[offset + 5] = (byte)((value >> 40) & 0xFF);
+            buffer[offset + 6] = (byte)((value >> 48) & 0xFF);
+            buffer[offset + 7] = (byte)((value >> 56) & 0xFF);
+        }
+
+        private sealed class QueuedInboundPacket
+        {
+            public BowlingPacketType type;
+            public string json;
+        }
+
+        private sealed class QueuedStatus
+        {
+            public string stage;
+            public string message;
         }
     }
 }

@@ -25,6 +25,8 @@ namespace BallTracking.Editor
         [MenuItem("Tools/Ball Tracking/Create Or Update Home Test Rig")]
         public static void CreateOrUpdateHomeTestRig()
         {
+            LegacyTransportCleanup.StripLegacySceneAndBuildArtifacts();
+
             var scene = SceneManager.GetActiveScene();
             if (!scene.IsValid() || !scene.isLoaded)
             {
@@ -161,7 +163,12 @@ namespace BallTracking.Editor
         {
             var serializedObject = new SerializedObject(streamClient);
             serializedObject.FindProperty("cameraAccess").objectReferenceValue = cameraAccess;
+            serializedObject.FindProperty("connectionMode").enumValueIndex = (int)QuestBowlingStreamClient.ConnectionMode.RemoteLaptop;
             serializedObject.FindProperty("serverPort").intValue = 5799;
+            serializedObject.FindProperty("targetSendFps").intValue = 15;
+            serializedObject.FindProperty("jpegQuality").intValue = 80;
+            serializedObject.FindProperty("maxDatagramPayloadBytes").intValue = 1200;
+            serializedObject.FindProperty("autoStreamWhenConnected").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(streamClient);
         }

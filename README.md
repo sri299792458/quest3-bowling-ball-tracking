@@ -13,18 +13,18 @@ The current implemented tracking path is:
 
 - `classical seed + live SAM2`
 
-The seed is found on the laptop during capture. As soon as the seed is confirmed, live `SAM2` starts tracking. Quest receives compact tracking results back for replay rendering.
+The current active transport direction is:
 
-The current transport direction is:
+- `TCP control + UDP JPEG frame datagrams`
 
-- `WebRTC video + WebRTC data channel + HTTP signaling`
+Quest sends camera frames to a nearby laptop over the local network. The laptop runs the heavier analysis and sends compact tracker status and shot results back to Quest for replay.
 
 ## Repo Layout
 
 - [`Assets/BallTracking`](Assets/BallTracking)
   - Unity runtime and editor code for the bowling project
 - [`laptop_pipeline`](laptop_pipeline)
-  - Quest receiver, online seed logic, and `SAM2` bridge
+  - laptop receiver, online seed logic, and `SAM2` bridge
 - [`third_party/sam2`](third_party/sam2)
   - vendored `SAM2` source and configs
 - [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
@@ -59,7 +59,8 @@ cd Quest3BowlingBallTracking
 2. Let Unity finish package import.
 3. Switch the active platform to `Android`.
 4. Run `Tools > Ball Tracking > Create Or Update Project Assets`.
-5. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
+5. Run `Tools > Ball Tracking > Clean Up Legacy Transport Artifacts` if this checkout still has old transport experiment assets from an earlier session.
+6. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
 
 Notes:
 
@@ -98,21 +99,14 @@ Then start the receiver:
 5. In `QuestBowlingStreamClient`, set:
    - `Server Host` = your laptop IPv4 address on the same local network
    - `Server Port` = `5799`
+   - `Stream Source`
+     - `PassthroughCamera` to test the real Quest camera path
+     - `SyntheticPattern` to isolate transport from camera capture
 6. Build and run on Quest.
 7. Use the current debug controls:
    - `X`: start shot
    - `Y`: end shot
-   - `Menu/Start`: resend lane calibration
-   - `Left thumbstick click`: tracker reset
-
-The home test rig tool also disables the inherited sample objects:
-
-- `DetectionUiMenuPrefab`
-- `DetectionManagerPrefab`
-- `SentisInferenceManagerPrefab`
-
-and moves `Assets/BallTracking/Scenes/BowlingBallTracking.unity` to build index `0`,
-so the old YOLO / Sentis start menu should no longer appear in the home-test build.
+   - `Left thumbstick click`: resend lane calibration
 
 The laptop should create a run folder under:
 
@@ -120,26 +114,36 @@ The laptop should create a run folder under:
 
 Notes:
 
-- The Quest app now negotiates a WebRTC connection to the laptop receiver.
-- `Server Host` is currently only used for HTTP signaling. Automatic discovery is still a next step.
+- `Server Host` and `Server Port` are now used directly by both the TCP control connection and the UDP frame path.
+- Automatic discovery is still a next step.
 
 ## Home Test Without a Bowling Alley
 
-You can still validate most of the system at home:
+You can validate most of the system at home:
 
-1. Run the normal laptop server to test real WebRTC transport and frame recording.
+1. Run the normal laptop server to test the real UDP/TCP transport and frame recording.
 2. Run `.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd` to test full round-trip result delivery without depending on a successful seed or track.
-3. Use the auto-created `QuestBowlingHomeTestRig` to see tracker status and a normalized debug path in-headset.
+3. Run `.\laptop_pipeline\start_quest_bowling_server_diagnostic.cmd` to test raw frame transport only:
+   - Quest sends UDP JPEG frames
+   - laptop records the raw frames
+   - Quest receives frame-count status and a diagnostic `shot_result`
 
 Synthetic mode is only for transport and UX testing. It does not validate the real tracking pipeline.
 
+Diagnostic mode is the cleanest way to answer:
+
+- do frames leave Quest?
+- do frames arrive on the laptop?
+- are those frames written to `laptop_pipeline/runs/.../raw/frames`?
+
 ## Current Limitations
 
+- The current Quest sender does an explicit GPU readback plus JPEG encode on device. That is acceptable for bring-up, but it is not yet the final optimized transport path.
 - The polished MR replay renderer is not finished yet.
 - The on-device `YOLOv9t` sample remains only a Quest-side baseline, not the main bowling tracker.
 - The current laptop path is tuned for a local NVIDIA GPU and the `SAM2` tiny checkpoint.
 - The classical seed stage is still heuristic and will need more validation on real Quest captures.
-- Automatic server discovery is not implemented yet, so the laptop signaling host still has to be set in the inspector.
+- Automatic server discovery is not implemented yet.
 
 ## Self-Sufficiency
 

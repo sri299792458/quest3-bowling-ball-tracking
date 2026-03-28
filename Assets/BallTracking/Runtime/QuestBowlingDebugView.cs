@@ -73,6 +73,7 @@ namespace BallTracking.Runtime
         private TextMesh _textMesh;
         private LineRenderer _lineRenderer;
         private Camera _mainCamera;
+        private string _lastMirroredClientStatus;
 
         public void ConfigureForRuntime(QuestBowlingStreamClient client, Transform runtimeAnchor)
         {
@@ -99,6 +100,7 @@ namespace BallTracking.Runtime
 
         private void Awake()
         {
+            Debug.Log("[QuestBowlingDebugView] Awake");
             if (anchor == null)
             {
                 anchor = transform;
@@ -110,6 +112,7 @@ namespace BallTracking.Runtime
 
         private void OnEnable()
         {
+            Debug.Log("[QuestBowlingDebugView] OnEnable");
             if (streamClient == null)
             {
                 streamClient = FindFirstObjectByType<QuestBowlingStreamClient>();
@@ -138,6 +141,7 @@ namespace BallTracking.Runtime
                 return;
             }
 
+            MirrorClientStatusIfNeeded();
             _root.position = anchor.TransformPoint(localOffset);
             if (!faceMainCamera)
             {
@@ -178,7 +182,8 @@ namespace BallTracking.Runtime
 
             var builder = new StringBuilder();
             builder.Append(payload.stage);
-            if (!string.IsNullOrEmpty(payload.shot_id))
+            if (!string.IsNullOrEmpty(payload.shot_id) &&
+                !string.Equals(payload.shot_id, "default-shot", StringComparison.OrdinalIgnoreCase))
             {
                 builder.Append(" | ").Append(payload.shot_id);
             }
@@ -321,7 +326,7 @@ namespace BallTracking.Runtime
             if (streamClient != null)
             {
                 PushStatus($"Signal {streamClient.ServerHost}:{streamClient.ServerPort}");
-                PushStatus(streamClient.IsConnected ? "WebRTC connected" : "WebRTC connecting...");
+                PushStatus(streamClient.LatestStatusLine);
             }
             else
             {
@@ -363,6 +368,23 @@ namespace BallTracking.Runtime
             _lineRenderer.widthMultiplier = lineWidth;
             _lineRenderer.material = CreateLineMaterial();
             _lineRenderer.positionCount = 0;
+        }
+
+        private void MirrorClientStatusIfNeeded()
+        {
+            if (streamClient == null)
+            {
+                return;
+            }
+
+            var latest = streamClient.LatestStatusLine;
+            if (string.IsNullOrWhiteSpace(latest) || string.Equals(latest, _lastMirroredClientStatus, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _lastMirroredClientStatus = latest;
+            PushStatus(latest);
         }
 
         private static Material CreateLineMaterial()

@@ -53,3 +53,96 @@
 - Added `QUEST_LAPTOP_PIPELINE_SPEC.md` to document the current runtime architecture: Quest streams frames, the laptop seeds during capture, live SAM2 starts once the seed is confirmed, and Quest receives compact replay data back.
 - Vendored the `SAM2` source into `third_party/sam2`, copied the classical seed core into `laptop_pipeline`, and added `laptop_pipeline/setup_laptop_env.ps1` so the repo no longer depends on a separate `sam2_bowling_eval` workspace.
 - Rewrote the top-level README and laptop README around a clone-and-run path: open the Unity project, run the laptop setup script, start the receiver, then test the Quest scene against the local server.
+
+## 2026-03-28
+
+- Replaced the first Quest-to-laptop prototype transport with `WebRTC video + data channel + HTTP signaling` and updated the runtime spec to match that direction.
+- Fixed multiple non-network blockers before the transport itself could be judged honestly:
+  - Android cleartext HTTP had to be enabled for local `http://<laptop-ip>:5799` signaling.
+  - Quest passthrough camera permission (`horizonos.permission.HEADSET_CAMERA`) had to be requested at runtime.
+  - The bowling scene needed to stay the actual startup path instead of falling back to the inherited sample UX.
+- Added device-side status breadcrumbs to the Quest client so the headset can report concrete stages such as `waiting_camera`, `checking_signal`, `signal_ok`, `creating_offer`, and later WebRTC state changes.
+- Added persistent Quest-side status logs under app storage because headset HUD text and logcat alone were too noisy for reliable debugging.
+- Proved that the Quest runtime path is alive in the built APK: `BowlingBallRuntimeBootstrap` registers, the bowling rig configures, and `QuestBowlingStreamClient` reaches its connection loop.
+- Narrowed the network diagnosis carefully instead of guessing:
+  - campus/public Wi-Fi was not the first blocker;
+  - the real first blockers were app-side config and permission issues;
+  - later testing on the phone hotspot showed that Quest could reach the laptop signaling endpoint successfully.
+- Replaced the Quest signaling preflight and offer POST from `UnityWebRequest` to a direct `TcpClient` HTTP path after the app repeatedly stalled at `checking_signal` despite the laptop server being reachable from the Quest shell.
+- Confirmed that the hotspot path now reaches the laptop cleanly: Quest advanced from `checking_signal` to `signal_ok`, successfully posted the WebRTC offer, received an answer, and opened the WebRTC data channel.
+- The next concrete Quest-side blocker was not signaling but texture format compatibility in Unity WebRTC:
+  - `VideoStreamTrack` rejected the initial render texture format with `ArgumentException: This graphics format R8G8B8A8_SRGB is not supported for streaming, please use supportedFormat: B8G8R8A8_SRGB`.
+  - Fixed the stream texture creation to use `WebRTC.GetSupportedGraphicsFormat(SystemInfo.graphicsDeviceType)` instead of a hard-coded `RenderTextureFormat.ARGB32`.
+- Current transport milestone: on Quest hotspot networking, the app now reaches `peer_state=Connected`, `ice_state=Connected`, and `data_channel_open`, which means the base Quest <-> laptop WebRTC control path is functioning.
+- The next ambiguity was the media plane: Quest control messages and even synthetic `shot_result` payloads were working, but the laptop `raw/frames` folders were still empty in the normal bowling flow.
+- Decided to stop patching inside the full bowling pipeline and add a clean transport diagnostic harness instead.
+- The new diagnostic plan is intentionally narrow:
+  - Quest can stream either `PassthroughCamera` or a `SyntheticPattern`.
+  - Laptop can run a `diagnostic` mode that records raw received frames only and returns a frame-count summary.
+  - This creates a clean matrix:
+    - synthetic source + diagnostic server = pure WebRTC media check
+    - passthrough source + diagnostic server = real camera-to-WebRTC check
+    - passthrough source + live server = full bowling pipeline
+- The diagnostic matrix gave the first clean media conclusion:
+  - `SyntheticPattern` also produced `no_video_frames_received`.
+  - Therefore the current failure was not in passthrough capture; it was in the Quest WebRTC sender path itself.
+- Added Quest-side outbound RTP stats and finally got the decisive evidence from logcat:
+  - Quest was rendering local stream frames continuously (`local_stream_frames` kept increasing),
+  - but `sender_video_stats` stayed at `encoded 0 | sent 0 | bytes 0`.
+  - That means the sender was not encoding any video at all, even though signaling and the data channel were fully connected.
+- The strongest native clue in logcat was `HardwareVideoEncoderFactory: No shared EglBase.Context. Encoders will not use texture mode.`
+- The next sender-side fix was based on Unity WebRTC's own sample patterns rather than further ad hoc patching:
+  - use `WebRTC.GetSupportedRenderTextureFormat(SystemInfo.graphicsDeviceType)` for the stream `RenderTexture`,
+  - create the video track with the named `VideoStreamTrack("bowling-video", renderTexture)` constructor,
+  - attach it through a `MediaStream`,
+  - and set the video transceiver codec preference to `H264` so Android can stay on the MediaCodec hardware path.
+- Tried an in-app `LocalLoopback` mode to remove the laptop from the equation entirely, but on Quest this caused an immediate native crash inside `libwebrtc` / `Il2CppExceptionWrapper` during startup.
+- That loopback path is now treated as an unsafe Android diagnostic for this project:
+  - the scene default was switched back to `RemoteLaptop`,
+  - and the client now guards against `LocalLoopback` on Quest builds by falling back to remote mode with a `loopback_unsupported` status instead of hard-crashing the app.
+- Added a stricter reset point after that: a dedicated `WebRtcSmokeTest` path that is intentionally outside the bowling flow.
+  - Quest side: `WebRtcSmokeTestClient` uses a hidden synthetic Unity camera and the package-style `CaptureStreamTrack(...)` path.
+  - Laptop side: `quest_bowling_server.py --analysis-mode smoke` records the first fixed batch of incoming frames automatically and returns a simple success/failure result.
+  - The purpose is to answer one bounded question only: can this Unity WebRTC setup on Quest publish any video frames in this repo.
+- The smoke test now has a decisive result:
+  - Quest reaches `signal_ok`, `peer_state=Connected`, and `data_channel_open`,
+  - but `sender_video_stats` still remains `encoded 0 | sent 0 | bytes 0`,
+  - and the laptop smoke run finalizes with `failure_reason = no_video_frames_received`.
+- That means the current blocker is no longer plausibly inside the bowling pipeline. Even the stripped-down synthetic-camera repro fails to publish video RTP from Quest in this project/setup.
+- Added a stronger external control after that result:
+  - pulled the official `Unity Render Streaming` package repo locally,
+  - compared its sender path against the smoke sender,
+  - and added a repo-contained `Render Streaming Official Control` harness.
+- The new control path includes:
+  - a package reference to `com.unity.renderstreaming`,
+  - an editor menu item to create `RenderStreamingOfficialControl.unity`,
+  - a runtime bootstrap that points the official signaling manager at the laptop web app,
+  - a portable local Node.js setup script,
+  - and a launcher for Unity's official Render Streaming web app on port `8080`.
+- This control matters because it removes the custom bowling laptop server from the test entirely.
+  - If Quest video appears in the browser through the official Render Streaming path, the custom laptop stack is the likely culprit.
+  - If it still fails, the issue is much more likely to be Unity 6000 + Quest + Unity WebRTC / Render Streaming on this machine rather than the bowling code.
+- Stopped treating WebRTC as the active path after that investigation and switched the repo back to a simpler local transport design:
+  - reliable TCP control packets for session metadata, calibration, shot markers, status, and results
+  - UDP datagrams for JPEG-compressed frame payloads
+- Reused the existing app-level bowling packet format instead of inventing a whole new session protocol:
+  - `BowlingProtocol` still frames control packets
+  - frame payloads still carry the same `session_id`, `shot_id`, `frame_id`, timestamp, pose placeholder, and JPEG bytes
+  - only the outer transport changed
+- Replaced the main Quest runtime transport in `QuestBowlingStreamClient`:
+  - removed the active dependency on peer connections, SDP signaling, and data channels
+  - added one TCP control connection plus one UDP sender
+  - added explicit Quest-side JPEG readback/encode and UDP fragmentation
+- Replaced the laptop receiver implementation with a TCP + UDP server:
+  - TCP control packets now drive session registration and shot lifecycle
+  - UDP fragments are reassembled into full frame payloads before they enter the existing `SAM2` bridge
+  - synthetic, diagnostic, and smoke receiver modes were kept on the Python side so the same local validation patterns still exist
+- Verified the new code path locally before trying Quest again:
+  - `py -3 -m py_compile` passed for the new laptop transport files
+  - `dotnet build Assembly-CSharp.csproj -nologo` succeeded
+  - the Python receiver imported cleanly and stayed alive when started briefly on localhost
+- Cleaned the Unity project back down to the active transport path:
+  - removed the legacy WebRTC / Render Streaming package references from `Packages/manifest.json`
+  - removed the old smoke-test / official-control scenes from Build Settings
+  - deleted the old Unity-side WebRTC / Render Streaming editor/runtime artifacts and imported sample assets
+  - added `Tools > Ball Tracking > Clean Up Legacy Transport Artifacts` so the project can be reset to the active UDP/TCP path again inside Unity

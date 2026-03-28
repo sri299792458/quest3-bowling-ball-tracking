@@ -1,6 +1,6 @@
 # Quest Laptop Pipeline Spec
 
-Last updated: 2026-03-27
+Last updated: 2026-03-28
 
 ## Goal
 
@@ -11,7 +11,7 @@ Build the lowest-latency practical local pipeline for:
 - laptop-side SAM2 tracking
 - Quest-side MR replay
 
-The main requirement is not just "it works." The transport has to look like the real system we would want in a bowling alley:
+The transport should match the real product shape:
 
 - untethered Quest
 - nearby laptop
@@ -20,42 +20,41 @@ The main requirement is not just "it works." The transport has to look like the 
 
 ## Transport Decision
 
-We are moving the v1 transport from:
+We are moving the active v1 transport to:
 
-- custom TCP + JPEG + manual packet framing
+- TCP control channel
+- UDP frame datagrams
+- JPEG-compressed frames on Quest
 
-to:
+This replaces the current WebRTC-first experiment as the primary path for this repo.
 
-- WebRTC video upstream
-- WebRTC data channel for control and results
-- HTTP signaling between Quest and laptop
+## Why This Move
 
-## Why WebRTC
+The WebRTC experiments proved something useful, but not the thing we needed:
 
-The old TCP/JPEG path was useful as a bring-up baseline, but it had three bad properties:
+- Quest could reach the laptop
+- control/signaling could come up
+- video still did not publish reliably from the Unity 6 + Quest sender path in this setup
 
-- Quest did explicit GPU readback and JPEG encode every frame
-- the network path was not media-optimized
-- the design pushed us toward a manual-IP, custom-framing local minimum
+For our actual architecture, Quest to nearby laptop on the same local network, the simpler transport is the better bet:
 
-WebRTC is a better fit because it gives us:
-
-- media-oriented transport
-- built-in congestion control and jitter handling
-- a clean split between video and control data
-- a realistic foundation for low-latency local wireless streaming
+- fewer moving parts
+- easier packet-level debugging
+- no browser/media-stack dependency
+- no SDP / ICE / signaling machinery in the hot path
 
 ## Current Practical Design
 
 ### Upstream from Quest
 
 - one passthrough camera for v1: left eye only
-- Quest copies the latest camera texture into a WebRTC video source texture
-- Quest sends that texture as a WebRTC video track
+- Quest copies the latest camera frame into a local `RenderTexture`
+- Quest does GPU readback plus JPEG encode
+- Quest fragments each encoded frame into UDP datagrams and sends them to the laptop
 
 ### Control plane
 
-Quest opens a reliable ordered WebRTC data channel and sends JSON control messages:
+Quest opens one TCP connection to the laptop and sends structured JSON messages in framed packets:
 
 - `hello`
 - `session_config`
@@ -63,71 +62,67 @@ Quest opens a reliable ordered WebRTC data channel and sends JSON control messag
 - `shot_marker`
 - `ping`
 
-Laptop sends JSON back on the same data channel:
+Laptop sends framed JSON back on the same TCP connection:
 
 - `tracker_status`
 - `shot_result`
 - `pong`
+- `error`
 
-### Signaling plane
+### Frame plane
 
-For now, signaling is HTTP:
+- each UDP datagram carries one fragment of a single encoded frame payload
+- the laptop reassembles fragments by sender endpoint plus `frame_id`
+- once a full frame is reassembled, the laptop decodes the binary frame payload and routes it into the current session
 
-- Quest posts an SDP offer to the laptop
-- laptop returns an SDP answer
+## Why We Still Keep Session Metadata
 
-This still requires a host/IP today, but only for signaling. The streaming path itself is WebRTC.
-
-## Why We Are Still Keeping Session Metadata
-
-Even with WebRTC video, the laptop still needs structured bowling metadata:
+The laptop still needs structured bowling metadata:
 
 - session id
 - camera intrinsics
 - lane calibration
 - shot start / shot end markers
 
-That metadata is small, so it belongs on the data channel instead of being crammed into the video path.
+That metadata is small and belongs on the reliable TCP control channel.
 
 ## Quest Runtime Flow
 
 1. Open `PassthroughCameraAccess` for the left camera.
-2. Create a WebRTC peer connection.
-3. Create a reliable ordered data channel.
-4. Create a `VideoStreamTrack` from a persistent `RenderTexture`.
-5. Copy the latest passthrough frame into that render texture at the target send FPS.
-6. Create an SDP offer and send it to the laptop over HTTP.
-7. Apply the SDP answer from the laptop.
-8. When the data channel opens:
-   - send `hello`
-   - send `session_config`
-   - send `lane_calibration` if available
-9. On user input:
+2. Open one TCP control connection to the laptop.
+3. Send `hello`.
+4. Send `session_config`.
+5. Send `lane_calibration` when available.
+6. At the target send FPS:
+   - copy the latest source frame into a `RenderTexture`
+   - read it back to CPU
+   - JPEG encode it
+   - fragment and send it over UDP
+7. On user input:
    - send `shot_started`
    - send `shot_ended`
    - send `tracker_reset` when needed
-10. Receive `tracker_status` and `shot_result` on the data channel.
-11. Render replay locally in Quest.
+8. Receive `tracker_status` and `shot_result` back over TCP.
+9. Render replay locally in Quest.
 
 ## Laptop Runtime Flow
 
-1. Listen for HTTP signaling on `5799`.
-2. Accept a Quest SDP offer.
-3. Build an `aiortc` peer connection.
-4. Accept the inbound video track.
-5. Accept the inbound control data channel.
-6. Convert each received video frame to BGR and persist it locally as JPEG for the existing SAM2 bridge.
-7. Keep a short pre-roll buffer.
-8. On `shot_started`:
+1. Listen for TCP and UDP on `5799`.
+2. Accept the inbound Quest TCP control connection.
+3. Register the session on `hello` / `session_config`.
+4. Reassemble UDP frame fragments into full frame payloads.
+5. Persist received JPEGs locally through the existing shot recorder path.
+6. Keep a short pre-roll buffer.
+7. On `shot_started`:
    - open a shot recorder
    - keep feeding frames into the online seed logic
-9. As soon as the classical seed is confirmed:
+8. As soon as the classical seed is confirmed:
    - start live SAM2 during the shot
-10. On `shot_ended`:
+9. On `shot_ended`:
    - finalize the shot
    - use live SAM2 result if available
    - otherwise use warm batch SAM2 fallback
-11. Send `shot_result` back over the data channel.
+10. Send `shot_result` back over TCP.
 
 ## Analysis Path
 
@@ -139,46 +134,55 @@ The current analysis path is still:
 - live SAM2 when seed is confirmed
 - warm SAM2 fallback if live path fails
 
-The new part is only how frames reach the laptop.
+## Diagnostic Modes
+
+The repo keeps two lightweight receiver modes:
+
+- `diagnostic`
+  - records raw received UDP JPEG frames only
+  - does not run the tracking bridge
+  - returns a simple diagnostic `shot_result`
+- `synthetic`
+  - runs the normal control and recording path
+  - returns a fake-but-valid tracking result for round-trip testing
+
+There is also a `smoke` receiver mode that auto-records the first fixed batch of UDP frames, but the active Quest bring-up path is the main bowling scene plus `SyntheticPattern`.
 
 ## Latency Model
 
-The main latency wins from this move are:
+This path is intentionally simple, not magically optimal.
 
-- no explicit JPEG encode on Quest
-- video goes over a transport designed for media
-- control messages are separated from bulk pixels
+Current tradeoff:
 
-The laptop still re-encodes received frames to JPEG for the existing bridge, but that happens after network receive and keeps the current SAM2 pipeline intact while we switch transports.
+- lower system complexity than WebRTC
+- explicit frame-level visibility for debugging
+- extra Quest CPU work from readback plus JPEG encode
 
-That local JPEG persistence is acceptable in v1 because:
-
-- it avoids rewriting the whole SAM2 bridge at the same time
-- it keeps the current shot recorder, online seed logic, and fallback path intact
+That Quest-side JPEG encode is acceptable for the current bring-up because it gets us back to a controllable local transport. We can optimize the sender once the end-to-end path is proven stable.
 
 ## Current Limits
 
-The first WebRTC cut still has two deliberate compromises:
+1. Manual server host
+- Quest still needs a laptop IP/host today
+- discovery is a later step
 
-1. Manual signaling host
-- Quest still needs a laptop host/IP in the inspector today
-- we are not solving discovery in the same patch
+2. Quest-side JPEG encode
+- simple and debuggable
+- not yet the final optimized sender
 
-2. HTTP offer/answer signaling
-- simple and robust for v1
-- not yet a full discovery + signaling service
+3. Best-effort UDP
+- packet loss is possible
+- the control path remains reliable over TCP
 
 ## Planned Next Networking Step
 
-After the WebRTC transport is stable, the next networking upgrade should be:
+After the UDP/TCP path is stable, the next networking upgrade should be:
 
 - automatic laptop discovery on the local network
 
 Preferred direction:
 
-- mDNS / DNS-SD or an equivalent local discovery layer
-
-That removes repeated manual IP entry without changing the media/control design.
+- mDNS / DNS-SD or equivalent local discovery
 
 ## Why We Are Not Returning Video Back to Quest
 
@@ -193,8 +197,6 @@ Quest should receive:
 
 and render the MR replay locally.
 
-That keeps the downstream payload tiny and preserves headset-local MR anchoring.
-
 ## Current Commands
 
 Laptop setup:
@@ -203,7 +205,7 @@ Laptop setup:
 powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
 ```
 
-Laptop WebRTC receiver:
+Laptop live receiver:
 
 ```powershell
 .\laptop_pipeline\start_quest_bowling_server.cmd
@@ -215,11 +217,14 @@ Laptop synthetic mode:
 .\laptop_pipeline\start_quest_bowling_server_synthetic.cmd
 ```
 
-## References
+Laptop diagnostic mode:
 
-- Meta Passthrough Camera API sample:
-  - https://github.com/oculus-samples/Unity-PassthroughCameraApiSamples
-- Unity WebRTC package:
-  - https://github.com/Unity-Technologies/com.unity.webrtc
-- aiortc:
-  - https://github.com/aiortc/aiortc
+```powershell
+.\laptop_pipeline\start_quest_bowling_server_diagnostic.cmd
+```
+
+Laptop smoke mode:
+
+```powershell
+.\laptop_pipeline\start_quest_bowling_server_smoke.cmd
+```
