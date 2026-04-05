@@ -46,3 +46,9 @@ Milestone_Presentation.pptx
 make_slides.py
 make_arch_slide.py
 yolo*.pt
+
+# Local-only historical docs
+BALL_TRACKING_README.md
+BALL_TRACKING_AUTO_INIT_SPEC.md
+HOLISTIC_PIPELINE_RESEARCH.md
+QUEST_LAPTOP_PIPELINE_SPEC.md

@@ -1,5 +1,14 @@
 # Running Notes
 
+This file is a chronological lab notebook.
+
+If you are trying to understand the repo quickly, do not start here.
+Start with:
+
+- [DOCS_MAP.md](/C:/Users/student/Quest3BowlingBallTracking/DOCS_MAP.md)
+- [FINDINGS_SO_FAR.md](/C:/Users/student/Quest3BowlingBallTracking/FINDINGS_SO_FAR.md)
+- [QUEST_TEAMMATE_SETUP_README.md](/C:/Users/student/Quest3BowlingBallTracking/QUEST_TEAMMATE_SETUP_README.md)
+
 ## 2026-03-18
 
 - Started from Meta's official `Unity-PassthroughCameraApiSamples` project instead of the coursework project so the Quest 3 camera permissions, MRUK setup, and Unity Inference Engine wiring come from a known-good baseline.

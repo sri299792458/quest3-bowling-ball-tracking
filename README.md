@@ -167,14 +167,21 @@ This repo is now self-contained for development:
 
 The only large runtime artifact that is not committed is the `SAM2` checkpoint. The setup script downloads that automatically.
 
-## More Docs
+## Docs
 
+Start here:
+
+- [`DOCS_MAP.md`](DOCS_MAP.md)
 - [`QUEST_TEAMMATE_SETUP_README.md`](QUEST_TEAMMATE_SETUP_README.md)
-- [`BALL_TRACKING_README.md`](BALL_TRACKING_README.md)
-- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
-- [`BALL_TRACKING_AUTO_INIT_SPEC.md`](BALL_TRACKING_AUTO_INIT_SPEC.md)
-- [`HOLISTIC_PIPELINE_RESEARCH.md`](HOLISTIC_PIPELINE_RESEARCH.md)
-- [`QUEST_LAPTOP_PIPELINE_SPEC.md`](QUEST_LAPTOP_PIPELINE_SPEC.md)
-- [`QUEST_LAPTOP_PIPELINE_V3_SPEC.md`](QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
+- [`laptop_pipeline/README.md`](laptop_pipeline/README.md)
+
+Current source of truth:
+
+- [`FINDINGS_SO_FAR.md`](FINDINGS_SO_FAR.md)
 - [`QUEST_LAPTOP_TRANSPORT_README.md`](QUEST_LAPTOP_TRANSPORT_README.md)
+- [`QUEST_LAPTOP_PIPELINE_V3_SPEC.md`](QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
+
+Historical / background docs:
+
+- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
 - [`running_notes.md`](running_notes.md)
