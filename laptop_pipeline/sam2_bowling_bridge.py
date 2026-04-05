@@ -1,6 +1,8 @@
 import asyncio
 import csv
 import json
+import math
+import statistics
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,11 +42,27 @@ class JpegShotRecorder:
         self.frame_count = 0
         self.fps = float(max(fps, 1.0))
         self.frame_size = frame_size
+        self.first_timestamp_us: Optional[int] = None
+        self.last_timestamp_us: Optional[int] = None
+        self.first_source_frame_id: Optional[int] = None
+        self.last_source_frame_id: Optional[int] = None
+        self._previous_timestamp_us: Optional[int] = None
+        self._frame_intervals_ms: list[float] = []
+        self._shot_ids_seen: set[str] = set()
 
     def write_frame(self, frame_packet) -> int:
         local_frame_idx = self.frame_count
         frame_path = self.frames_dir / f"{local_frame_idx:06d}.jpg"
         frame_path.write_bytes(frame_packet.encoded_bytes)
+        if self.first_timestamp_us is None:
+            self.first_timestamp_us = int(frame_packet.timestamp_us)
+            self.first_source_frame_id = int(frame_packet.frame_id)
+        self.last_timestamp_us = int(frame_packet.timestamp_us)
+        self.last_source_frame_id = int(frame_packet.frame_id)
+        if self._previous_timestamp_us is not None:
+            self._frame_intervals_ms.append((frame_packet.timestamp_us - self._previous_timestamp_us) / 1000.0)
+        self._previous_timestamp_us = int(frame_packet.timestamp_us)
+        self._shot_ids_seen.add(str(frame_packet.shot_id))
         self.metadata_handle.write(
             json.dumps(
                 {
@@ -54,6 +72,8 @@ class JpegShotRecorder:
                     "shot_id": frame_packet.shot_id,
                     "camera_position": frame_packet.camera_position,
                     "camera_rotation": frame_packet.camera_rotation,
+                    "head_position": frame_packet.head_position,
+                    "head_rotation": frame_packet.head_rotation,
                     "file_name": frame_path.name,
                 }
             )
@@ -66,6 +86,22 @@ class JpegShotRecorder:
         if self.metadata_handle is not None:
             self.metadata_handle.close()
             self.metadata_handle = None
+
+        duration_seconds = 0.0
+        effective_fps = 0.0
+        if self.first_timestamp_us is not None and self.last_timestamp_us is not None and self.last_timestamp_us > self.first_timestamp_us:
+            duration_seconds = (self.last_timestamp_us - self.first_timestamp_us) / 1_000_000.0
+            if self.frame_count > 1:
+                effective_fps = (self.frame_count - 1) / duration_seconds
+
+        median_interval_ms = statistics.median(self._frame_intervals_ms) if self._frame_intervals_ms else 0.0
+        average_interval_ms = statistics.mean(self._frame_intervals_ms) if self._frame_intervals_ms else 0.0
+        p95_interval_ms = 0.0
+        if self._frame_intervals_ms:
+            sorted_intervals = sorted(self._frame_intervals_ms)
+            p95_index = min(len(sorted_intervals) - 1, max(0, math.ceil(len(sorted_intervals) * 0.95) - 1))
+            p95_interval_ms = sorted_intervals[p95_index]
+
         self.manifest_path.write_text(
             json.dumps(
                 {
@@ -73,8 +109,30 @@ class JpegShotRecorder:
                     "frame_width": self.frame_size[0],
                     "frame_height": self.frame_size[1],
                     "frame_count": self.frame_count,
+                    "first_timestamp_us": self.first_timestamp_us,
+                    "last_timestamp_us": self.last_timestamp_us,
+                    "first_source_frame_id": self.first_source_frame_id,
+                    "last_source_frame_id": self.last_source_frame_id,
                     "frames_dir": str(self.frames_dir),
                     "metadata_path": str(self.metadata_path),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (self.output_dir / "capture_summary.json").write_text(
+            json.dumps(
+                {
+                    "configured_fps": self.fps,
+                    "effective_fps": effective_fps,
+                    "duration_seconds": duration_seconds,
+                    "frame_count": self.frame_count,
+                    "average_frame_interval_ms": average_interval_ms,
+                    "median_frame_interval_ms": median_interval_ms,
+                    "p95_frame_interval_ms": p95_interval_ms,
+                    "min_frame_interval_ms": min(self._frame_intervals_ms) if self._frame_intervals_ms else 0.0,
+                    "max_frame_interval_ms": max(self._frame_intervals_ms) if self._frame_intervals_ms else 0.0,
+                    "shot_ids_seen": sorted(self._shot_ids_seen),
                 },
                 indent=2,
             ),
@@ -216,27 +274,82 @@ class Sam2BowlingBridge:
         analysis_dir = shot_dir / "analysis"
         analysis_dir.mkdir(parents=True, exist_ok=True)
         raw_frames_dir = shot_dir / "raw" / "frames"
+        result_path = shot_dir / "shot_result.json"
 
-        if self.config.analysis_mode == "synthetic":
-            synthetic_result = self._build_synthetic_result(session_id, shot_id, shot_dir, analysis_dir, raw_frames_dir, fps, total_frames)
-            (shot_dir / "synthetic_result.json").write_text(json.dumps(synthetic_result, indent=2), encoding="utf-8")
-            return synthetic_result
+        try:
+            if self.config.analysis_mode == "synthetic":
+                result = self._build_synthetic_result(session_id, shot_id, shot_dir, analysis_dir, raw_frames_dir, fps, total_frames)
+                (shot_dir / "synthetic_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+                result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+                return result
 
-        if seed_detector is None:
-            return {"kind": "shot_result", "success": False, "session_id": session_id, "shot_id": shot_id, "failure_reason": "seed_detector_missing"}
+            if seed_detector is None:
+                result = {
+                    "kind": "shot_result",
+                    "success": False,
+                    "session_id": session_id,
+                    "shot_id": shot_id,
+                    "failure_reason": "seed_detector_missing",
+                    "analysis_dir": str(analysis_dir),
+                    "raw_frames_dir": str(raw_frames_dir),
+                }
+                result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+                return result
 
-        seed = await asyncio.to_thread(seed_detector.write_outputs, analysis_dir)
-        if seed is None:
-            return {"kind": "shot_result", "success": False, "session_id": session_id, "shot_id": shot_id, "failure_reason": "no_seed_found", "analysis_dir": str(analysis_dir), "raw_frames_dir": str(raw_frames_dir)}
+            seed = await asyncio.to_thread(seed_detector.write_outputs, analysis_dir)
+            if seed is None:
+                result = {
+                    "kind": "shot_result",
+                    "success": False,
+                    "session_id": session_id,
+                    "shot_id": shot_id,
+                    "failure_reason": "no_seed_found",
+                    "analysis_dir": str(analysis_dir),
+                    "raw_frames_dir": str(raw_frames_dir),
+                }
+                result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+                return result
 
-        sam2_output_dir = analysis_dir / "sam2"
-        if self.live_tracking_started and not self.live_tracking_failed and self.live_tracker.seed_frame_idx is not None:
-            live_summary = await asyncio.to_thread(self.live_tracker.write_outputs, sam2_output_dir, total_frames, self.config.save_preview, raw_frames_dir, fps)
-            (shot_dir / "live_sam2_summary.json").write_text(json.dumps(live_summary, indent=2), encoding="utf-8")
-        else:
-            warm_summary = await asyncio.to_thread(self.warm_tracker.track_from_seed, str(raw_frames_dir), seed, sam2_output_dir, not self.config.save_preview, 0, fps)
-            (shot_dir / "warm_sam2_summary.json").write_text(json.dumps(warm_summary, indent=2), encoding="utf-8")
-        return self._build_result(session_id, shot_id, shot_dir, analysis_dir)
+            sam2_output_dir = analysis_dir / "sam2"
+            if self.live_tracking_started and not self.live_tracking_failed and self.live_tracker.seed_frame_idx is not None:
+                live_summary = await asyncio.to_thread(
+                    self.live_tracker.write_outputs,
+                    sam2_output_dir,
+                    total_frames,
+                    self.config.save_preview,
+                    raw_frames_dir,
+                    fps,
+                )
+                (shot_dir / "live_sam2_summary.json").write_text(json.dumps(live_summary, indent=2), encoding="utf-8")
+            else:
+                warm_summary = await asyncio.to_thread(
+                    self.warm_tracker.track_from_seed,
+                    str(raw_frames_dir),
+                    seed,
+                    sam2_output_dir,
+                    not self.config.save_preview,
+                    0,
+                    fps,
+                )
+                (shot_dir / "warm_sam2_summary.json").write_text(json.dumps(warm_summary, indent=2), encoding="utf-8")
+
+            result = self._build_result(session_id, shot_id, shot_dir, analysis_dir)
+            result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            return result
+        except Exception as exc:
+            (analysis_dir / "analysis_exception.txt").write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
+            result = {
+                "kind": "shot_result",
+                "success": False,
+                "session_id": session_id,
+                "shot_id": shot_id,
+                "failure_reason": "analysis_exception",
+                "analysis_dir": str(analysis_dir),
+                "raw_frames_dir": str(raw_frames_dir),
+                "error_message": f"{type(exc).__name__}: {exc}",
+            }
+            result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            return result
 
     def _build_result(self, session_id: str, shot_id: str, shot_dir: Path, analysis_dir: Path):
         seed_path = analysis_dir / "seed.json"

@@ -362,9 +362,9 @@ def mean_node_score(track: PathTrack):
     return sum(c.score for c in track.candidates) / max(len(track.candidates), 1)
 
 
-def choose_track(candidates: list[Candidate], frame_height: int, args):
+def build_valid_tracks(candidates: list[Candidate], frame_height: int, args):
     if not candidates:
-        return None
+        return []
 
     ordered = sorted(candidates, key=lambda c: (c.frame_idx, -c.score))
     successors: list[list[int]] = [[] for _ in ordered]
@@ -402,6 +402,11 @@ def choose_track(candidates: list[Candidate], frame_height: int, args):
             continue
         valid_tracks.append(track)
 
+    return valid_tracks
+
+
+def choose_track(candidates: list[Candidate], frame_height: int, args):
+    valid_tracks = build_valid_tracks(candidates, frame_height, args)
     if not valid_tracks:
         return None
 

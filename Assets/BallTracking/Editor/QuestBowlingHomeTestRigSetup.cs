@@ -13,6 +13,7 @@ namespace BallTracking.Editor
         private const string RigName = "QuestBowlingHomeTestRig";
         private const string LaneReferenceName = "LaneReference";
         private const string BowlingScenePath = "Assets/BallTracking/Scenes/BowlingBallTracking.unity";
+        private const string PassthroughCameraAccessPrefabPath = "Assets/PassthroughCameraApiSamples/PassthroughCamera/Prefabs/PassthroughCameraAccessPrefab.prefab";
         private const float DefaultLaneDistanceMeters = 2.0f;
         private static readonly string[] LegacySampleObjectNames =
         {
@@ -25,8 +26,6 @@ namespace BallTracking.Editor
         [MenuItem("Tools/Ball Tracking/Create Or Update Home Test Rig")]
         public static void CreateOrUpdateHomeTestRig()
         {
-            LegacyTransportCleanup.StripLegacySceneAndBuildArtifacts();
-
             var scene = SceneManager.GetActiveScene();
             if (!scene.IsValid() || !scene.isLoaded)
             {
@@ -37,12 +36,12 @@ namespace BallTracking.Editor
                 return;
             }
 
-            var cameraAccess = Object.FindFirstObjectByType<PassthroughCameraAccess>();
+            var cameraAccess = FindOrCreateCameraAccess();
             if (cameraAccess == null)
             {
                 EditorUtility.DisplayDialog(
                     "Ball Tracking",
-                    "Could not find a PassthroughCameraAccess component in the open scene.",
+                    "Could not find or create a PassthroughCameraAccess for the open scene.",
                     "OK");
                 return;
             }
@@ -80,6 +79,32 @@ namespace BallTracking.Editor
             var root = new GameObject(objectName);
             Undo.RegisterCreatedObjectUndo(root, "Create Quest Bowling Home Test Rig");
             return root;
+        }
+
+        private static PassthroughCameraAccess FindOrCreateCameraAccess()
+        {
+            var existing = Object.FindFirstObjectByType<PassthroughCameraAccess>(FindObjectsInactive.Include);
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PassthroughCameraAccessPrefabPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning($"[QuestBowlingHomeTestRigSetup] Missing prefab at {PassthroughCameraAccessPrefabPath}");
+                return null;
+            }
+
+            var instance = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (instance == null)
+            {
+                Debug.LogWarning("[QuestBowlingHomeTestRigSetup] Failed to instantiate PassthroughCameraAccess prefab.");
+                return null;
+            }
+
+            Undo.RegisterCreatedObjectUndo(instance, "Create Passthrough Camera Access");
+            return instance.GetComponent<PassthroughCameraAccess>();
         }
 
         private static Transform FindOrCreateLaneReference(Transform centerEyeAnchor)
@@ -165,9 +190,12 @@ namespace BallTracking.Editor
             serializedObject.FindProperty("cameraAccess").objectReferenceValue = cameraAccess;
             serializedObject.FindProperty("connectionMode").enumValueIndex = (int)QuestBowlingStreamClient.ConnectionMode.RemoteLaptop;
             serializedObject.FindProperty("serverPort").intValue = 5799;
-            serializedObject.FindProperty("targetSendFps").intValue = 15;
-            serializedObject.FindProperty("jpegQuality").intValue = 80;
-            serializedObject.FindProperty("maxDatagramPayloadBytes").intValue = 1200;
+            serializedObject.FindProperty("targetSendFps").intValue = 30;
+            serializedObject.FindProperty("passthroughSendResolution").vector2IntValue = new Vector2Int(960, 720);
+            serializedObject.FindProperty("jpegQuality").intValue = 65;
+            serializedObject.FindProperty("maxDatagramPayloadBytes").intValue = 1400;
+            serializedObject.FindProperty("useAsyncGpuReadback").boolValue = false;
+            serializedObject.FindProperty("cameraSourceProbeOnly").boolValue = false;
             serializedObject.FindProperty("autoStreamWhenConnected").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(streamClient);

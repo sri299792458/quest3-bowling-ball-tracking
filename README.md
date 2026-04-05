@@ -59,8 +59,7 @@ cd Quest3BowlingBallTracking
 2. Let Unity finish package import.
 3. Switch the active platform to `Android`.
 4. Run `Tools > Ball Tracking > Create Or Update Project Assets`.
-5. Run `Tools > Ball Tracking > Clean Up Legacy Transport Artifacts` if this checkout still has old transport experiment assets from an earlier session.
-6. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
+5. Open `Assets/BallTracking/Scenes/BowlingBallTracking.unity`.
 
 Notes:
 
@@ -102,6 +101,9 @@ Then start the receiver:
    - `Stream Source`
      - `PassthroughCamera` to test the real Quest camera path
      - `SyntheticPattern` to isolate transport from camera capture
+   - `Target Send Fps` = `30` for the current benchmark pass
+   - `Passthrough Send Resolution` = `960 x 720`
+   - `Jpeg Quality` = `65`
 6. Build and run on Quest.
 7. Use the current debug controls:
    - `X`: start shot
@@ -127,14 +129,23 @@ You can validate most of the system at home:
    - Quest sends UDP JPEG frames
    - laptop records the raw frames
    - Quest receives frame-count status and a diagnostic `shot_result`
+4. Run `.\laptop_pipeline\start_quest_bowling_server_record_only.cmd` when the priority is collecting raw Quest captures plus metadata for later analytics work.
+5. For the current benchmark pass, use `Target Send Fps = 30`, `Passthrough Send Resolution = 960 x 720`, and `Jpeg Quality = 65`, then compare the saved `capture_summary.json` against the mirrored `capture_perf` statuses. If the saved run quality drops too far, fall back to `15`.
 
 Synthetic mode is only for transport and UX testing. It does not validate the real tracking pipeline.
 
-Diagnostic mode is the cleanest way to answer:
+Diagnostic / record-only mode is the cleanest way to answer:
 
 - do frames leave Quest?
 - do frames arrive on the laptop?
 - are those frames written to `laptop_pipeline/runs/.../raw/frames`?
+
+The saved run now also includes:
+
+- `capture_context.json`
+- `session_config.json`
+- `lane_calibration.json`
+- `shot_events.jsonl`
 
 ## Current Limitations
 
@@ -158,9 +169,12 @@ The only large runtime artifact that is not committed is the `SAM2` checkpoint. 
 
 ## More Docs
 
+- [`QUEST_TEAMMATE_SETUP_README.md`](QUEST_TEAMMATE_SETUP_README.md)
 - [`BALL_TRACKING_README.md`](BALL_TRACKING_README.md)
 - [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
 - [`BALL_TRACKING_AUTO_INIT_SPEC.md`](BALL_TRACKING_AUTO_INIT_SPEC.md)
 - [`HOLISTIC_PIPELINE_RESEARCH.md`](HOLISTIC_PIPELINE_RESEARCH.md)
 - [`QUEST_LAPTOP_PIPELINE_SPEC.md`](QUEST_LAPTOP_PIPELINE_SPEC.md)
+- [`QUEST_LAPTOP_PIPELINE_V3_SPEC.md`](QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
+- [`QUEST_LAPTOP_TRANSPORT_README.md`](QUEST_LAPTOP_TRANSPORT_README.md)
 - [`running_notes.md`](running_notes.md)

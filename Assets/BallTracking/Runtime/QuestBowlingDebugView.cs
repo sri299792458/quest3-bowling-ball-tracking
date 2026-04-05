@@ -321,7 +321,7 @@ namespace BallTracking.Runtime
             }
 
             _statusLines.Clear();
-            PushStatus("Bowling Home Test");
+            PushStatus("Bowling Tracker");
 
             if (streamClient != null)
             {
@@ -336,7 +336,7 @@ namespace BallTracking.Runtime
             PushStatus("Menu: calibrate");
             PushStatus("X: start shot");
             PushStatus("Y: end shot");
-            PushStatus("L-stick click: reset");
+            PushStatus("L-stick click: calibrate");
         }
 
         private void EnsureVisuals()

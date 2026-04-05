@@ -3,7 +3,7 @@ import asyncio
 import json
 import struct
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -75,6 +75,8 @@ class FramePacket:
     timestamp_us: int
     camera_position: tuple[float, float, float]
     camera_rotation: tuple[float, float, float, float]
+    head_position: tuple[float, float, float]
+    head_rotation: tuple[float, float, float, float]
     encoded_bytes: bytes
 
 
@@ -84,6 +86,15 @@ class PendingFrame:
     chunk_count: int
     chunks: dict[int, bytes] = field(default_factory=dict)
     created_at: float = field(default_factory=time.monotonic)
+
+
+SHOT_MARKER_NAMES = {
+    0: "session_started",
+    1: "armed",
+    2: "shot_started",
+    3: "shot_ended",
+    4: "tracker_reset",
+}
 
 
 def decode_jpeg(encoded_bytes: bytes) -> np.ndarray:
@@ -137,6 +148,12 @@ class DotNetBinaryReader:
     def read_int32(self) -> int:
         return struct.unpack("<i", self.read_bytes(4))[0]
 
+    def peek_int32(self) -> int:
+        end = self.offset + 4
+        if end > len(self.data):
+            raise ValueError("frame payload truncated")
+        return struct.unpack("<i", self.data[self.offset:end])[0]
+
     def read_int64(self) -> int:
         return struct.unpack("<q", self.read_bytes(8))[0]
 
@@ -167,6 +184,10 @@ class DotNetBinaryReader:
             return ""
         return self.read_bytes(length).decode("utf-8")
 
+    @property
+    def remaining(self) -> int:
+        return len(self.data) - self.offset
+
 
 def decode_frame_packet(payload: bytes) -> FramePacket:
     reader = DotNetBinaryReader(payload)
@@ -176,7 +197,15 @@ def decode_frame_packet(payload: bytes) -> FramePacket:
     timestamp_us = reader.read_int64()
     camera_position = (reader.read_single(), reader.read_single(), reader.read_single())
     camera_rotation = (reader.read_single(), reader.read_single(), reader.read_single(), reader.read_single())
-    encoded_length = reader.read_int32()
+    head_position = (0.0, 0.0, 0.0)
+    head_rotation = (0.0, 0.0, 0.0, 1.0)
+
+    encoded_length = reader.peek_int32()
+    if encoded_length < 0 or encoded_length != reader.remaining - 4:
+        head_position = (reader.read_single(), reader.read_single(), reader.read_single())
+        head_rotation = (reader.read_single(), reader.read_single(), reader.read_single(), reader.read_single())
+        encoded_length = reader.read_int32()
+
     encoded_bytes = reader.read_bytes(encoded_length)
     return FramePacket(
         session_id=session_id,
@@ -185,6 +214,8 @@ def decode_frame_packet(payload: bytes) -> FramePacket:
         timestamp_us=timestamp_us,
         camera_position=camera_position,
         camera_rotation=camera_rotation,
+        head_position=head_position,
+        head_rotation=head_rotation,
         encoded_bytes=encoded_bytes,
     )
 
@@ -216,6 +247,7 @@ class QuestUdpSession:
         self.smoke_shot_dir: Optional[Path] = None
         self.smoke_result_sent = False
         self.smoke_timeout_task: Optional[asyncio.Task] = None
+        self.first_udp_frame_reported = False
 
     async def run(self) -> None:
         await self.send_tracker_status("control_connected", message="tcp control ready")
@@ -281,6 +313,7 @@ class QuestUdpSession:
                 f"size={self.session_config.width}x{self.session_config.height} "
                 f"fps={self.session_config.target_send_fps}"
             )
+            self.persist_active_shot_metadata()
             await self.send_tracker_status(
                 "session_ready",
                 width=self.session_config.width,
@@ -313,6 +346,15 @@ class QuestUdpSession:
                 lane_length_m=float(data.get("lane_length_m", 0.0)),
             )
             print(f"[udp] lane_calibration valid={self.lane_calibration.is_valid} session={self.session_id}")
+            self.persist_active_shot_metadata()
+            return
+
+        if packet_type == BowlingPacketType.TRACKER_STATUS:
+            self.persist_quest_tracker_status(data)
+            stage = data.get("stage", "tracker_status")
+            message = data.get("message", "")
+            if stage in {"capture_perf", "capture_slow_frame", "frame_send_blocked", "frame_send_resumed"}:
+                print(f"[quest-status] session={self.session_id} stage={stage} message={message}")
             return
 
         if packet_type == BowlingPacketType.SHOT_MARKER:
@@ -347,14 +389,19 @@ class QuestUdpSession:
                     frame_size=frame_size,
                     decode_frame=lambda fp: decode_jpeg(fp.encoded_bytes),
                 )
+                shot_dir = self.bridge.active_shot_dir
                 events = self.bridge.drain_status_events()
+            self.persist_shot_metadata(shot_dir)
+            self.append_shot_event(shot_dir, shot_id, marker_type, timestamp_ms)
             await self.send_events(events)
             return
 
         if marker_type == 3:
             async with self.bridge_lock:
+                shot_dir = self.bridge.active_shot_dir
                 task = await self.bridge.end_shot_and_launch()
                 events = self.bridge.drain_status_events()
+            self.append_shot_event(shot_dir, shot_id, marker_type, timestamp_ms)
             await self.send_events(events)
             if task is not None:
                 result = await task
@@ -365,15 +412,37 @@ class QuestUdpSession:
 
         if marker_type == 4:
             async with self.bridge_lock:
+                shot_dir = self.bridge.active_shot_dir
                 self.bridge.finish_active_recorder()
+            self.append_shot_event(shot_dir, shot_id, marker_type, timestamp_ms)
             await self.send_tracker_status("tracker_reset", shot_id=shot_id)
 
-    async def handle_frame(self, frame_packet: FramePacket) -> None:
+    async def handle_frame(
+        self,
+        frame_packet: FramePacket,
+        addr: tuple[str, int],
+        chunk_count: int,
+        total_payload_length: int,
+    ) -> None:
         self.current_shot_id = frame_packet.shot_id or self.current_shot_id
         self.received_frame_count += 1
 
-        if self.received_frame_count == 1 or self.received_frame_count % 30 == 0:
-            await self.send_tracker_status("remote_frames", shot_id=self.current_shot_id, message=str(self.received_frame_count))
+        if not self.first_udp_frame_reported:
+            self.first_udp_frame_reported = True
+            await self.send_tracker_status(
+                "udp_frame_received",
+                shot_id=self.current_shot_id,
+                message=(
+                    f"frame {frame_packet.frame_id} | jpg {len(frame_packet.encoded_bytes)} | "
+                    f"{chunk_count} chunks | payload {total_payload_length} | {addr[0]}:{addr[1]}"
+                ),
+            )
+        elif self.received_frame_count % 30 == 0:
+            await self.send_tracker_status(
+                "remote_frames",
+                shot_id=self.current_shot_id,
+                message=f"{self.received_frame_count} | frame {frame_packet.frame_id} | jpg {len(frame_packet.encoded_bytes)}",
+            )
 
         if self.analysis_mode == "diagnostic":
             if self.diagnostic_recorder is not None:
@@ -425,6 +494,7 @@ class QuestUdpSession:
         fps = float(max(self.session_config.target_send_fps if self.session_config else 15, 1))
         self.diagnostic_recorder = JpegShotRecorder(raw_dir, fps=fps, frame_size=self.last_frame_size)
         self.diagnostic_shot_dir = shot_dir
+        self.persist_shot_metadata(shot_dir)
 
     def finish_diagnostic_shot(self, shot_id: str) -> dict:
         recorder = self.diagnostic_recorder
@@ -462,6 +532,7 @@ class QuestUdpSession:
             "path_samples": [],
         }
         (shot_dir / "diagnostic_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        (shot_dir / "shot_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
 
     async def handle_smoke_frame(self, frame_packet: FramePacket) -> None:
@@ -500,6 +571,7 @@ class QuestUdpSession:
         fps = float(max(self.session_config.target_send_fps if self.session_config else 15, 1))
         self.smoke_recorder = JpegShotRecorder(raw_dir, fps=fps, frame_size=self.last_frame_size)
         self.smoke_shot_dir = shot_dir
+        self.persist_shot_metadata(shot_dir)
 
     def finish_smoke_capture(self) -> dict:
         recorder = self.smoke_recorder
@@ -537,6 +609,7 @@ class QuestUdpSession:
             "path_samples": [],
         }
         (shot_dir / "smoke_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+        (shot_dir / "shot_result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
 
     async def run_smoke_timeout(self) -> None:
@@ -549,7 +622,11 @@ class QuestUdpSession:
                 self.start_smoke_capture()
 
             self.smoke_result_sent = True
-            await self.send_tracker_status("smoke_timeout", shot_id=self.current_shot_id, message=f"{self.server.smoke_timeout_seconds:0.0f}s")
+            await self.send_tracker_status(
+                "smoke_timeout",
+                shot_id=self.current_shot_id,
+                message=f"{self.server.smoke_timeout_seconds:0.0f}s | frames {self.received_frame_count}",
+            )
             await self.send_json(BowlingPacketType.SHOT_RESULT, self.finish_smoke_capture())
         except asyncio.CancelledError:
             raise
@@ -570,6 +647,68 @@ class QuestUdpSession:
             return
         async with self.writer_lock:
             await write_control_packet(writer=self.writer, packet_type=packet_type, payload=json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+
+    def get_active_shot_dir(self) -> Optional[Path]:
+        if self.bridge is not None and self.bridge.active_shot_dir is not None:
+            return self.bridge.active_shot_dir
+        if self.diagnostic_shot_dir is not None:
+            return self.diagnostic_shot_dir
+        if self.smoke_shot_dir is not None:
+            return self.smoke_shot_dir
+        return None
+
+    def persist_active_shot_metadata(self) -> None:
+        self.persist_shot_metadata(self.get_active_shot_dir())
+
+    def persist_shot_metadata(self, shot_dir: Optional[Path]) -> None:
+        if shot_dir is None:
+            return
+
+        shot_dir.mkdir(parents=True, exist_ok=True)
+        peername = self.writer.get_extra_info("peername")
+        capture_context = {
+            "session_id": self.session_id,
+            "shot_id": self.current_shot_id,
+            "analysis_mode": self.analysis_mode,
+            "control_peer": list(peername) if isinstance(peername, tuple) else peername,
+            "last_frame_width": self.last_frame_size[0],
+            "last_frame_height": self.last_frame_size[1],
+            "received_frame_count": self.received_frame_count,
+            "saved_at_utc": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        }
+        (shot_dir / "capture_context.json").write_text(json.dumps(capture_context, indent=2), encoding="utf-8")
+
+        if self.session_config is not None:
+            (shot_dir / "session_config.json").write_text(json.dumps(asdict(self.session_config), indent=2), encoding="utf-8")
+
+        if self.lane_calibration is not None:
+            (shot_dir / "lane_calibration.json").write_text(json.dumps(asdict(self.lane_calibration), indent=2), encoding="utf-8")
+
+    def append_shot_event(self, shot_dir: Optional[Path], shot_id: str, marker_type: int, timestamp_ms: int) -> None:
+        if shot_dir is None:
+            return
+
+        self.persist_shot_metadata(shot_dir)
+        event = {
+            "shot_id": shot_id,
+            "marker_type": marker_type,
+            "marker_name": SHOT_MARKER_NAMES.get(marker_type, f"unknown_{marker_type}"),
+            "quest_timestamp_ms": timestamp_ms,
+            "server_received_utc": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        }
+        with (shot_dir / "shot_events.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event) + "\n")
+
+    def persist_quest_tracker_status(self, payload: dict) -> None:
+        shot_dir = self.get_active_shot_dir()
+        if shot_dir is None:
+            return
+
+        self.persist_shot_metadata(shot_dir)
+        record = dict(payload)
+        record["server_received_utc"] = datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+        with (shot_dir / "quest_tracker_status.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
 
     async def close(self) -> None:
         if self.closed:
@@ -615,6 +754,16 @@ class QuestUdpServer:
         self.sessions: set[QuestUdpSession] = set()
         self.sessions_by_id: dict[str, QuestUdpSession] = {}
         self.pending_frames: dict[tuple[tuple[str, int], int], PendingFrame] = {}
+        self.first_udp_datagram_seen = False
+
+    async def broadcast_tracker_status(self, stage: str, message: str) -> None:
+        if not self.sessions:
+            return
+
+        await asyncio.gather(
+            *(session.send_tracker_status(stage, message=message) for session in list(self.sessions)),
+            return_exceptions=True,
+        )
 
     async def handle_control_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         session = QuestUdpSession(server=self, reader=reader, writer=writer)
@@ -648,8 +797,22 @@ class QuestUdpServer:
         if magic != MAGIC or version != VERSION or packet_type != BowlingPacketType.FRAME_PACKET:
             return
 
+        if not self.first_udp_datagram_seen:
+            self.first_udp_datagram_seen = True
+            message = f"{addr[0]}:{addr[1]} | frame {frame_id} | chunks {chunk_count} | total {total_payload_length}"
+            print(f"[udp] first datagram {message}")
+            await self.broadcast_tracker_status("udp_datagram_seen", message)
+
         chunk = data[UDP_FRAME_HEADER_STRUCT.size : UDP_FRAME_HEADER_STRUCT.size + payload_length]
         if len(chunk) != payload_length or chunk_index >= chunk_count:
+            print(
+                f"[udp] invalid datagram addr={addr[0]}:{addr[1]} frame={frame_id} "
+                f"chunk={chunk_index}/{chunk_count} payload_length={payload_length} actual={len(chunk)}"
+            )
+            await self.broadcast_tracker_status(
+                "udp_datagram_invalid",
+                f"{addr[0]}:{addr[1]} | frame {frame_id} | chunk {chunk_index}/{chunk_count}",
+            )
             return
 
         key = (addr, frame_id)
@@ -665,15 +828,41 @@ class QuestUdpServer:
         payload = b"".join(pending.chunks[index] for index in range(pending.chunk_count))
         del self.pending_frames[key]
         if len(payload) != pending.total_payload_length:
+            print(
+                f"[udp] payload length mismatch addr={addr[0]}:{addr[1]} frame={frame_id} "
+                f"expected={pending.total_payload_length} actual={len(payload)}"
+            )
+            await self.broadcast_tracker_status(
+                "udp_payload_mismatch",
+                f"{addr[0]}:{addr[1]} | frame {frame_id} | expected {pending.total_payload_length} got {len(payload)}",
+            )
             return
 
-        frame_packet = decode_frame_packet(payload)
+        try:
+            frame_packet = decode_frame_packet(payload)
+        except Exception as exc:
+            print(f"[udp] decode failed addr={addr[0]}:{addr[1]} frame={frame_id}: {exc}")
+            await self.broadcast_tracker_status(
+                "udp_frame_decode_failed",
+                f"{addr[0]}:{addr[1]} | frame {frame_id} | {type(exc).__name__}: {exc}",
+            )
+            return
+
         session = self.sessions_by_id.get(frame_packet.session_id)
         if session is None:
             print(f"[udp] dropping frame for unknown session={frame_packet.session_id}")
+            await self.broadcast_tracker_status(
+                "udp_unknown_session_frame",
+                f"{frame_packet.session_id} | frame {frame_packet.frame_id} | from {addr[0]}:{addr[1]}",
+            )
             return
 
-        await session.handle_frame(frame_packet)
+        await session.handle_frame(
+            frame_packet,
+            addr=addr,
+            chunk_count=chunk_count,
+            total_payload_length=total_payload_length,
+        )
 
     async def close(self) -> None:
         sessions = list(self.sessions)

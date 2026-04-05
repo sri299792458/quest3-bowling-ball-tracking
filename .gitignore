@@ -38,3 +38,11 @@ sam3_benchmark/
 sam3_benchmark/.venv/
 sam3_benchmark/runs/
 sam3_benchmark/hf_cache/
+
+# Local research / presentation artifacts
+.claude/
+laptop_pipeline/datasets/
+Milestone_Presentation.pptx
+make_slides.py
+make_arch_slide.py
+yolo*.pt

@@ -702,13 +702,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BallTracking.Runtime.QuestBowlingStreamClient
   cameraAccess: {fileID: 1373946501}
   cameraPosition: 0
-  serverHost: 10.1.248.31
+  connectionMode: 0
+  serverHost: 10.232.253.83
   serverPort: 5799
   reconnectDelaySeconds: 2
-  targetSendFps: 15
+  connectTimeoutSeconds: 4
+  streamSource: 0
+  syntheticResolution: {x: 1280, y: 960}
+  passthroughSendResolution: {x: 960, y: 720}
+  targetSendFps: 30
+  targetBitrateKbps: 3500
   jpegQuality: 65
+  maxDatagramPayloadBytes: 1400
+  useAsyncGpuReadback: 0
+  cameraSourceProbeOnly: 0
   autoStreamWhenConnected: 1
-  verboseLogging: 0
+  verboseLogging: 1
   onTrackerStatus:
     m_PersistentCalls:
       m_Calls: []

@@ -225,10 +225,11 @@ namespace BallTracking.Runtime.Transport
             ulong frameId,
             DateTime timestampUtc,
             Pose cameraPose,
+            Pose headPose,
             byte[] encodedBytes)
         {
             encodedBytes ??= Array.Empty<byte>();
-            using var stream = new MemoryStream(128 + encodedBytes.Length);
+            using var stream = new MemoryStream(160 + encodedBytes.Length);
             using var writer = new BinaryWriter(stream, Encoding.UTF8, true);
             writer.Write(sessionId ?? string.Empty);
             writer.Write(shotId ?? string.Empty);
@@ -236,6 +237,8 @@ namespace BallTracking.Runtime.Transport
             writer.Write(new DateTimeOffset(timestampUtc).ToUnixTimeMilliseconds() * 1000);
             WriteVector3(writer, cameraPose.position);
             WriteQuaternion(writer, cameraPose.rotation);
+            WriteVector3(writer, headPose.position);
+            WriteQuaternion(writer, headPose.rotation);
             writer.Write(encodedBytes.Length);
             writer.Write(encodedBytes);
             return stream.ToArray();

@@ -10,6 +10,7 @@ using BallTracking.Runtime.Transport;
 using Meta.XR;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 
 namespace BallTracking.Runtime
@@ -150,10 +151,13 @@ namespace BallTracking.Runtime
         [Header("Streaming")]
         [SerializeField] private StreamSourceMode streamSource = StreamSourceMode.PassthroughCamera;
         [SerializeField] private Vector2Int syntheticResolution = new(1280, 960);
-        [SerializeField] private int targetSendFps = 15;
+        [SerializeField] private Vector2Int passthroughSendResolution = new(960, 720);
+        [SerializeField] private int targetSendFps = 30;
         [SerializeField] private int targetBitrateKbps = 3500;
-        [SerializeField] private int jpegQuality = 80;
-        [SerializeField] private int maxDatagramPayloadBytes = 1200;
+        [SerializeField] private int jpegQuality = 65;
+        [SerializeField] private int maxDatagramPayloadBytes = 1400;
+        [SerializeField] private bool useAsyncGpuReadback;
+        [SerializeField] private bool cameraSourceProbeOnly;
         [SerializeField] private bool autoStreamWhenConnected = true;
         [SerializeField] private bool verboseLogging;
 
@@ -179,6 +183,7 @@ namespace BallTracking.Runtime
         private bool _sessionConfigSent;
         private bool _laneCalibrationSent;
         private bool _permissionsRequested;
+        private bool _videoEncoderProbeReported;
         private double _lastFrameSendTime;
         private int _localStreamFrameCount;
         private ulong _nextFrameId;
@@ -187,6 +192,49 @@ namespace BallTracking.Runtime
         private string _latestStatusLine = "client_not_started";
         private BowlingLaneCalibration _laneCalibration;
         private string _statusLogPath;
+        private int _consecutiveFrameSendFailures;
+        private string _lastFrameSendFailureNote;
+        private Transform _headAnchorTransform;
+        private int _captureAttemptCount;
+        private int _captureSentCount;
+        private int _captureBlockedPassthroughCount;
+        private int _captureBlockedOtherCount;
+        private double _captureStatsWindowStartTime;
+        private double _captureStatsLastSentTime;
+        private double _captureStatsSentDeltaSumMs;
+        private double _captureStatsMinSentDeltaMs = double.PositiveInfinity;
+        private double _captureStatsMaxSentDeltaMs;
+        private int _captureCameraUpdateCount;
+        private double _captureCameraLastUpdateTime;
+        private double _captureCameraUpdateDeltaSumMs;
+        private double _captureCameraUpdateMinDeltaMs = double.PositiveInfinity;
+        private double _captureCameraUpdateMaxDeltaMs;
+        private double _captureRenderSumMs;
+        private double _captureReadbackSumMs;
+        private double _captureApplySumMs;
+        private double _captureJpegSumMs;
+        private double _captureEncodeSumMs;
+        private double _captureUdpSumMs;
+        private double _captureTotalSumMs;
+        private double _captureRenderMaxMs;
+        private double _captureReadbackMaxMs;
+        private double _captureApplyMaxMs;
+        private double _captureJpegMaxMs;
+        private double _captureEncodeMaxMs;
+        private double _captureUdpMaxMs;
+        private double _captureTotalMaxMs;
+        private AsyncGPUReadbackRequest _pendingReadbackRequest;
+        private bool _hasPendingReadbackRequest;
+        private ulong _pendingReadbackFrameId;
+        private DateTime _pendingReadbackTimestampUtc;
+        private Pose _pendingReadbackCameraPose;
+        private Pose _pendingReadbackHeadPose;
+        private string _pendingReadbackSourceNote;
+        private string _pendingReadbackShotId;
+        private double _pendingReadbackRenderMs;
+        private double _pendingReadbackIssuedAtMs;
+        private int _pendingReadbackWidth;
+        private int _pendingReadbackHeight;
 
         public bool IsConnected => _controlConnected && _controlStream != null;
         public string ServerHost => serverHost;
@@ -199,10 +247,7 @@ namespace BallTracking.Runtime
             int? port = null)
         {
             cameraAccess = passthroughCameraAccess;
-            if (cameraAccess != null)
-            {
-                cameraAccess.CameraPosition = cameraPosition;
-            }
+            ConfigurePassthroughCameraAccess();
 
             if (!string.IsNullOrWhiteSpace(host))
             {
@@ -219,10 +264,8 @@ namespace BallTracking.Runtime
         {
             _sessionId = Guid.NewGuid().ToString("N");
             _statusLogPath = Path.Combine(Application.persistentDataPath, "quest_bowling_status.log");
-            if (cameraAccess != null)
-            {
-                cameraAccess.CameraPosition = cameraPosition;
-            }
+            _headAnchorTransform = ResolveHeadAnchorTransform();
+            ConfigurePassthroughCameraAccess();
 
             EmitLocalStatus("client_awake", _sessionId);
         }
@@ -248,6 +291,7 @@ namespace BallTracking.Runtime
             }
 
             CleanupConnection();
+            ClearPendingAsyncReadback();
             DisposeStreamTexture();
             DisposeReadbackTexture();
             DisposeSyntheticSenderCamera();
@@ -258,12 +302,35 @@ namespace BallTracking.Runtime
         {
             DrainQueuedStatuses();
             DrainInboundPackets();
+            ObserveCameraUpdateIfNeeded();
+
+            if (cameraSourceProbeOnly)
+            {
+                EnsureCaptureStatsWindowStarted();
+                if (IsConnected)
+                {
+                    if (!_sessionConfigSent)
+                    {
+                        TrySendSessionConfig();
+                    }
+
+                    if (_laneCalibration.isValid && !_laneCalibrationSent)
+                    {
+                        TrySendLaneCalibration();
+                    }
+                }
+
+                MaybeEmitCameraSourcePerfStatus();
+                return;
+            }
 
             if (!autoStreamWhenConnected || !IsConnected)
             {
                 return;
             }
 
+            EnsureCaptureStatsWindowStarted();
+            _captureAttemptCount++;
             var minInterval = 1.0 / Mathf.Max(1, targetSendFps);
             if (Time.unscaledTimeAsDouble - _lastFrameSendTime < minInterval)
             {
@@ -272,15 +339,24 @@ namespace BallTracking.Runtime
 
             if (!TrySendCurrentFrame(out var frameNote))
             {
+                if (!IsDeferredCaptureState(frameNote))
+                {
+                    TrackCaptureBlocked(frameNote);
+                    ReportFrameSendBlocked(frameNote);
+                }
+                MaybeEmitCapturePerfStatus();
                 return;
             }
 
+            ReportFrameSendResumedIfNeeded(frameNote);
             _lastFrameSendTime = Time.unscaledTimeAsDouble;
             _localStreamFrameCount++;
             if (_localStreamFrameCount == 1 || _localStreamFrameCount % 30 == 0)
             {
                 EmitLocalStatus("local_stream_frames", $"{_localStreamFrameCount} | {frameNote}");
             }
+
+            MaybeEmitCapturePerfStatus();
 
             if (!_sessionConfigSent)
             {
@@ -311,6 +387,7 @@ namespace BallTracking.Runtime
         public void SetShotId(string shotId)
         {
             _shotId = string.IsNullOrWhiteSpace(shotId) ? "default-shot" : shotId;
+            ResetCapturePerfWindow();
         }
 
         public bool SendShotMarker(BowlingShotMarkerType markerType)
@@ -427,8 +504,8 @@ namespace BallTracking.Runtime
 
             try
             {
-                tcpClient.SendTimeout = (int)(Mathf.Max(0.5f, connectTimeoutSeconds) * 1000f);
-                tcpClient.ReceiveTimeout = (int)(Mathf.Max(0.5f, connectTimeoutSeconds) * 1000f);
+                tcpClient.SendTimeout = 0;
+                tcpClient.ReceiveTimeout = 0;
                 _controlClient = tcpClient;
                 _controlStream = tcpClient.GetStream();
                 _frameClient = new UdpClient();
@@ -450,6 +527,7 @@ namespace BallTracking.Runtime
             }
 
             EmitLocalStatus("transport_ready", $"tcp+udp {serverHost}:{serverPort}");
+            MaybeEmitVideoEncoderProbeStatus();
             TrySendHello();
             TrySendSessionConfig();
             TrySendLaneCalibration();
@@ -631,6 +709,8 @@ namespace BallTracking.Runtime
                 return;
             }
 
+            var passthroughSourceWidth = streamWidth;
+            var passthroughSourceHeight = streamHeight;
             float fx = 0f;
             float fy = 0f;
             float cx = streamWidth * 0.5f;
@@ -648,12 +728,21 @@ namespace BallTracking.Runtime
             if (UsesPassthroughCamera() && cameraAccess != null && cameraAccess.IsPlaying)
             {
                 var intrinsics = cameraAccess.Intrinsics;
-                fx = intrinsics.FocalLength.x;
-                fy = intrinsics.FocalLength.y;
-                cx = intrinsics.PrincipalPoint.x;
-                cy = intrinsics.PrincipalPoint.y;
-                sensorWidth = intrinsics.SensorResolution.x;
-                sensorHeight = intrinsics.SensorResolution.y;
+                var sourceTexture = cameraAccess.GetTexture();
+                if (sourceTexture != null)
+                {
+                    passthroughSourceWidth = Mathf.Max(1, sourceTexture.width);
+                    passthroughSourceHeight = Mathf.Max(1, sourceTexture.height);
+                }
+
+                var widthScale = (float)streamWidth / Mathf.Max(1, passthroughSourceWidth);
+                var heightScale = (float)streamHeight / Mathf.Max(1, passthroughSourceHeight);
+                fx = intrinsics.FocalLength.x * widthScale;
+                fy = intrinsics.FocalLength.y * heightScale;
+                cx = intrinsics.PrincipalPoint.x * widthScale;
+                cy = intrinsics.PrincipalPoint.y * heightScale;
+                sensorWidth = streamWidth;
+                sensorHeight = streamHeight;
                 lensPositionX = intrinsics.LensOffset.position.x;
                 lensPositionY = intrinsics.LensOffset.position.y;
                 lensPositionZ = intrinsics.LensOffset.position.z;
@@ -772,41 +861,215 @@ namespace BallTracking.Runtime
                 return false;
             }
 
+            if (useAsyncGpuReadback && SystemInfo.supportsAsyncGPUReadback)
+            {
+                return TrySendCurrentFrameAsync(out note);
+            }
+
+            var frameStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+            double renderMs = 0.0;
+            double readbackMs = 0.0;
+            double applyMs = 0.0;
+            double jpegMs = 0.0;
+            double encodeMs = 0.0;
+            double udpMs = 0.0;
+
+            var renderStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
             if (!TryRenderStreamFrame(out var sourceNote))
             {
-                note = sourceNote;
+                renderMs = Time.realtimeSinceStartupAsDouble * 1000.0 - renderStartMs;
+                note = $"{sourceNote} | render_ms {renderMs:F1}";
                 return false;
             }
+            renderMs = Time.realtimeSinceStartupAsDouble * 1000.0 - renderStartMs;
 
-            if (!TryEncodeCurrentFrame(out var encodedJpeg, out var encodeNote))
+            var encodeStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+            if (!TryEncodeCurrentFrame(out var encodedJpeg, out var encodeNote, out readbackMs, out applyMs, out jpegMs))
             {
-                note = encodeNote;
+                encodeMs = Time.realtimeSinceStartupAsDouble * 1000.0 - encodeStartMs;
+                note = $"{encodeNote} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1}";
                 return false;
             }
+            encodeMs = Time.realtimeSinceStartupAsDouble * 1000.0 - encodeStartMs;
 
             var frameId = _nextFrameId++;
+            var headPose = GetHeadPose();
+            var cameraPose = GetCameraPose(headPose);
+            var frameTimestampUtc = GetFrameTimestampUtc();
             var framePayload = BowlingProtocol.EncodeFramePacket(
                 _sessionId,
                 _shotId,
                 frameId,
-                DateTime.UtcNow,
-                new Pose(Vector3.zero, Quaternion.identity),
+                frameTimestampUtc,
+                cameraPose,
+                headPose,
                 encodedJpeg);
 
+            var udpStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
             if (!TrySendUdpFrame(frameId, framePayload, out var udpNote))
             {
-                note = udpNote;
+                udpMs = Time.realtimeSinceStartupAsDouble * 1000.0 - udpStartMs;
+                var totalMsFailed = Time.realtimeSinceStartupAsDouble * 1000.0 - frameStartMs;
+                note = $"{udpNote} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1} | udp_ms {udpMs:F1} | total_ms {totalMsFailed:F1}";
                 return false;
             }
+            udpMs = Time.realtimeSinceStartupAsDouble * 1000.0 - udpStartMs;
 
-            note = $"{sourceNote} | jpeg {encodedJpeg.Length} | {udpNote}";
+            var totalMs = Time.realtimeSinceStartupAsDouble * 1000.0 - frameStartMs;
+            TrackCaptureSent(renderMs, readbackMs, applyMs, jpegMs, encodeMs, udpMs, totalMs);
+            MaybeEmitSlowFrameStatus(frameId, renderMs, readbackMs, applyMs, jpegMs, encodeMs, udpMs, totalMs, encodedJpeg.Length);
+
+            note = $"frame {frameId} | {sourceNote} | jpeg {encodedJpeg.Length} | {udpNote} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1} | udp_ms {udpMs:F1} | total_ms {totalMs:F1}";
             return true;
         }
 
-        private bool TryEncodeCurrentFrame(out byte[] encodedJpeg, out string note)
+        private bool TrySendCurrentFrameAsync(out string note)
+        {
+            note = "async_readback_unavailable";
+            if (_hasPendingReadbackRequest)
+            {
+                if (!_pendingReadbackRequest.done)
+                {
+                    note = "async_readback_pending";
+                    return false;
+                }
+
+                return TryFinalizePendingAsyncFrame(out note);
+            }
+
+            var renderStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+            if (!TryRenderStreamFrame(out var sourceNote))
+            {
+                var renderMsFailed = Time.realtimeSinceStartupAsDouble * 1000.0 - renderStartMs;
+                note = $"{sourceNote} | render_ms {renderMsFailed:F1}";
+                return false;
+            }
+
+            var renderMs = Time.realtimeSinceStartupAsDouble * 1000.0 - renderStartMs;
+            var frameId = _nextFrameId++;
+            var headPose = GetHeadPose();
+            var cameraPose = GetCameraPose(headPose);
+            var frameTimestampUtc = GetFrameTimestampUtc();
+            var issuedAtMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+
+            try
+            {
+                _pendingReadbackRequest = AsyncGPUReadback.Request(_streamTexture, 0, TextureFormat.RGB24);
+                _hasPendingReadbackRequest = true;
+                _pendingReadbackFrameId = frameId;
+                _pendingReadbackTimestampUtc = frameTimestampUtc;
+                _pendingReadbackCameraPose = cameraPose;
+                _pendingReadbackHeadPose = headPose;
+                _pendingReadbackSourceNote = sourceNote;
+                _pendingReadbackShotId = _shotId;
+                _pendingReadbackRenderMs = renderMs;
+                _pendingReadbackIssuedAtMs = issuedAtMs;
+                _pendingReadbackWidth = _streamTexture.width;
+                _pendingReadbackHeight = _streamTexture.height;
+                note = $"async_readback_started | frame {frameId} | {sourceNote} | render_ms {renderMs:F1}";
+                return false;
+            }
+            catch (Exception ex)
+            {
+                note = $"async_readback_start_failed | render_ms {renderMs:F1}";
+                QueueStatus("frame_encode_failed", ex.GetType().Name + ": " + ex.Message);
+                ClearPendingAsyncReadback();
+                return false;
+            }
+        }
+
+        private bool TryFinalizePendingAsyncFrame(out string note)
+        {
+            note = "async_readback_missing";
+            if (!_hasPendingReadbackRequest)
+            {
+                return false;
+            }
+
+            var renderMs = _pendingReadbackRenderMs;
+            var readbackMs = Math.Max(0.0, Time.realtimeSinceStartupAsDouble * 1000.0 - _pendingReadbackIssuedAtMs);
+            double applyMs = 0.0;
+            double jpegMs = 0.0;
+            byte[] encodedJpeg = null;
+            ulong frameId = _pendingReadbackFrameId;
+            string sourceNote = _pendingReadbackSourceNote;
+            DateTime timestampUtc = _pendingReadbackTimestampUtc;
+            Pose cameraPose = _pendingReadbackCameraPose;
+            Pose headPose = _pendingReadbackHeadPose;
+            string shotId = _pendingReadbackShotId;
+            int width = _pendingReadbackWidth;
+            int height = _pendingReadbackHeight;
+
+            try
+            {
+                if (_pendingReadbackRequest.hasError)
+                {
+                    note = $"async_readback_error | render_ms {renderMs:F1} | readback_ms {readbackMs:F1}";
+                    return false;
+                }
+
+                EnsureReadbackTexture(width, height);
+                var data = _pendingReadbackRequest.GetData<byte>();
+
+                var applyStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+                _readbackTexture.LoadRawTextureData(data);
+                _readbackTexture.Apply(false, false);
+                applyMs = Time.realtimeSinceStartupAsDouble * 1000.0 - applyStartMs;
+
+                var jpegStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+                encodedJpeg = ImageConversion.EncodeToJPG(_readbackTexture, Mathf.Clamp(jpegQuality, 1, 100));
+                jpegMs = Time.realtimeSinceStartupAsDouble * 1000.0 - jpegStartMs;
+                if (encodedJpeg == null || encodedJpeg.Length == 0)
+                {
+                    note = $"jpeg_encode_failed | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1}";
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                note = $"async_readback_encode_exception | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1}";
+                QueueStatus("frame_encode_failed", ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+            finally
+            {
+                ClearPendingAsyncReadback();
+            }
+
+            var encodeMs = readbackMs + applyMs + jpegMs;
+            var framePayload = BowlingProtocol.EncodeFramePacket(
+                _sessionId,
+                shotId,
+                frameId,
+                timestampUtc,
+                cameraPose,
+                headPose,
+                encodedJpeg);
+
+            var udpStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
+            if (!TrySendUdpFrame(frameId, framePayload, out var udpNote))
+            {
+                var udpMsFailed = Time.realtimeSinceStartupAsDouble * 1000.0 - udpStartMs;
+                var totalMsFailed = renderMs + encodeMs + udpMsFailed;
+                note = $"{udpNote} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1} | udp_ms {udpMsFailed:F1} | total_ms {totalMsFailed:F1}";
+                return false;
+            }
+
+            var udpMs = Time.realtimeSinceStartupAsDouble * 1000.0 - udpStartMs;
+            var totalMs = renderMs + encodeMs + udpMs;
+            TrackCaptureSent(renderMs, readbackMs, applyMs, jpegMs, encodeMs, udpMs, totalMs);
+            MaybeEmitSlowFrameStatus(frameId, renderMs, readbackMs, applyMs, jpegMs, encodeMs, udpMs, totalMs, encodedJpeg.Length);
+            note = $"frame {frameId} | {sourceNote} | async_jpeg {encodedJpeg.Length} | {udpNote} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1} | udp_ms {udpMs:F1} | total_ms {totalMs:F1}";
+            return true;
+        }
+
+        private bool TryEncodeCurrentFrame(out byte[] encodedJpeg, out string note, out double readbackMs, out double applyMs, out double jpegMs)
         {
             encodedJpeg = null;
             note = "readback_unavailable";
+            readbackMs = 0.0;
+            applyMs = 0.0;
+            jpegMs = 0.0;
 
             if (_streamTexture == null)
             {
@@ -819,9 +1082,17 @@ namespace BallTracking.Runtime
             try
             {
                 RenderTexture.active = _streamTexture;
+                var readbackStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
                 _readbackTexture.ReadPixels(new Rect(0, 0, _streamTexture.width, _streamTexture.height), 0, 0, false);
+                readbackMs = Time.realtimeSinceStartupAsDouble * 1000.0 - readbackStartMs;
+
+                var applyStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
                 _readbackTexture.Apply(false, false);
+                applyMs = Time.realtimeSinceStartupAsDouble * 1000.0 - applyStartMs;
+
+                var jpegStartMs = Time.realtimeSinceStartupAsDouble * 1000.0;
                 encodedJpeg = ImageConversion.EncodeToJPG(_readbackTexture, Mathf.Clamp(jpegQuality, 1, 100));
+                jpegMs = Time.realtimeSinceStartupAsDouble * 1000.0 - jpegStartMs;
                 if (encodedJpeg == null || encodedJpeg.Length == 0)
                 {
                     note = "jpeg_encode_failed";
@@ -881,7 +1152,7 @@ namespace BallTracking.Runtime
                     _frameClient.Send(datagram, datagram.Length);
                 }
 
-                note = $"{payload.Length} bytes | {chunkCount} udp";
+                note = $"{payload.Length} bytes | {chunkCount} udp | chunk {chunkPayloadSize}";
                 return true;
             }
             catch (Exception ex)
@@ -890,6 +1161,299 @@ namespace BallTracking.Runtime
                 QueueStatus("udp_send_failed", ex.GetType().Name + ": " + ex.Message);
                 return false;
             }
+        }
+
+        private Pose GetHeadPose()
+        {
+            var anchor = ResolveHeadAnchorTransform();
+            if (anchor == null)
+            {
+                return new Pose(transform.position, transform.rotation);
+            }
+
+            return new Pose(anchor.position, anchor.rotation);
+        }
+
+        private Pose GetCameraPose(Pose fallbackPose)
+        {
+            if (UsesPassthroughCamera() && cameraAccess != null && cameraAccess.IsPlaying)
+            {
+                return cameraAccess.GetCameraPose();
+            }
+
+            if (_syntheticSenderCamera != null)
+            {
+                return new Pose(_syntheticSenderCamera.transform.position, _syntheticSenderCamera.transform.rotation);
+            }
+
+            if (Camera.main != null)
+            {
+                return new Pose(Camera.main.transform.position, Camera.main.transform.rotation);
+            }
+
+            return fallbackPose;
+        }
+
+        private DateTime GetFrameTimestampUtc()
+        {
+            if (UsesPassthroughCamera() && cameraAccess != null && cameraAccess.IsPlaying)
+            {
+                var cameraTimestamp = cameraAccess.Timestamp;
+                if (cameraTimestamp != default)
+                {
+                    return cameraTimestamp.Kind == DateTimeKind.Utc ? cameraTimestamp : cameraTimestamp.ToUniversalTime();
+                }
+            }
+
+            return DateTime.UtcNow;
+        }
+
+        private Transform ResolveHeadAnchorTransform()
+        {
+            if (_headAnchorTransform != null)
+            {
+                return _headAnchorTransform;
+            }
+
+            _headAnchorTransform = GameObject.Find("CenterEyeAnchor")?.transform;
+            if (_headAnchorTransform == null && Camera.main != null)
+            {
+                _headAnchorTransform = Camera.main.transform;
+            }
+
+            return _headAnchorTransform;
+        }
+
+        private void ConfigurePassthroughCameraAccess()
+        {
+            if (cameraAccess == null)
+            {
+                return;
+            }
+
+            cameraAccess.CameraPosition = cameraPosition;
+
+            var requestedMaxFramerate = Mathf.Max(1, targetSendFps);
+            if (cameraAccess.MaxFramerate == requestedMaxFramerate)
+            {
+                return;
+            }
+
+            var wasEnabled = cameraAccess.enabled;
+            if (wasEnabled)
+            {
+                cameraAccess.enabled = false;
+            }
+
+            cameraAccess.MaxFramerate = requestedMaxFramerate;
+
+            if (wasEnabled)
+            {
+                cameraAccess.enabled = true;
+            }
+
+            EmitLocalStatus("camera_max_fps_requested", requestedMaxFramerate.ToString());
+        }
+
+        private void EnsureCaptureStatsWindowStarted()
+        {
+            if (_captureStatsWindowStartTime <= 0.0)
+            {
+                _captureStatsWindowStartTime = Time.unscaledTimeAsDouble;
+            }
+        }
+
+        private void ObserveCameraUpdateIfNeeded()
+        {
+            if (!UsesPassthroughCamera() || cameraAccess == null || !cameraAccess.IsPlaying)
+            {
+                return;
+            }
+
+            EnsureCaptureStatsWindowStarted();
+            if (!cameraAccess.IsUpdatedThisFrame)
+            {
+                return;
+            }
+
+            var now = Time.unscaledTimeAsDouble;
+            if (_captureCameraLastUpdateTime > 0.0)
+            {
+                var deltaMs = (now - _captureCameraLastUpdateTime) * 1000.0;
+                _captureCameraUpdateDeltaSumMs += deltaMs;
+                _captureCameraUpdateMinDeltaMs = Math.Min(_captureCameraUpdateMinDeltaMs, deltaMs);
+                _captureCameraUpdateMaxDeltaMs = Math.Max(_captureCameraUpdateMaxDeltaMs, deltaMs);
+            }
+
+            _captureCameraLastUpdateTime = now;
+            _captureCameraUpdateCount++;
+        }
+
+        private void MaybeEmitCameraSourcePerfStatus()
+        {
+            if (_captureCameraUpdateCount <= 0 || _captureCameraUpdateCount % 15 != 0)
+            {
+                return;
+            }
+
+            var now = Time.unscaledTimeAsDouble;
+            var windowSeconds = Math.Max(0.001, now - _captureStatsWindowStartTime);
+            var cameraUpdateFps = _captureCameraUpdateCount / windowSeconds;
+            var avgCameraDeltaMs = _captureCameraUpdateCount > 1 ? _captureCameraUpdateDeltaSumMs / (_captureCameraUpdateCount - 1) : 0.0;
+            var minCameraDeltaMs = double.IsPositiveInfinity(_captureCameraUpdateMinDeltaMs) ? 0.0 : _captureCameraUpdateMinDeltaMs;
+
+            EmitLocalStatus(
+                "camera_source_perf",
+                $"requested {targetSendFps} | camera_update_fps {cameraUpdateFps:F1} | avg_camera_gap_ms {avgCameraDeltaMs:F1} | min_camera_gap_ms {minCameraDeltaMs:F1} | max_camera_gap_ms {_captureCameraUpdateMaxDeltaMs:F1} | camera_updates {_captureCameraUpdateCount} | probe_only 1");
+        }
+
+        private static bool IsDeferredCaptureState(string note)
+        {
+            return note != null &&
+                   (note.StartsWith("async_readback_started", StringComparison.Ordinal) ||
+                    note.StartsWith("async_readback_pending", StringComparison.Ordinal));
+        }
+
+        private void ClearPendingAsyncReadback()
+        {
+            _hasPendingReadbackRequest = false;
+            _pendingReadbackRequest = default;
+            _pendingReadbackFrameId = 0;
+            _pendingReadbackTimestampUtc = default;
+            _pendingReadbackCameraPose = default;
+            _pendingReadbackHeadPose = default;
+            _pendingReadbackSourceNote = null;
+            _pendingReadbackShotId = null;
+            _pendingReadbackRenderMs = 0.0;
+            _pendingReadbackIssuedAtMs = 0.0;
+            _pendingReadbackWidth = 0;
+            _pendingReadbackHeight = 0;
+        }
+
+        private void MaybeEmitVideoEncoderProbeStatus()
+        {
+            if (_videoEncoderProbeReported)
+            {
+                return;
+            }
+
+            var result = QuestVideoEncoderProbe.Probe();
+            EmitLocalStatus("video_encoder_probe", QuestVideoEncoderProbe.Summarize(result));
+            _videoEncoderProbeReported = true;
+        }
+
+        private void TrackCaptureBlocked(string note)
+        {
+            if (note != null && note.StartsWith("passthrough_not_updated", StringComparison.Ordinal))
+            {
+                _captureBlockedPassthroughCount++;
+                return;
+            }
+
+            _captureBlockedOtherCount++;
+        }
+
+        private void TrackCaptureSent(double renderMs, double readbackMs, double applyMs, double jpegMs, double encodeMs, double udpMs, double totalMs)
+        {
+            var now = Time.unscaledTimeAsDouble;
+            EnsureCaptureStatsWindowStarted();
+
+            if (_captureStatsLastSentTime > 0.0)
+            {
+                var deltaMs = (now - _captureStatsLastSentTime) * 1000.0;
+                _captureStatsSentDeltaSumMs += deltaMs;
+                _captureStatsMinSentDeltaMs = Math.Min(_captureStatsMinSentDeltaMs, deltaMs);
+                _captureStatsMaxSentDeltaMs = Math.Max(_captureStatsMaxSentDeltaMs, deltaMs);
+            }
+
+            _captureStatsLastSentTime = now;
+            _captureSentCount++;
+            _captureRenderSumMs += renderMs;
+            _captureReadbackSumMs += readbackMs;
+            _captureApplySumMs += applyMs;
+            _captureJpegSumMs += jpegMs;
+            _captureEncodeSumMs += encodeMs;
+            _captureUdpSumMs += udpMs;
+            _captureTotalSumMs += totalMs;
+            _captureRenderMaxMs = Math.Max(_captureRenderMaxMs, renderMs);
+            _captureReadbackMaxMs = Math.Max(_captureReadbackMaxMs, readbackMs);
+            _captureApplyMaxMs = Math.Max(_captureApplyMaxMs, applyMs);
+            _captureJpegMaxMs = Math.Max(_captureJpegMaxMs, jpegMs);
+            _captureEncodeMaxMs = Math.Max(_captureEncodeMaxMs, encodeMs);
+            _captureUdpMaxMs = Math.Max(_captureUdpMaxMs, udpMs);
+            _captureTotalMaxMs = Math.Max(_captureTotalMaxMs, totalMs);
+        }
+
+        private void MaybeEmitCapturePerfStatus()
+        {
+            if (_captureSentCount <= 0 || _captureSentCount % 5 != 0)
+            {
+                return;
+            }
+
+            var now = Time.unscaledTimeAsDouble;
+            var windowSeconds = Math.Max(0.001, now - _captureStatsWindowStartTime);
+            var effectiveFps = _captureSentCount / windowSeconds;
+            var cameraUpdateFps = _captureCameraUpdateCount / windowSeconds;
+            var avgDeltaMs = _captureSentCount > 1 ? _captureStatsSentDeltaSumMs / (_captureSentCount - 1) : 0.0;
+            var minDeltaMs = double.IsPositiveInfinity(_captureStatsMinSentDeltaMs) ? 0.0 : _captureStatsMinSentDeltaMs;
+            var avgCameraDeltaMs = _captureCameraUpdateCount > 1 ? _captureCameraUpdateDeltaSumMs / (_captureCameraUpdateCount - 1) : 0.0;
+            var minCameraDeltaMs = double.IsPositiveInfinity(_captureCameraUpdateMinDeltaMs) ? 0.0 : _captureCameraUpdateMinDeltaMs;
+            var avgRenderMs = _captureRenderSumMs / _captureSentCount;
+            var avgReadbackMs = _captureReadbackSumMs / _captureSentCount;
+            var avgApplyMs = _captureApplySumMs / _captureSentCount;
+            var avgJpegMs = _captureJpegSumMs / _captureSentCount;
+            var avgEncodeMs = _captureEncodeSumMs / _captureSentCount;
+            var avgUdpMs = _captureUdpSumMs / _captureSentCount;
+            var avgTotalMs = _captureTotalSumMs / _captureSentCount;
+
+            EmitLocalStatus(
+                "capture_perf",
+                $"target {targetSendFps} | effective {effectiveFps:F1} | camera_update_fps {cameraUpdateFps:F1} | avg_gap_ms {avgDeltaMs:F1} | min_gap_ms {minDeltaMs:F1} | max_gap_ms {_captureStatsMaxSentDeltaMs:F1} | avg_camera_gap_ms {avgCameraDeltaMs:F1} | min_camera_gap_ms {minCameraDeltaMs:F1} | max_camera_gap_ms {_captureCameraUpdateMaxDeltaMs:F1} | avg_render_ms {avgRenderMs:F1} | avg_readback_ms {avgReadbackMs:F1} | avg_apply_ms {avgApplyMs:F1} | avg_jpeg_ms {avgJpegMs:F1} | avg_encode_ms {avgEncodeMs:F1} | avg_udp_ms {avgUdpMs:F1} | avg_total_ms {avgTotalMs:F1} | max_render_ms {_captureRenderMaxMs:F1} | max_readback_ms {_captureReadbackMaxMs:F1} | max_apply_ms {_captureApplyMaxMs:F1} | max_jpeg_ms {_captureJpegMaxMs:F1} | max_encode_ms {_captureEncodeMaxMs:F1} | max_udp_ms {_captureUdpMaxMs:F1} | max_total_ms {_captureTotalMaxMs:F1} | camera_updates {_captureCameraUpdateCount} | blocked_passthrough {_captureBlockedPassthroughCount} | blocked_other {_captureBlockedOtherCount} | attempts {_captureAttemptCount}");
+        }
+
+        private void MaybeEmitSlowFrameStatus(ulong frameId, double renderMs, double readbackMs, double applyMs, double jpegMs, double encodeMs, double udpMs, double totalMs, int jpegBytes)
+        {
+            if (totalMs < 250.0)
+            {
+                return;
+            }
+
+            EmitLocalStatus(
+                "capture_slow_frame",
+                $"frame {frameId} | jpeg {jpegBytes} | render_ms {renderMs:F1} | readback_ms {readbackMs:F1} | apply_ms {applyMs:F1} | jpeg_ms {jpegMs:F1} | encode_ms {encodeMs:F1} | udp_ms {udpMs:F1} | total_ms {totalMs:F1}");
+        }
+
+        private void ResetCapturePerfWindow()
+        {
+            _captureAttemptCount = 0;
+            _captureSentCount = 0;
+            _captureBlockedPassthroughCount = 0;
+            _captureBlockedOtherCount = 0;
+            _captureStatsWindowStartTime = 0.0;
+            _captureStatsLastSentTime = 0.0;
+            _captureStatsSentDeltaSumMs = 0.0;
+            _captureStatsMinSentDeltaMs = double.PositiveInfinity;
+            _captureStatsMaxSentDeltaMs = 0.0;
+            _captureCameraUpdateCount = 0;
+            _captureCameraLastUpdateTime = 0.0;
+            _captureCameraUpdateDeltaSumMs = 0.0;
+            _captureCameraUpdateMinDeltaMs = double.PositiveInfinity;
+            _captureCameraUpdateMaxDeltaMs = 0.0;
+            _captureRenderSumMs = 0.0;
+            _captureReadbackSumMs = 0.0;
+            _captureApplySumMs = 0.0;
+            _captureJpegSumMs = 0.0;
+            _captureEncodeSumMs = 0.0;
+            _captureUdpSumMs = 0.0;
+            _captureTotalSumMs = 0.0;
+            _captureRenderMaxMs = 0.0;
+            _captureReadbackMaxMs = 0.0;
+            _captureApplyMaxMs = 0.0;
+            _captureJpegMaxMs = 0.0;
+            _captureEncodeMaxMs = 0.0;
+            _captureUdpMaxMs = 0.0;
+            _captureTotalMaxMs = 0.0;
         }
 
         private bool UsesPassthroughCamera()
@@ -922,9 +1486,8 @@ namespace BallTracking.Runtime
                     return false;
                 }
 
-                width = sourceTexture.width;
-                height = sourceTexture.height;
-                note = "passthrough";
+                GetPassthroughSendResolution(sourceTexture.width, sourceTexture.height, out width, out height);
+                note = $"passthrough {sourceTexture.width}x{sourceTexture.height}->{width}x{height}";
                 return true;
             }
 
@@ -972,6 +1535,52 @@ namespace BallTracking.Runtime
             _syntheticSenderCamera.Render();
             note = "synthetic_camera";
             return true;
+        }
+
+        private void GetPassthroughSendResolution(int sourceWidth, int sourceHeight, out int width, out int height)
+        {
+            sourceWidth = Mathf.Max(64, sourceWidth);
+            sourceHeight = Mathf.Max(64, sourceHeight);
+
+            var configuredWidth = passthroughSendResolution.x;
+            var configuredHeight = passthroughSendResolution.y;
+            if (configuredWidth <= 0 && configuredHeight <= 0)
+            {
+                width = sourceWidth;
+                height = sourceHeight;
+                return;
+            }
+
+            if (configuredWidth <= 0)
+            {
+                configuredWidth = Mathf.RoundToInt(sourceWidth * (configuredHeight / (float)Mathf.Max(1, sourceHeight)));
+            }
+            else if (configuredHeight <= 0)
+            {
+                configuredHeight = Mathf.RoundToInt(sourceHeight * (configuredWidth / (float)Mathf.Max(1, sourceWidth)));
+            }
+
+            configuredWidth = Mathf.Max(64, configuredWidth);
+            configuredHeight = Mathf.Max(64, configuredHeight);
+
+            var scale = Mathf.Min(
+                1f,
+                Mathf.Min(
+                    configuredWidth / (float)Mathf.Max(1, sourceWidth),
+                    configuredHeight / (float)Mathf.Max(1, sourceHeight)));
+
+            width = Mathf.Clamp(MakeEven(Mathf.RoundToInt(sourceWidth * scale)), 64, sourceWidth);
+            height = Mathf.Clamp(MakeEven(Mathf.RoundToInt(sourceHeight * scale)), 64, sourceHeight);
+        }
+
+        private static int MakeEven(int value)
+        {
+            if (value <= 64)
+            {
+                return 64;
+            }
+
+            return (value & 1) == 0 ? value : value - 1;
         }
 
         private void EnsureStreamTexture(int width, int height)
@@ -1112,6 +1721,8 @@ namespace BallTracking.Runtime
             _helloSent = false;
             _sessionConfigSent = false;
             _laneCalibrationSent = false;
+            _videoEncoderProbeReported = false;
+            ClearPendingAsyncReadback();
         }
 
         private static bool AreCameraPermissionsGranted()
@@ -1144,6 +1755,34 @@ namespace BallTracking.Runtime
             });
         }
 
+        private void ReportFrameSendBlocked(string note)
+        {
+            note = string.IsNullOrWhiteSpace(note) ? "unknown" : note;
+            _consecutiveFrameSendFailures++;
+            var shouldEmit =
+                _consecutiveFrameSendFailures == 1 ||
+                _consecutiveFrameSendFailures == 15 ||
+                _consecutiveFrameSendFailures % 60 == 0 ||
+                !string.Equals(note, _lastFrameSendFailureNote, StringComparison.Ordinal);
+
+            _lastFrameSendFailureNote = note;
+            if (shouldEmit)
+            {
+                EmitLocalStatus("frame_send_blocked", $"{note} | consecutive {_consecutiveFrameSendFailures}");
+            }
+        }
+
+        private void ReportFrameSendResumedIfNeeded(string note)
+        {
+            if (_consecutiveFrameSendFailures > 0)
+            {
+                EmitLocalStatus("frame_send_resumed", $"{note} | after {_consecutiveFrameSendFailures} blocked");
+            }
+
+            _consecutiveFrameSendFailures = 0;
+            _lastFrameSendFailureNote = null;
+        }
+
         private void EmitLocalStatus(string stage, string message = null)
         {
             var payload = new LocalTrackerStatusMessage
@@ -1160,6 +1799,38 @@ namespace BallTracking.Runtime
             TrackerStatusReceived?.Invoke(json);
             Debug.Log($"[QuestBowlingStreamClient] status={stage} message={message}");
             AppendStatusLog(stage, message);
+            MirrorLocalStatusToLaptop(stage, payload);
+        }
+
+        private void MirrorLocalStatusToLaptop(string stage, LocalTrackerStatusMessage payload)
+        {
+            if (!_controlConnected || _controlStream == null || payload == null)
+            {
+                return;
+            }
+
+            if (stage != null && (stage.StartsWith("remote_", StringComparison.Ordinal) || string.Equals(stage, "shot_result_received", StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            try
+            {
+                var json = JsonUtility.ToJson(payload);
+                var bytes = Encoding.UTF8.GetBytes(json);
+                lock (_controlSendGate)
+                {
+                    if (_controlStream == null)
+                    {
+                        return;
+                    }
+
+                    BowlingProtocol.WritePacket(_controlStream, BowlingPacketType.TrackerStatus, bytes);
+                }
+            }
+            catch
+            {
+            }
         }
 
         private void AppendStatusLog(string stage, string message)

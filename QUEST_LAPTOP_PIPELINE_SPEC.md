@@ -142,6 +142,9 @@ The repo keeps two lightweight receiver modes:
   - records raw received UDP JPEG frames only
   - does not run the tracking bridge
   - returns a simple diagnostic `shot_result`
+- `record only`
+  - operationally the same as `diagnostic`
+  - intended for collecting raw Quest captures plus metadata for later analytics
 - `synthetic`
   - runs the normal control and recording path
   - returns a fake-but-valid tracking result for round-trip testing

@@ -5,12 +5,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Optional
 
+import cv2
 import numpy as np
 
 try:
     from . import classical_seed_core as classical_core
+    from . import lane_geometry
 except ImportError:
     import classical_seed_core as classical_core
+    import lane_geometry
 
 
 @dataclass
@@ -36,6 +39,8 @@ class OnlineClassicalSeedConfig:
     min_track_travel: float = 180.0
     min_start_center_y_ratio: float = 0.55
     min_mean_score: float = 0.62
+    max_lane_hypotheses: int = 4
+    release_band_start_y_ratio: float = 0.38
 
 
 class OnlineClassicalSeedDetector:
@@ -65,8 +70,15 @@ class OnlineClassicalSeedDetector:
         )
         self.frame_width = frame_width
         self.frame_height = frame_height
-        self.lane_points = self.classical.build_default_bowling_corridor(frame_width, frame_height)
-        self.lane_mask = self.classical.build_lane_mask(self.lane_points, frame_width, frame_height)
+        self.primary_lane = lane_geometry.build_default_lane_hypothesis(frame_width, frame_height)
+        self.lane_hypotheses: list[lane_geometry.LaneHypothesis] = [self.primary_lane]
+        self.selected_lane = self.primary_lane
+        self.selected_lane_score = 0.0
+        self.lane_points = self.primary_lane.points
+        self.lane_mask = lane_geometry.build_union_lane_mask(self.lane_hypotheses, frame_width, frame_height)
+        self.lane_initialized = False
+        self.lane_debug_frame_idx: Optional[int] = None
+        self.lane_debug_frame_rgb: Optional[np.ndarray] = None
         self.prev_sampled_frame_rgb: Optional[np.ndarray] = None
         self.candidates = []
         self.sampled_frames = 0
@@ -81,6 +93,8 @@ class OnlineClassicalSeedDetector:
     def process_frame(self, frame_idx: int, frame_rgb: np.ndarray) -> Optional[dict[str, Any]]:
         if not self.should_sample(frame_idx):
             return None
+
+        self._ensure_lane_hypotheses(frame_idx, frame_rgb)
 
         self.sampled_frames += 1
         self.sampled_frame_cache[frame_idx] = frame_rgb.copy()
@@ -100,11 +114,15 @@ class OnlineClassicalSeedDetector:
         )
 
         self.prev_sampled_frame_rgb = frame_rgb.copy()
-        track = self.classical.choose_track(self.candidates, self.frame_height, self.args)
+        valid_tracks = self.classical.build_valid_tracks(self.candidates, self.frame_height, self.args)
+        track, selected_lane, selection_score = self._select_track(valid_tracks)
         if track is None:
             return None
 
         self.best_track = track
+        self.selected_lane = selected_lane or self.primary_lane
+        self.selected_lane_score = selection_score
+        self.lane_points = self.selected_lane.points
         seed = self._build_seed_from_track(track)
         if seed is None:
             return None
@@ -122,7 +140,108 @@ class OnlineClassicalSeedDetector:
             "seed_box": seed["box"],
             "track_length": seed["track_length"],
             "initializer": seed["initializer"],
+            "lane_model": seed["lane_model"],
         }
+
+    def _ensure_lane_hypotheses(self, frame_idx: int, frame_rgb: np.ndarray) -> None:
+        if self.lane_initialized:
+            return
+        estimated = lane_geometry.estimate_lane_hypotheses(
+            frame_rgb,
+            max_hypotheses=self.config.max_lane_hypotheses,
+        )
+        if estimated:
+            self.lane_hypotheses = estimated
+            self.primary_lane = estimated[0]
+        else:
+            self.lane_hypotheses = [self.primary_lane]
+        self.selected_lane = self.primary_lane
+        self.lane_points = self.primary_lane.points
+        self.lane_mask = lane_geometry.build_union_lane_mask(self.lane_hypotheses, self.frame_width, self.frame_height)
+        self.lane_initialized = True
+        self.lane_debug_frame_idx = frame_idx
+        self.lane_debug_frame_rgb = frame_rgb.copy()
+
+    def _select_track(self, valid_tracks) -> tuple[Any, lane_geometry.LaneHypothesis | None, float]:
+        if not valid_tracks:
+            return None, None, 0.0
+
+        best_track = None
+        best_lane = None
+        best_score = float("-inf")
+        for track in valid_tracks:
+            for hypothesis in self.lane_hypotheses:
+                score = self._score_track_for_lane(track, hypothesis)
+                if score > best_score:
+                    best_track = track
+                    best_lane = hypothesis
+                    best_score = score
+
+        if best_track is None:
+            fallback = sorted(
+                valid_tracks,
+                key=lambda track: (track.first.frame_idx, -track.total_score, -self.classical.mean_node_score(track)),
+            )[0]
+            return fallback, self.primary_lane, 0.0
+        return best_track, best_lane, float(best_score)
+
+    def _score_track_for_lane(self, track, hypothesis: lane_geometry.LaneHypothesis) -> float:
+        inside_hits = 0
+        margin_scores: list[float] = []
+        for candidate in track.candidates:
+            inside = cv2.pointPolygonTest(
+                hypothesis.points.astype(np.float32),
+                (float(candidate.cx), float(candidate.cy)),
+                False,
+            )
+            if inside >= 0:
+                inside_hits += 1
+            lateral = lane_geometry.normalized_lateral_position(hypothesis.points, candidate.cx, candidate.cy)
+            if lateral is not None:
+                margin_scores.append(float(np.clip(min(lateral, 1.0 - lateral) / 0.25, 0.0, 1.0)))
+
+        inside_fraction = inside_hits / max(len(track.candidates), 1)
+        edge_margin = sum(margin_scores) / max(len(margin_scores), 1)
+        start_ratio = track.first.cy / max(self.frame_height, 1)
+        lane_left, lane_right = lane_geometry.lane_bounds_at_y(hypothesis.points, track.first.cy)
+        lane_width = max(lane_right - lane_left, 1.0)
+        seed_lane_width_ratio = track.first.width / lane_width
+        size_score = float(np.exp(-abs(np.log(max(seed_lane_width_ratio, 1e-6) / 0.12))))
+        release_score = float(
+            np.clip(
+                (start_ratio - self.config.release_band_start_y_ratio)
+                / max(1e-6, 0.88 - self.config.release_band_start_y_ratio),
+                0.0,
+                1.25,
+            )
+        )
+        travel_score = float(
+            np.clip(
+                self.classical.total_y_travel(track) / max(self.frame_height * 0.24, 1.0),
+                0.0,
+                1.6,
+            )
+        )
+        mean_score = float(np.clip(self.classical.mean_node_score(track), 0.0, 1.5))
+        monotonic = float(self.classical.monotonic_fraction(track))
+        frame_score = float(np.clip(track.first.frame_idx / 50.0, 0.0, 1.0))
+
+        total = (
+            1.35 * inside_fraction
+            + 1.10 * release_score
+            + 0.85 * travel_score
+            + 0.70 * mean_score
+            + 0.55 * size_score
+            + 0.45 * monotonic
+            + 0.40 * edge_margin
+            + 0.35 * hypothesis.confidence
+            + 0.20 * frame_score
+        )
+        if inside_fraction < 0.70:
+            total -= 0.75
+        if start_ratio < self.config.release_band_start_y_ratio:
+            total -= 0.50
+        return float(total)
 
     def _build_seed_from_track(self, track) -> Optional[dict[str, Any]]:
         coarse_seed = track.first
@@ -130,26 +249,34 @@ class OnlineClassicalSeedDetector:
         if seed_frame is None:
             return None
 
-        refined_seed, refined = self.classical.refine_seed_candidate(seed_frame, coarse_seed, self.lane_mask)
+        lane_mask = lane_geometry.build_lane_mask(self.selected_lane.points, self.frame_width, self.frame_height)
+        refined_seed, refined = self.classical.refine_seed_candidate(seed_frame, coarse_seed, lane_mask)
         return {
             "frame_idx": refined_seed.frame_idx,
             "box": [refined_seed.x1, refined_seed.y1, refined_seed.x2, refined_seed.y2],
             "center": [refined_seed.cx, refined_seed.cy],
-            "initializer": "dark_compact_motion_online",
+            "initializer": "lane_constrained_dark_motion_online",
             "coarse_box": [coarse_seed.x1, coarse_seed.y1, coarse_seed.x2, coarse_seed.y2],
             "coarse_center": [coarse_seed.cx, coarse_seed.cy],
             "refined_seed": refined,
             "track_length": len(track.candidates),
             "score": refined_seed.score,
+            "lane_model": self.selected_lane.model,
+            "lane_confidence": self.selected_lane.confidence,
+            "lane_points": [[float(x), float(y)] for x, y in self.selected_lane.points.tolist()],
+            "lane_selection_score": self.selected_lane_score,
         }
 
     def finalize(self) -> Optional[dict[str, Any]]:
         if self.seed is not None:
             return self.seed
-        if self.best_track is None:
-            self.best_track = self.classical.choose_track(self.candidates, self.frame_height, self.args)
+        valid_tracks = self.classical.build_valid_tracks(self.candidates, self.frame_height, self.args)
+        self.best_track, selected_lane, selection_score = self._select_track(valid_tracks)
         if self.best_track is None:
             return None
+        self.selected_lane = selected_lane or self.primary_lane
+        self.selected_lane_score = selection_score
+        self.lane_points = self.selected_lane.points
         self.seed = self._build_seed_from_track(self.best_track)
         return self.seed
 
@@ -178,6 +305,8 @@ class OnlineClassicalSeedDetector:
                         "mean_score": self.classical.mean_node_score(self.best_track),
                         "monotonic_fraction": self.classical.monotonic_fraction(self.best_track),
                         "total_y_travel": self.classical.total_y_travel(self.best_track),
+                        "lane_selection_score": self.selected_lane_score,
+                        "lane_model": self.selected_lane.model,
                         "frames": [
                             {
                                 "frame_idx": candidate.frame_idx,
@@ -194,6 +323,29 @@ class OnlineClassicalSeedDetector:
             )
         else:
             track_path.write_text(json.dumps({"length": 0, "frames": []}, indent=2), encoding="utf-8")
+
+        lane_hypotheses_path = output_dir / "lane_hypotheses.json"
+        lane_hypotheses_path.write_text(
+            json.dumps(
+                {
+                    "selected_lane_model": self.selected_lane.model,
+                    "selected_lane_points": [[float(x), float(y)] for x, y in self.selected_lane.points.tolist()],
+                    "selected_lane_score": self.selected_lane_score,
+                    "hypotheses": [hypothesis.to_dict() for hypothesis in self.lane_hypotheses],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        lane_overlay_path = output_dir / "lane_overlay.jpg"
+        if self.lane_debug_frame_rgb is not None:
+            overlay_rgb = lane_geometry.render_lane_overlay(
+                self.lane_debug_frame_rgb,
+                self.lane_hypotheses,
+                selected_hypothesis=self.selected_lane if self.selected_lane is not None else self.primary_lane,
+            )
+            cv2.imwrite(str(lane_overlay_path), cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR))
 
         best_detection_path = output_dir / "best_detection.jpg"
         seed_path = output_dir / "seed.json"
@@ -218,9 +370,11 @@ class OnlineClassicalSeedDetector:
 
         pipeline_summary = output_dir / "pipeline_summary.txt"
         with pipeline_summary.open("w", encoding="utf-8") as handle:
-            handle.write("initializer=dark_compact_motion_online\n")
-            handle.write("lane_model=default_bowling_corridor\n")
-            handle.write(f"lane_points={self.lane_points.tolist()}\n")
+            handle.write("initializer=lane_constrained_dark_motion_online\n")
+            handle.write(f"lane_model={self.selected_lane.model}\n")
+            handle.write(f"lane_points={self.selected_lane.points.tolist()}\n")
+            handle.write(f"lane_hypothesis_count={len(self.lane_hypotheses)}\n")
+            handle.write(f"lane_selection_score={self.selected_lane_score:.6f}\n")
             handle.write(f"scan_start={self.config.scan_start}\n")
             handle.write(f"scan_step={self.config.scan_step}\n")
             handle.write(f"sampled_frames={self.sampled_frames}\n")
@@ -236,6 +390,8 @@ class OnlineClassicalSeedDetector:
                 handle.write(f"seed_score={seed['score']:.6f}\n")
                 handle.write(f"seed_json={seed_path}\n")
                 handle.write(f"best_detection={best_detection_path}\n")
+            handle.write(f"lane_hypotheses_json={lane_hypotheses_path}\n")
+            handle.write(f"lane_overlay={lane_overlay_path}\n")
             handle.write(f"detections_csv={detections_csv}\n")
             handle.write(f"track_json={track_path}\n")
 

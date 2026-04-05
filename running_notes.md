@@ -145,4 +145,8 @@
   - removed the legacy WebRTC / Render Streaming package references from `Packages/manifest.json`
   - removed the old smoke-test / official-control scenes from Build Settings
   - deleted the old Unity-side WebRTC / Render Streaming editor/runtime artifacts and imported sample assets
-  - added `Tools > Ball Tracking > Clean Up Legacy Transport Artifacts` so the project can be reset to the active UDP/TCP path again inside Unity
+  - briefly added a one-off cleanup utility during the transport migration, then removed it once the repo was cleaned up
+
+## 2026-03-29
+
+- Wrote a consolidated pause-state findings note in [FINDINGS_SO_FAR.md](C:/Users/student/Quest3BowlingBallTracking/FINDINGS_SO_FAR.md) covering transport, capture, oracle review, YOLO training, causal YOLO -> SAM2 results, and the mixed open-source generalization check.

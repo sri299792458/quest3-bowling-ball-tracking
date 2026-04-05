@@ -11,9 +11,9 @@ import numpy as np
 from PIL import Image
 
 try:
-    from .path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
+    from .path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_CACHE_ROOT, DEFAULT_SAM2_ROOT
 except ImportError:
-    from path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_ROOT
+    from path_config import DEFAULT_CHECKPOINTS_ROOT, DEFAULT_SAM2_CACHE_ROOT, DEFAULT_SAM2_ROOT
 
 
 def bbox_from_mask(mask: np.ndarray):
@@ -89,6 +89,7 @@ def iter_source_frames(source_path: str, start_frame: int = 0):
 @dataclass
 class WarmSam2Config:
     sam2_root: Path = DEFAULT_SAM2_ROOT
+    cache_root: Path = DEFAULT_SAM2_CACHE_ROOT
     checkpoint: Path = DEFAULT_CHECKPOINTS_ROOT / "sam2.1_hiera_tiny.pt"
     model_cfg: str = "configs/sam2.1/sam2.1_hiera_t.yaml"
     object_id: int = 1
@@ -99,10 +100,6 @@ class WarmSam2Config:
     @property
     def repo_root(self) -> Path:
         return self.sam2_root
-
-    @property
-    def cache_root(self) -> Path:
-        return self.sam2_root / "cache"
 
 
 class WarmSam2Tracker:
@@ -162,10 +159,16 @@ class WarmSam2Tracker:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         seed_frame = int(seed["frame_idx"])
-        box = [float(v) for v in seed["box"]]
+        box = [float(v) for v in seed["box"]] if seed.get("box") is not None else None
+        seed_points = seed.get("points") or []
+        seed_labels = seed.get("point_labels") or []
         frame_count, video_width, video_height, preview_fps = get_source_metadata(video_path, preview_fps=preview_fps)
         if not (0 <= seed_frame < frame_count):
             raise ValueError(f"seed frame {seed_frame} is outside 0..{frame_count - 1}")
+        if box is None and not seed_points:
+            raise ValueError("Seed must include at least a box or one point prompt.")
+        if seed_points and len(seed_points) != len(seed_labels):
+            raise ValueError("Seed point_labels must match the number of seed points.")
 
         init_start = time.perf_counter()
         inference_state = self._predictor.init_state(
@@ -175,14 +178,23 @@ class WarmSam2Tracker:
         )
         init_seconds = time.perf_counter() - init_start
 
-        box_array = np.array(box, dtype=np.float32)
+        box_array = np.array(box, dtype=np.float32) if box is not None else None
+        points_array = np.array(seed_points, dtype=np.float32) if seed_points else None
+        labels_array = np.array(seed_labels, dtype=np.int32) if seed_labels else None
         results = {}
         max_to_track = None if frame_limit <= 0 else frame_limit
         self._torch.cuda.empty_cache()
 
         propagate_start = time.perf_counter()
         with self._torch.inference_mode(), self._torch.autocast("cuda", dtype=self._torch.bfloat16):
-            self._predictor.add_new_points_or_box(inference_state=inference_state, frame_idx=seed_frame, obj_id=self.config.object_id, points=None, labels=None, box=box_array)
+            self._predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=seed_frame,
+                obj_id=self.config.object_id,
+                points=points_array,
+                labels=labels_array,
+                box=box_array,
+            )
             for out_frame_idx, out_obj_ids, out_mask_logits in self._predictor.propagate_in_video(inference_state, start_frame_idx=seed_frame, max_frame_num_to_track=max_to_track):
                 for obj_id, mask_logits in zip(out_obj_ids, out_mask_logits):
                     mask = (mask_logits[0] > 0.0).cpu().numpy()
@@ -233,6 +245,8 @@ class WarmSam2Tracker:
             handle.write(f"model_cfg={self.config.model_cfg}\n")
             handle.write(f"seed_frame={seed_frame}\n")
             handle.write(f"seed_box={box}\n")
+            handle.write(f"seed_points={seed_points}\n")
+            handle.write(f"seed_point_labels={seed_labels}\n")
             handle.write(f"video_size={video_width}x{video_height}\n")
             handle.write(f"vos_optimized={self.config.vos_optimized}\n")
             handle.write(f"build_seconds={float(self._build_seconds or 0.0):.3f}\n")

@@ -93,8 +93,14 @@ namespace BallTracking.Runtime
             _currentShotId = $"shot_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             streamClient.SetShotId(_currentShotId);
             var sent = streamClient.SendShotMarker(BowlingShotMarkerType.ShotStarted);
+            if (!sent)
+            {
+                streamClient.ShowLocalStatus("local_start_dropped", _currentShotId);
+                return;
+            }
+
             _shotActive = true;
-            streamClient.ShowLocalStatus(sent ? "local_start_sent" : "local_start_queued", _currentShotId);
+            streamClient.ShowLocalStatus("local_start_sent", _currentShotId);
 
             if (verboseLogging)
             {
@@ -110,8 +116,14 @@ namespace BallTracking.Runtime
             }
 
             var sent = streamClient.SendShotMarker(BowlingShotMarkerType.ShotEnded);
+            if (!sent)
+            {
+                streamClient.ShowLocalStatus("local_end_dropped", _currentShotId);
+                return;
+            }
+
             _shotActive = false;
-            streamClient.ShowLocalStatus(sent ? "local_end_sent" : "local_end_dropped", _currentShotId);
+            streamClient.ShowLocalStatus("local_end_sent", _currentShotId);
 
             if (verboseLogging)
             {
