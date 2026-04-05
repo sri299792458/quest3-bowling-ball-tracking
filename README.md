@@ -27,10 +27,10 @@ Quest sends camera frames to a nearby laptop over the local network. The laptop 
   - laptop receiver, online seed logic, and `SAM2` bridge
 - [`third_party/sam2`](third_party/sam2)
   - vendored `SAM2` source and configs
-- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
+- [`docs`](docs)
+  - project docs, setup guides, findings, and specs
+- [`docs/BALL_TRACKING_SPEC.md`](docs/BALL_TRACKING_SPEC.md)
   - main product and research spec
-- [`QUEST_LAPTOP_PIPELINE_SPEC.md`](QUEST_LAPTOP_PIPELINE_SPEC.md)
-  - transport and runtime pipeline spec
 
 ## Prerequisites
 
@@ -171,17 +171,17 @@ The only large runtime artifact that is not committed is the `SAM2` checkpoint. 
 
 Start here:
 
-- [`DOCS_MAP.md`](DOCS_MAP.md)
-- [`QUEST_TEAMMATE_SETUP_README.md`](QUEST_TEAMMATE_SETUP_README.md)
+- [`docs/DOCS_MAP.md`](docs/DOCS_MAP.md)
+- [`docs/QUEST_TEAMMATE_SETUP_README.md`](docs/QUEST_TEAMMATE_SETUP_README.md)
 - [`laptop_pipeline/README.md`](laptop_pipeline/README.md)
 
 Current source of truth:
 
-- [`FINDINGS_SO_FAR.md`](FINDINGS_SO_FAR.md)
-- [`QUEST_LAPTOP_TRANSPORT_README.md`](QUEST_LAPTOP_TRANSPORT_README.md)
-- [`QUEST_LAPTOP_PIPELINE_V3_SPEC.md`](QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
+- [`docs/FINDINGS_SO_FAR.md`](docs/FINDINGS_SO_FAR.md)
+- [`docs/QUEST_LAPTOP_TRANSPORT_README.md`](docs/QUEST_LAPTOP_TRANSPORT_README.md)
+- [`docs/QUEST_LAPTOP_PIPELINE_V3_SPEC.md`](docs/QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
 
 Historical / background docs:
 
-- [`BALL_TRACKING_SPEC.md`](BALL_TRACKING_SPEC.md)
-- [`running_notes.md`](running_notes.md)
+- [`docs/BALL_TRACKING_SPEC.md`](docs/BALL_TRACKING_SPEC.md)
+- [`docs/running_notes.md`](docs/running_notes.md)

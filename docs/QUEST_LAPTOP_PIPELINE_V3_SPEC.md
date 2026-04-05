@@ -803,4 +803,4 @@ Repo-local references:
 - [QuestBowlingStreamClient.cs](C:/Users/student/Quest3BowlingBallTracking/Assets/BallTracking/Runtime/QuestBowlingStreamClient.cs)
 - [quest_bowling_udp_server.py](C:/Users/student/Quest3BowlingBallTracking/laptop_pipeline/quest_bowling_udp_server.py)
 - [QUEST_LAPTOP_PIPELINE_SPEC.md](C:/Users/student/Quest3BowlingBallTracking/QUEST_LAPTOP_PIPELINE_SPEC.md)
-- [QUEST_LAPTOP_TRANSPORT_README.md](C:/Users/student/Quest3BowlingBallTracking/QUEST_LAPTOP_TRANSPORT_README.md)
+- [QUEST_LAPTOP_TRANSPORT_README.md](QUEST_LAPTOP_TRANSPORT_README.md)

@@ -5,9 +5,9 @@ This file is a chronological lab notebook.
 If you are trying to understand the repo quickly, do not start here.
 Start with:
 
-- [DOCS_MAP.md](/C:/Users/student/Quest3BowlingBallTracking/DOCS_MAP.md)
-- [FINDINGS_SO_FAR.md](/C:/Users/student/Quest3BowlingBallTracking/FINDINGS_SO_FAR.md)
-- [QUEST_TEAMMATE_SETUP_README.md](/C:/Users/student/Quest3BowlingBallTracking/QUEST_TEAMMATE_SETUP_README.md)
+- [DOCS_MAP.md](DOCS_MAP.md)
+- [FINDINGS_SO_FAR.md](FINDINGS_SO_FAR.md)
+- [QUEST_TEAMMATE_SETUP_README.md](QUEST_TEAMMATE_SETUP_README.md)
 
 ## 2026-03-18
 
@@ -158,4 +158,4 @@ Start with:
 
 ## 2026-03-29
 
-- Wrote a consolidated pause-state findings note in [FINDINGS_SO_FAR.md](C:/Users/student/Quest3BowlingBallTracking/FINDINGS_SO_FAR.md) covering transport, capture, oracle review, YOLO training, causal YOLO -> SAM2 results, and the mixed open-source generalization check.
+- Wrote a consolidated pause-state findings note in [FINDINGS_SO_FAR.md](FINDINGS_SO_FAR.md) covering transport, capture, oracle review, YOLO training, causal YOLO -> SAM2 results, and the mixed open-source generalization check.

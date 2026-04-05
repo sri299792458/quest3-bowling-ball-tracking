@@ -746,4 +746,4 @@ If you want to trace this in code before presenting:
   - [QUEST_LAPTOP_PIPELINE_SPEC.md](C:/Users/student/Quest3BowlingBallTracking/QUEST_LAPTOP_PIPELINE_SPEC.md)
 
 - Pause-state findings:
-  - [FINDINGS_SO_FAR.md](C:/Users/student/Quest3BowlingBallTracking/FINDINGS_SO_FAR.md)
+  - [FINDINGS_SO_FAR.md](FINDINGS_SO_FAR.md)

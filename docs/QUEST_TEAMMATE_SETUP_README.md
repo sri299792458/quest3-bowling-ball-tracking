@@ -260,8 +260,8 @@ It is not yet the final V3 video-encoder path.
 
 For transport architecture background:
 
-- [QUEST_LAPTOP_TRANSPORT_README.md](/C:/Users/student/Quest3BowlingBallTracking/QUEST_LAPTOP_TRANSPORT_README.md)
+- [QUEST_LAPTOP_TRANSPORT_README.md](QUEST_LAPTOP_TRANSPORT_README.md)
 
 For the future redesign:
 
-- [QUEST_LAPTOP_PIPELINE_V3_SPEC.md](/C:/Users/student/Quest3BowlingBallTracking/QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
+- [QUEST_LAPTOP_PIPELINE_V3_SPEC.md](QUEST_LAPTOP_PIPELINE_V3_SPEC.md)
