@@ -1,6 +1,6 @@
 @echo off
 setlocal
-set "ROOT=%~dp0"
+set "ROOT=%~dp0..\"
 set "VENV=%ROOT%.venv\Scripts\python.exe"
 if not exist "%VENV%" (
   echo Missing laptop_pipeline\.venv. Run laptop_pipeline\setup_laptop_env.ps1 first.

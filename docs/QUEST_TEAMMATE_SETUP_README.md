@@ -73,13 +73,13 @@ If it fails on CUDA:
 For the normal end-to-end path:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server.cmd
 ```
 
 For raw capture only, use:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server_record_only.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server_record_only.cmd
 ```
 
 Notes:

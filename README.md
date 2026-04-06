@@ -86,7 +86,7 @@ If the script stops at the CUDA check, install a CUDA-enabled PyTorch build for 
 Then start the receiver:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server.cmd
 ```
 
 ## First End-to-End Test
@@ -124,12 +124,12 @@ Notes:
 You can validate most of the system at home:
 
 1. Run the normal laptop server to test the real UDP/TCP transport and frame recording.
-2. Run `.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd` to test full round-trip result delivery without depending on a successful seed or track.
-3. Run `.\laptop_pipeline\start_quest_bowling_server_diagnostic.cmd` to test raw frame transport only:
+2. Run `.\laptop_pipeline\launchers\start_quest_bowling_server_synthetic.cmd` to test full round-trip result delivery without depending on a successful seed or track.
+3. Run `.\laptop_pipeline\launchers\start_quest_bowling_server_diagnostic.cmd` to test raw frame transport only:
    - Quest sends UDP JPEG frames
    - laptop records the raw frames
    - Quest receives frame-count status and a diagnostic `shot_result`
-4. Run `.\laptop_pipeline\start_quest_bowling_server_record_only.cmd` when the priority is collecting raw Quest captures plus metadata for later analytics work.
+4. Run `.\laptop_pipeline\launchers\start_quest_bowling_server_record_only.cmd` when the priority is collecting raw Quest captures plus metadata for later analytics work.
 5. For the current benchmark pass, use `Target Send Fps = 30`, `Passthrough Send Resolution = 960 x 720`, and `Jpeg Quality = 65`, then compare the saved `capture_summary.json` against the mirrored `capture_perf` statuses. If the saved run quality drops too far, fall back to `15`.
 
 Synthetic mode is only for transport and UX testing. It does not validate the real tracking pipeline.

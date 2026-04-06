@@ -12,6 +12,19 @@ This folder contains the current Quest-to-laptop receiver for the bowling MR pip
 - falls back to warm batch `SAM2` only if the live path never starts or fails
 - sends status and final result JSON back to Quest over the TCP control channel
 
+## Folder Layout
+
+- `launchers/`
+  - convenience `.cmd` wrappers for starting the server and optional training jobs
+- `training/`
+  - optional YOLO retraining and hillclimb utilities
+- `runs/`
+  - recorded shots, tracking outputs, and experiment artifacts
+- `datasets/`
+  - locally exported training datasets; ignored in Git
+
+You do not need the training utilities for normal Quest-to-laptop use. They are only for detector retraining experiments.
+
 ## Current Analysis Path
 
 The current receiver uses:
@@ -49,7 +62,7 @@ The setup script downloads the `sam2.1_hiera_tiny.pt` checkpoint into:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\laptop_pipeline\setup_laptop_env.ps1
-.\laptop_pipeline\start_quest_bowling_server.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server.cmd
 ```
 
 If setup fails at the CUDA check, install a CUDA-enabled PyTorch build for that machine and rerun `setup_laptop_env.ps1`.
@@ -63,25 +76,25 @@ The setup script verifies:
 For a home test that skips real analysis and returns a fake-but-valid result payload, run:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server_synthetic.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server_synthetic.cmd
 ```
 
 For a transport diagnostic that records only raw received frames and reports counts back to Quest, run:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server_diagnostic.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server_diagnostic.cmd
 ```
 
 For dataset capture, use the equivalent record-only launcher:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server_record_only.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server_record_only.cmd
 ```
 
 For an auto-recording smoke-style capture that records the first fixed chunk of UDP frames, run:
 
 ```powershell
-.\laptop_pipeline\start_quest_bowling_server_smoke.cmd
+.\laptop_pipeline\launchers\start_quest_bowling_server_smoke.cmd
 ```
 
 ## Oracle Workflow For Recorded Alley Runs
@@ -239,13 +252,13 @@ The current first-pass detector setup is:
 Launch training with:
 
 ```powershell
-.\laptop_pipeline\start_train_bowling_ball_yolo.cmd
+.\laptop_pipeline\launchers\start_train_bowling_ball_yolo.cmd
 ```
 
 Or inspect the resolved training config without starting:
 
 ```powershell
-.\laptop_pipeline\start_train_bowling_ball_yolo.cmd --dry-run
+.\laptop_pipeline\launchers\start_train_bowling_ball_yolo.cmd --dry-run
 ```
 
 Training outputs go under:
@@ -253,6 +266,8 @@ Training outputs go under:
 - `laptop_pipeline/runs/yolo_training`
 
 This detector is intended only to provide the one initial ball box that starts `SAM2`.
+
+`yolo_hillclimb.py` is optional and only useful when we are actively comparing retraining recipes. It is not needed for the normal transport or tracking pipeline.
 
 ## Output Layout
 

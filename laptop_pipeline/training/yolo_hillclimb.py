@@ -3,18 +3,23 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+PIPELINE_ROOT = Path(__file__).resolve().parents[1]
+if str(PIPELINE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PIPELINE_ROOT))
+
 try:
     from .path_config import LAPTOP_PIPELINE_ROOT
     from .train_bowling_ball_yolo import DEFAULT_DATASET_YAML, DEFAULT_EXPORT_SUMMARY
 except ImportError:
     from path_config import LAPTOP_PIPELINE_ROOT
-    from train_bowling_ball_yolo import DEFAULT_DATASET_YAML, DEFAULT_EXPORT_SUMMARY
+    from training.train_bowling_ball_yolo import DEFAULT_DATASET_YAML, DEFAULT_EXPORT_SUMMARY
 
 
 DEFAULT_ROOT = LAPTOP_PIPELINE_ROOT / "runs" / "yolo_hillclimb"
