@@ -1,0 +1,24 @@
+# Local environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Unity / Android build clutter
+Library/
+Temp/
+Obj/
+Build/
+Logs/
+UserSettings/
+MemoryCaptures/
+
+# Large local validation data
+data/bowling_tests/
+
+# OS/editor clutter
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
