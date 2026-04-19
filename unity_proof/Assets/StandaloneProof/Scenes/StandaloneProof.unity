@@ -337,6 +337,7 @@ GameObject:
   - component: {fileID: 1545997001}
   - component: {fileID: 1545997000}
   - component: {fileID: 1545996999}
+  - component: {fileID: 1545997004}
   m_Layer: 0
   m_Name: StandaloneProofCaptureRig
   m_TagString: Untagged
@@ -357,6 +358,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneProofAutoRun
   proofCapture: {fileID: 1545997001}
+  liveMetadataSender: {fileID: 1545997004}
   startupDelaySeconds: 2
   maxBeginWaitSeconds: 20
   beginRetryIntervalSeconds: 0.25
@@ -364,6 +366,9 @@ MonoBehaviour:
   preRollMs: 0
   postRollMs: 0
   shotId: standalone-proof
+  enableLiveStreaming: 1
+  liveStreamHost: 10.235.26.83
+  liveMediaPort: 8766
   verboseLogging: 1
 --- !u!114 &1545997000
 MonoBehaviour:
@@ -379,6 +384,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator
   frameSource: {fileID: 1545997002}
   proofCapture: {fileID: 1545997001}
+  liveMetadataSender: {fileID: 1545997004}
   appendFrameMetadata: 1
   verboseLogging: 1
 --- !u!114 &1545997001
@@ -444,6 +450,22 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1545997004
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1545996998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 11cb39b7c7b76004cb3f8921cc9a83bf, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender
+  host: 10.235.26.83
+  port: 8767
+  enabledForAutoRun: 1
+  verboseLogging: 1
 --- !u!1001 &1642275083
 PrefabInstance:
   m_ObjectHideFlags: 0

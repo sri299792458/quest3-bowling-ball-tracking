@@ -29,6 +29,7 @@ namespace QuestBowlingStandalone.Editor
 
             var frameSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource>(proofRig);
             var proofCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture>(proofRig);
+            var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
             var autoRun = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneProofAutoRun>(proofRig);
 
@@ -37,8 +38,9 @@ namespace QuestBowlingStandalone.Editor
             ConfigurePassthroughLayer(passthroughLayer);
             ConfigureFrameSource(frameSource, cameraAccess);
             ConfigureProofCapture(proofCapture, cameraAccess, headAnchor);
+            ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
-            ConfigureAutoRun(autoRun, proofCapture);
+            ConfigureAutoRun(autoRun, proofCapture, liveMetadataSender);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -286,6 +288,17 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(proofCapture);
         }
 
+        private static void ConfigureLiveMetadataSender(QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender)
+        {
+            var serializedObject = new SerializedObject(liveMetadataSender);
+            serializedObject.FindProperty("host").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("port").intValue = 8767;
+            serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(liveMetadataSender);
+        }
+
         private static void ConfigureCoordinator(
             QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator coordinator,
             QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource frameSource,
@@ -294,6 +307,8 @@ namespace QuestBowlingStandalone.Editor
             var serializedObject = new SerializedObject(coordinator);
             serializedObject.FindProperty("frameSource").objectReferenceValue = frameSource;
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue =
+                coordinator.GetComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>();
             serializedObject.FindProperty("appendFrameMetadata").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
@@ -302,10 +317,12 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureAutoRun(
             QuestBowlingStandalone.QuestApp.StandaloneProofAutoRun autoRun,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender)
         {
             var serializedObject = new SerializedObject(autoRun);
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
             serializedObject.FindProperty("startupDelaySeconds").floatValue = 2.0f;
             serializedObject.FindProperty("maxBeginWaitSeconds").floatValue = 20.0f;
             serializedObject.FindProperty("beginRetryIntervalSeconds").floatValue = 0.25f;
@@ -313,6 +330,9 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("preRollMs").intValue = 0;
             serializedObject.FindProperty("postRollMs").intValue = 0;
             serializedObject.FindProperty("shotId").stringValue = "standalone-proof";
+            serializedObject.FindProperty("enableLiveStreaming").boolValue = true;
+            serializedObject.FindProperty("liveStreamHost").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("liveMediaPort").intValue = 8766;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(autoRun);

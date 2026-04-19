@@ -18,6 +18,10 @@ unity_proof/*.log
 
 # Large local validation data
 data/bowling_tests/
+data/proof_artifacts/
+data/imported_artifacts/
+data/incoming_artifacts/
+data/incoming_live_streams/
 
 # OS/editor clutter
 .DS_Store

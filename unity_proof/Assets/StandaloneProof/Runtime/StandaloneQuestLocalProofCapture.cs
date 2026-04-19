@@ -49,9 +49,16 @@ namespace QuestBowlingStandalone.QuestApp
         private long _lastFrameTimestampUs;
         private long _lastCommittedPtsUs;
         private bool _hasFrameRange;
+        private StandaloneFrameMetadata _lastCommittedFrameMetadata;
 
         public bool IsCapturing => _artifactWriter != null;
         public string ActiveClipDirectory => _artifactWriter?.ClipDirectoryPath ?? string.Empty;
+        public string ActiveSessionId => _sessionId ?? string.Empty;
+        public string ActiveShotId => _shotId ?? string.Empty;
+        public StandaloneSessionMetadata CurrentSessionMetadata => _sessionMetadata;
+        public StandaloneLaneLockMetadata CurrentLaneLockMetadata => _laneLockMetadata;
+        public StandaloneShotMetadata CurrentShotMetadata => _shotMetadata;
+        public StandaloneFrameMetadata LastCommittedFrameMetadata => _lastCommittedFrameMetadata;
 
         public bool TryGetEncoderInputSurfaceRawObject(out IntPtr surfaceObject)
         {
@@ -86,6 +93,7 @@ namespace QuestBowlingStandalone.QuestApp
             _firstFrameTimestampUs = 0;
             _lastFrameTimestampUs = 0;
             _lastCommittedPtsUs = -1;
+            _lastCommittedFrameMetadata = null;
             _preparedFrameMetadata = null;
             _hasPreparedFrameMetadata = false;
             _proofDiagnostics = new StandaloneProofDiagnostics
@@ -241,6 +249,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             _lastFrameTimestampUs = _preparedFrameMetadata.cameraTimestampUs;
             _lastCommittedPtsUs = _preparedFrameMetadata.ptsUs;
+            _lastCommittedFrameMetadata = _preparedFrameMetadata;
             _nextFrameSeq++;
             _preparedFrameMetadata = null;
             _hasPreparedFrameMetadata = false;
@@ -411,6 +420,38 @@ namespace QuestBowlingStandalone.QuestApp
         public string GetEncoderStatusJson()
         {
             return _videoEncoderBridge?.GetStatusJson() ?? "{\"status\":\"bridge_missing\"}";
+        }
+
+        public bool TryStartLiveMediaStream(string host, int port, out string note)
+        {
+            note = "live_media_unavailable";
+
+            if (!IsCapturing)
+            {
+                note = "proof_clip_inactive";
+                return false;
+            }
+
+            if (!startEncoderOnProofClip)
+            {
+                note = "encoder_not_running_for_proof_clip";
+                return false;
+            }
+
+            _videoEncoderBridge ??= new StandaloneQuestVideoEncoderBridge();
+            return _videoEncoderBridge.TryStartLiveStream(host, port, _sessionId, _shotId, out note);
+        }
+
+        public bool TryStopLiveMediaStream(out string note)
+        {
+            note = "live_media_unavailable";
+            if (_videoEncoderBridge == null)
+            {
+                note = "bridge_missing";
+                return false;
+            }
+
+            return _videoEncoderBridge.TryStopLiveStream(out note);
         }
 
         private void OnDestroy()

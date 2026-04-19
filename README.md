@@ -47,16 +47,39 @@ Milestone `1` is now proven in the clean Unity proof app:
 - per-frame metadata is written to `frame_metadata.jsonl`
 - encoder surface binding and native blit path are working
 - `ptsUs` in metadata is now camera-derived and coherent with the shot span
+- laptop-side standalone artifact validation now works against a pulled proof clip
 
-The latest successful proof artifact was pulled from the Quest to:
+The clean next slice after Quest proof is now in place:
 
-- `C:\Users\student\QuestBowlingStandalone\unity_proof\Temp\device_pull\standalone_local_clips\clip_2e2890ae03b64ce3b98d37938bf3b199_standalone-proof`
+- load `artifact_manifest.json`, sidecars, and `video.mp4` as one standalone artifact
+- validate decoded video frames against `frame_metadata.jsonl`
+- prove timestamp and metadata alignment before porting over more of the old laptop stack
+- run standalone causal YOLO seeding directly on a `LocalClipArtifact`
+- import one legacy `bowling_tests` run into the standalone artifact shape for real bowling-content validation
+- run warm SAM2 from the standalone `yolo_seed.json` contract
+- receive a live Quest `H.264` stream plus live metadata on the laptop
+- make the landed live session decodable and loadable through the same analysis boundary as offline artifacts
+
+Current validation entry point:
+
+- `py -m pip install -r laptop_receiver/requirements.txt`
+- `py -m laptop_receiver.validate_local_clip_artifact <artifact_dir>`
+- `py -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>`
+- `py -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
+- `py -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
+- `py -m laptop_receiver.live_stream_receiver`
 
 Important note:
 
 - the proof diagnostics still show many `passthrough_not_updated` skips
 - those skips are now understood as expected render-loop vs camera-source cadence mismatch
 - current proof runs show about `72 Hz` render polling against a `~30 FPS` camera source, which matches the observed skip ratio closely
+
+Live transport note:
+
+- the main direction is now live Quest-to-laptop streaming
+- Quest proof capture is being extended to stream encoded `H.264` media live while Unity sends frame metadata over a separate TCP side channel
+- latest milestone: a real hotspot run now lands as a decodable live `H.264` session on the laptop, with codec config persisted and the shared loader able to open the session as a `LocalClipArtifact`
 
 See [docs/IMPLEMENTATION_PLAN.md](C:/Users/student/QuestBowlingStandalone/docs/IMPLEMENTATION_PLAN.md) for the active build sequence.
 See [docs/PORTING_MAP.md](C:/Users/student/QuestBowlingStandalone/docs/PORTING_MAP.md) for the exact archive files we should mine and what to avoid copying.

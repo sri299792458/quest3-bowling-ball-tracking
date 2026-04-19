@@ -92,6 +92,62 @@ namespace QuestBowlingStandalone.QuestApp
 #endif
         }
 
+        public bool TryStartLiveStream(string host, int port, string sessionId, string shotId, out string note)
+        {
+            note = "encoder_unavailable";
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                EnsurePlugin();
+                var started = _plugin.Call<bool>(
+                    "connectLiveStream",
+                    host ?? string.Empty,
+                    Math.Max(1, port),
+                    sessionId ?? string.Empty,
+                    shotId ?? string.Empty);
+                note = _plugin.Call<string>("getStatusJson");
+                return started;
+            }
+            catch (Exception ex)
+            {
+                note = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+#else
+            note = "android_only";
+            return false;
+#endif
+        }
+
+        public bool TryStopLiveStream(out string note)
+        {
+            note = "encoder_unavailable";
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                if (_plugin == null)
+                {
+                    note = "plugin_missing";
+                    return false;
+                }
+
+                var stopped = _plugin.Call<bool>("disconnectLiveStream");
+                note = _plugin.Call<string>("getStatusJson");
+                return stopped;
+            }
+            catch (Exception ex)
+            {
+                note = ex.GetType().Name + ": " + ex.Message;
+                return false;
+            }
+#else
+            note = "android_only";
+            return false;
+#endif
+        }
+
         public void AbortSession()
         {
 #if UNITY_ANDROID && !UNITY_EDITOR

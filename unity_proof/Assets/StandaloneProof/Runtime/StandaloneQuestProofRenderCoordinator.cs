@@ -6,6 +6,7 @@ namespace QuestBowlingStandalone.QuestApp
     {
         [SerializeField] private StandaloneQuestFrameSource frameSource;
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
+        [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
         [SerializeField] private bool appendFrameMetadata = true;
         [SerializeField] private bool verboseLogging;
 
@@ -106,6 +107,18 @@ namespace QuestBowlingStandalone.QuestApp
                 if (!appended)
                 {
                     DebugLog("Failed to append frame metadata.");
+                }
+                else if (liveMetadataSender != null && liveMetadataSender.EnabledForAutoRun)
+                {
+                    var sent = liveMetadataSender.TrySendFrameMetadata(
+                        proofCapture.ActiveSessionId,
+                        proofCapture.ActiveShotId,
+                        proofCapture.LastCommittedFrameMetadata,
+                        out var metadataNote);
+                    if (!sent)
+                    {
+                        DebugLog($"Live metadata send failed: {metadataNote}");
+                    }
                 }
             }
             else

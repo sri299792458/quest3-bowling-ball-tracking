@@ -6,6 +6,7 @@ namespace QuestBowlingStandalone.QuestApp
     public sealed class StandaloneProofAutoRun : MonoBehaviour
     {
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
+        [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
         [SerializeField] private float startupDelaySeconds = 2.0f;
         [SerializeField] private float maxBeginWaitSeconds = 20.0f;
         [SerializeField] private float beginRetryIntervalSeconds = 0.25f;
@@ -13,6 +14,9 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private int preRollMs = 0;
         [SerializeField] private int postRollMs = 0;
         [SerializeField] private string shotId = "standalone-proof";
+        [SerializeField] private bool enableLiveStreaming = true;
+        [SerializeField] private string liveStreamHost = "10.235.26.83";
+        [SerializeField] private int liveMediaPort = 8766;
         [SerializeField] private bool verboseLogging = true;
 
         private Coroutine _runCoroutine;
@@ -65,10 +69,39 @@ namespace QuestBowlingStandalone.QuestApp
                 yield break;
             }
 
+            if (enableLiveStreaming)
+            {
+                var liveMediaStarted = proofCapture.TryStartLiveMediaStream(liveStreamHost, liveMediaPort, out var liveMediaNote);
+                DebugLog($"Begin live media stream: {(liveMediaStarted ? "ok" : "failed")} | {liveMediaNote}");
+
+                if (liveMetadataSender != null && liveMetadataSender.EnabledForAutoRun)
+                {
+                    var liveMetadataStarted = liveMetadataSender.TryBeginSession(
+                        proofCapture.ActiveSessionId,
+                        proofCapture.ActiveShotId,
+                        proofCapture.CurrentSessionMetadata,
+                        proofCapture.CurrentLaneLockMetadata,
+                        proofCapture.CurrentShotMetadata,
+                        out var liveMetadataNote);
+                    DebugLog($"Begin live metadata stream: {(liveMetadataStarted ? "ok" : "failed")} | {liveMetadataNote}");
+                }
+            }
+
             yield return new WaitForSeconds(captureDurationSeconds);
 
             var finalized = proofCapture.TryFinalizeProofClip();
             DebugLog($"Finalize proof clip: {(finalized ? "ok" : "failed")}");
+
+            if (enableLiveStreaming && liveMetadataSender != null && liveMetadataSender.EnabledForAutoRun)
+            {
+                var ended = liveMetadataSender.TryEndSession(
+                    proofCapture.ActiveSessionId,
+                    proofCapture.ActiveShotId,
+                    finalized ? "proof_capture_finalized" : "proof_capture_finalize_failed",
+                    out var endNote);
+                DebugLog($"End live metadata stream: {(ended ? "ok" : "failed")} | {endNote}");
+            }
+
             _runCoroutine = null;
         }
 
