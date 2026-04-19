@@ -9,9 +9,12 @@ Library/
 Temp/
 Obj/
 Build/
+Builds/
 Logs/
 UserSettings/
 MemoryCaptures/
+.utmp/
+unity_proof/*.log
 
 # Large local validation data
 data/bowling_tests/
@@ -21,4 +24,3 @@ data/bowling_tests/
 Thumbs.db
 .idea/
 .vscode/
-
