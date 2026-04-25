@@ -35,6 +35,11 @@ The goal is to avoid drifting into disconnected experiments.
   - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs)
   - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs)
   - lane lock consumes the common world-ray selection stream, intersects it with the floor, projects that floor hit into the current camera frame, then calls `TrySetFoulLineSelection`
+- Laptop lane lock is now a reusable live-session stage:
+  - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py)
+  - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
+  - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
+- The live pipeline polls landed live session folders, processes each strict `lane_lock_request` once, writes `analysis_live_pipeline/pipeline_state.json`, and publishes the lane-lock result through the existing result channel.
 
 ## Current State
 
@@ -200,6 +205,8 @@ The goal is to avoid drifting into disconnected experiments.
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - Result envelopes require `schemaVersion = laptop_result_envelope`; lane-lock result payloads require `schemaVersion = lane_lock_result`.
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) can now publish a solved lane lock with `--publish-result-host 127.0.0.1`.
+- [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) holds the shared lane-lock solve/write/preview stage used by the one-shot CLI and live pipeline.
+- [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the first laptop session orchestrator: it processes pending live `lane_lock_request` events once, persists pipeline state, and can publish results to Quest through the live receiver.
 - Quest-side foul-line selection now has a common input layer:
   - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs) emits shared hand/controller ray selections
   - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs) is the lane-specific consumer
@@ -219,15 +226,16 @@ The goal is to avoid drifting into disconnected experiments.
 2. Build and deploy the Unity proof scene so the shared ray selector can be verified on-device.
 3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
-5. Build the laptop live session orchestrator so lane lock, shot tracking, and replay generation are stages of one session pipeline instead of separate CLIs.
-6. When a real bowling clip is available, validate one live bowling session end to end through:
+5. Run `run_live_session_pipeline.py` beside `live_stream_receiver.py` and confirm the lane-lock result is processed and returned automatically.
+6. Add shot tracking as the next stage in [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py), fed by the same landed session media and the solved lane lock.
+7. When a real bowling clip is available, validate one live bowling session end to end through:
    - live stream landing
    - lane lock
    - result return to Quest
    - YOLO seed
    - SAM2 tracking
-7. Expand validation from one imported bowling clip to a small batch, so we know whether the standalone adapter holds up across multiple runs.
-8. Decide whether the tiny SAM2 drift versus the old JPEG-first path is acceptable or worth deeper investigation.
+8. Expand validation from one imported bowling clip to a small batch, so we know whether the standalone adapter holds up across multiple runs.
+9. Decide whether the tiny SAM2 drift versus the old JPEG-first path is acceptable or worth deeper investigation.
 
 ## Important Assumption
 

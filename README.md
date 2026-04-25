@@ -73,6 +73,7 @@ Current validation entry point:
 - `py -m laptop_receiver.live_stream_receiver`
 - `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
 - `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
+- `py -m laptop_receiver.run_live_session_pipeline`
 
 Important note:
 
@@ -129,7 +130,11 @@ Lane-lock implementation note:
   - forwarded results are persisted in `outbound_results.jsonl`
 - the current lane-lock runner is:
   - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py)
-- lane-lock results can now be forwarded to Quest through the same session channel instead of being only local files
+- the reusable lane-lock stage and live pipeline are in:
+  - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py)
+  - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
+  - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
+- lane-lock results can now be processed and forwarded to Quest through the same session channel instead of being only local files
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
 - no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
 

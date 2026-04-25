@@ -29,7 +29,10 @@ Current implemented slice:
 - [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py) defines strict laptop-to-Quest result envelopes
 - the same [local_clip_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/local_clip_artifact.py) loader now also accepts a persisted live session directory directly
 - [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py) loads `lane_lock_request` events from a landed live session
+- [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) contains the reusable lane-lock stage used by both CLIs and the live pipeline
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
+- [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
+- [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the live pipeline CLI entry point
 
 Validation checks currently include:
 
@@ -148,6 +151,18 @@ Publish the lane-lock result to a connected Quest session:
 
 ```powershell
 py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream> --publish-result-host 127.0.0.1
+```
+
+Live session pipeline usage:
+
+```powershell
+py -m laptop_receiver.run_live_session_pipeline
+```
+
+Process one landed session without publishing results:
+
+```powershell
+py -m laptop_receiver.run_live_session_pipeline --session-dir C:\path\to\live_<session>_<stream> --once --no-publish
 ```
 
 Current honest note:
