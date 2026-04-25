@@ -54,6 +54,7 @@ The goal is to avoid drifting into disconnected experiments.
   - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
   - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) writes `shot_result.json`
   - [StandaloneQuestLiveResultReceiver.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLiveResultReceiver.cs) receives `shot_result`
+  - [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs) renders successful lane-space shot trajectories back in Quest world space
   - replayable results require a solved lane lock; missing lane lock is a failed `shot_result`, not a guessed trajectory
 
 ## Current State
@@ -225,6 +226,7 @@ The goal is to avoid drifting into disconnected experiments.
 - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates completed shot windows from `shot_boundaries.jsonl`; only `shot_start` and `shot_end` are accepted boundary types.
 - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) runs windowed shot tracking under `analysis_shot_tracking/<windowId>`.
 - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py) defines the compact replay-facing shot result contract.
+- [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs) listens for `shot_result` events and renders a replay trajectory plus moving marker in Quest world space.
 - Quest-side foul-line selection now has a common input layer:
   - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs) emits shared hand/controller ray selections
   - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs) is the lane-specific consumer
@@ -245,7 +247,7 @@ The goal is to avoid drifting into disconnected experiments.
 3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
 5. Run `run_live_session_pipeline.py` beside `live_stream_receiver.py` and confirm the lane-lock result is processed and returned automatically.
-6. Exercise the new `shot_result` payload on a real live shot window after lane lock is solved, then wire it into Quest replay rendering.
+6. Exercise the new `shot_result` payload and Quest replay renderer on a real live shot window after lane lock is solved.
 7. When a real bowling clip is available, validate one live bowling session end to end through:
    - live stream landing
    - lane lock

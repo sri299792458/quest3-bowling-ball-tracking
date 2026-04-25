@@ -720,6 +720,7 @@ GameObject:
   - component: {fileID: 1545997011}
   - component: {fileID: 1545997012}
   - component: {fileID: 1545997013}
+  - component: {fileID: 1545997014}
   - component: {fileID: 1545997005}
   m_Layer: 0
   m_Name: StandaloneProofCaptureRig
@@ -955,6 +956,29 @@ MonoBehaviour:
   maxFloorHitDistanceMeters: 25
   minimumCameraDepthMeters: 0.05
   clearPendingPointOnDisable: 1
+  verboseLogging: 1
+--- !u!114 &1545997014
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1545996998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e27f18c7b39d41ce90280c72827b12da, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer
+  liveResultReceiver: {fileID: 1545997011}
+  replayRoot: {fileID: 0}
+  lineWidthMeters: 0.035
+  markerRadiusMeters: 0.11
+  verticalOffsetMeters: 0.035
+  minReplayDurationSeconds: 0.75
+  maxReplayDurationSeconds: 3
+  clearOnFailedShotResult: 1
+  trajectoryColor: {r: 0.05, g: 0.9, b: 1, a: 1}
+  markerColor: {r: 1, g: 0.74, b: 0.16, a: 1}
   verboseLogging: 1
 --- !u!1001 &1588580007
 PrefabInstance:

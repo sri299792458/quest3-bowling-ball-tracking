@@ -148,6 +148,7 @@ Lane-lock implementation note:
   - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
 - the live pipeline can now run `YOLO -> SAM2` only inside completed shot windows when configured with `--yolo-checkpoint` and optional `--run-sam2`
 - `shot_result` messages require lane-space trajectory data from a successful lane lock; missing lane lock is reported as a failed result, not guessed
+- Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
 - no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
 
