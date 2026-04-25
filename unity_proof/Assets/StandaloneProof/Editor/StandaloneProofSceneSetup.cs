@@ -54,6 +54,7 @@ namespace QuestBowlingStandalone.Editor
             var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
+            var shotReplayRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer>(proofRig);
             var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
             var foulLineRaySelector = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector>(proofRig);
             var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
@@ -78,6 +79,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
+            ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver);
 
@@ -707,6 +709,26 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(liveResultReceiver);
+        }
+
+        private static void ConfigureShotReplayRenderer(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+        {
+            var serializedObject = new SerializedObject(shotReplayRenderer);
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("replayRoot").objectReferenceValue = null;
+            serializedObject.FindProperty("lineWidthMeters").floatValue = 0.035f;
+            serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.11f;
+            serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.035f;
+            serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
+            serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
+            serializedObject.FindProperty("clearOnFailedShotResult").boolValue = true;
+            serializedObject.FindProperty("trajectoryColor").colorValue = new Color(0.05f, 0.9f, 1.0f, 1.0f);
+            serializedObject.FindProperty("markerColor").colorValue = new Color(1.0f, 0.74f, 0.16f, 1.0f);
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(shotReplayRenderer);
         }
 
         private static void ConfigureFloorPlaneSource(
