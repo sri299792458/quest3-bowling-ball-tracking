@@ -103,10 +103,13 @@ Lane-lock implementation note:
 - line-support extraction is still available for validation/overlay scoring:
   - [lane_line_support.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_line_support.py)
 - Quest-side request capture is in:
+  - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs)
+  - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs)
   - [StandaloneQuestLaneLockCapture.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockCapture.cs)
   - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
   - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
+- the shared ray interactor is reusable by replay controls; the foul-line selector is just the lane-lock consumer
 - that Quest-side slice rejects lane-lock requests until a foul-line selection exists, then sends one `lane_lock_request` metadata event with:
   - `selectionFrameSeq`
   - `leftFoulLinePointNorm`

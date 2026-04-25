@@ -54,6 +54,8 @@ namespace QuestBowlingStandalone.Editor
             var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
+            var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
+            var foulLineRaySelector = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector>(proofRig);
             var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
             var sessionController = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController>(proofRig);
             var eventSystem = GetOrAddComponent<EventSystem>(eventSystemObject);
@@ -70,8 +72,10 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
             ConfigureHandRayHelper(leftHand, leftRayHelper);
             ConfigureHandRayHelper(rightHand, rightRayHelper);
+            ConfigureRayInteractor(rayInteractor, rightRayHelper != null ? rightRayHelper.transform : headAnchor);
+            ConfigureFoulLineRaySelector(foulLineRaySelector, rayInteractor, laneLockCapture, proofCapture, floorPlaneSource);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
-            ConfigureLockLaneButton(lockLaneButton, laneLockCapture);
+            ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
@@ -385,13 +389,27 @@ namespace QuestBowlingStandalone.Editor
                 return null;
             }
 
+            var handName = handType == OVRHand.Hand.HandLeft ? "StandaloneProofLeftHand" : "StandaloneProofRightHand";
             var existingHands = parentAnchor.GetComponentsInChildren<OVRHand>(true);
             foreach (var existingHand in existingHands)
             {
-                if (existingHand != null)
+                if (existingHand != null && existingHand.gameObject.name == handName)
                 {
-                    Undo.DestroyObjectImmediate(existingHand.gameObject);
+                    ConfigureHandComponents(existingHand, handType);
+                    return existingHand;
                 }
+            }
+
+            foreach (var existingHand in existingHands)
+            {
+                if (existingHand == null)
+                {
+                    continue;
+                }
+
+                existingHand.gameObject.name = handName;
+                ConfigureHandComponents(existingHand, handType);
+                return existingHand;
             }
 
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(HandPrefabPath);
@@ -406,7 +424,7 @@ namespace QuestBowlingStandalone.Editor
                 throw new System.InvalidOperationException("Failed to instantiate OVRHandPrefab.");
             }
 
-            handObject.name = handType == OVRHand.Hand.HandLeft ? "StandaloneProofLeftHand" : "StandaloneProofRightHand";
+            handObject.name = handName;
             Undo.RegisterCreatedObjectUndo(handObject, $"Create {handObject.name}");
             Undo.SetTransformParent(handObject.transform, parentAnchor, false, "Parent hand to camera rig.");
 
@@ -724,6 +742,42 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(laneLockCapture);
         }
 
+        private static void ConfigureRayInteractor(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
+            Transform rayTransform)
+        {
+            var serializedObject = new SerializedObject(rayInteractor);
+            serializedObject.FindProperty("rayTransform").objectReferenceValue = rayTransform;
+            serializedObject.FindProperty("maxRayDistanceMeters").floatValue = 30.0f;
+            serializedObject.FindProperty("selectWithHandPinch").boolValue = true;
+            serializedObject.FindProperty("selectWithControllerTrigger").boolValue = true;
+            serializedObject.FindProperty("debugKeyboardSelect").boolValue = true;
+            serializedObject.FindProperty("debugSelectKey").intValue = (int)KeyCode.Space;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(rayInteractor);
+        }
+
+        private static void ConfigureFoulLineRaySelector(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource)
+        {
+            var serializedObject = new SerializedObject(foulLineRaySelector);
+            serializedObject.FindProperty("rayInteractor").objectReferenceValue = rayInteractor;
+            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
+            serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
+            serializedObject.FindProperty("maxFloorHitDistanceMeters").floatValue = 25.0f;
+            serializedObject.FindProperty("minimumCameraDepthMeters").floatValue = 0.05f;
+            serializedObject.FindProperty("clearPendingPointOnDisable").boolValue = true;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(foulLineRaySelector);
+        }
+
         private static void ConfigureLockLaneCanvas(GameObject lockLaneCanvas, Camera eventCamera)
         {
             if (lockLaneCanvas == null)
@@ -763,7 +817,8 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureLockLaneButton(
             GameObject lockLaneButton,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector)
         {
             if (lockLaneButton == null)
             {
@@ -838,6 +893,7 @@ namespace QuestBowlingStandalone.Editor
 
             var serializedObject = new SerializedObject(laneLockButton);
             serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
+            serializedObject.FindProperty("foulLineSelector").objectReferenceValue = foulLineRaySelector;
             serializedObject.FindProperty("label").objectReferenceValue = label;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();

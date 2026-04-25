@@ -31,6 +31,10 @@ The goal is to avoid drifting into disconnected experiments.
   - Quest connects to `tcp://<laptop>:8769`
   - laptop analysis producers publish strict result envelopes to `tcp://127.0.0.1:8770`
   - forwarded results are persisted as `outbound_results.jsonl`
+- Shared Quest ray selection is now started:
+  - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs)
+  - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs)
+  - lane lock consumes the common world-ray selection stream, intersects it with the floor, projects that floor hit into the current camera frame, then calls `TrySetFoulLineSelection`
 
 ## Current State
 
@@ -196,6 +200,10 @@ The goal is to avoid drifting into disconnected experiments.
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - Result envelopes require `schemaVersion = laptop_result_envelope`; lane-lock result payloads require `schemaVersion = lane_lock_result`.
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) can now publish a solved lane lock with `--publish-result-host 127.0.0.1`.
+- Quest-side foul-line selection now has a common input layer:
+  - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs) emits shared hand/controller ray selections
+  - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs) is the lane-specific consumer
+  - first selection is left foul-line edge; second selection is right foul-line edge; invalid order is rejected by the existing strict lane-lock request path
 - Current explicit lane-selection decision:
   - the user must provide the two foul-line edge selections before `Lock Lane` can send a request
   - the selection frame is part of the request and is the only anchor frame the solver accepts
@@ -208,7 +216,7 @@ The goal is to avoid drifting into disconnected experiments.
 ## Immediate Next Focus
 
 1. Keep `unity_proof` as the primary Quest-side testbed and avoid falling back to the old bowling app project for proof runs.
-2. Finish the shared Quest hand-ray/select service and make lane selection call `TrySetFoulLineSelection(left, right, out note)` through that service.
+2. Build and deploy the Unity proof scene so the shared ray selector can be verified on-device.
 3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
 5. Build the laptop live session orchestrator so lane lock, shot tracking, and replay generation are stages of one session pipeline instead of separate CLIs.

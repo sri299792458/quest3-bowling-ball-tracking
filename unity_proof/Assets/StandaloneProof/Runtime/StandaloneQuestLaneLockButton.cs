@@ -7,6 +7,7 @@ namespace QuestBowlingStandalone.QuestApp
     public sealed class StandaloneQuestLaneLockButton : MonoBehaviour
     {
         [SerializeField] private StandaloneQuestLaneLockCapture laneLockCapture;
+        [SerializeField] private StandaloneQuestFoulLineRaySelector foulLineSelector;
         [SerializeField] private Text label;
         [SerializeField] private string idleText = "Lock Lane";
         [SerializeField] private string activeText = "Locking...";
@@ -16,6 +17,7 @@ namespace QuestBowlingStandalone.QuestApp
         private Button _button;
         private bool _lastActiveState;
         private string _lastObservedNote = string.Empty;
+        private string _lastObservedSelectionStatus = string.Empty;
         private string _transientStatusText = string.Empty;
         private float _transientStatusUntilRealtime;
 
@@ -69,11 +71,13 @@ namespace QuestBowlingStandalone.QuestApp
                 }
             }
 
-            if (!force && isActive == _lastActiveState)
+            var latestSelectionStatus = foulLineSelector != null ? foulLineSelector.LastStatus : string.Empty;
+            if (!string.IsNullOrWhiteSpace(latestSelectionStatus) && latestSelectionStatus != _lastObservedSelectionStatus)
             {
-                if (label == null || string.IsNullOrEmpty(_transientStatusText) || Time.realtimeSinceStartup > _transientStatusUntilRealtime)
+                _lastObservedSelectionStatus = latestSelectionStatus;
+                if (!isActive)
                 {
-                    return;
+                    ShowTransientStatus(_noteToLabel(latestSelectionStatus));
                 }
             }
 
@@ -127,6 +131,31 @@ namespace QuestBowlingStandalone.QuestApp
             if (note.StartsWith("foul_line_selection"))
             {
                 return "Foul Line Ready";
+            }
+
+            if (note.StartsWith("left_foul_line_point_selected"))
+            {
+                return "Select Right Edge";
+            }
+
+            if (note.StartsWith("floor_hit_outside_camera_image"))
+            {
+                return "Aim In View";
+            }
+
+            if (note.StartsWith("floor_hit_too_far"))
+            {
+                return "Aim Closer";
+            }
+
+            if (note.StartsWith("ray_parallel_to_floor") || note.StartsWith("floor_hit_behind_ray"))
+            {
+                return "Aim At Floor";
+            }
+
+            if (note.StartsWith("selection_frame_metadata_missing"))
+            {
+                return "Camera Not Ready";
             }
 
             if (note.StartsWith("floor_plane_unavailable:"))

@@ -34,6 +34,27 @@ For the selected frame:
 
 The selected points are normalized image coordinates in `[0, 1]`.
 
+## Quest Selection Path
+
+The shared Quest selector emits a world ray from the active hand/controller ray. Lane lock consumes that ray as follows:
+
+1. intersect the ray with the current floor plane
+2. project the floor hit point into the current passthrough camera frame
+3. store the resulting normalized image coordinate
+
+The first accepted selection is the left foul-line edge. The second accepted selection is the right foul-line edge. The code does not sort those points silently; if the second point is not to the right in image space, the request is rejected and the user must select again.
+
+World point to image pixel:
+
+```text
+P_c = inverse(cameraRotationWorld) * (P_w - cameraPositionWorld)
+u = fx * (P_c.x / P_c.z) + cx
+v = cy - fy * (P_c.y / P_c.z)
+pointNorm = [u / imageWidth, v / imageHeight]
+```
+
+The selection is rejected if the ray misses the floor, the projected point is behind the camera, or the normalized point falls outside `[0, 1]`.
+
 ## Coordinate Frames
 
 Image frame:
