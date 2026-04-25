@@ -9,6 +9,7 @@ from typing import Any
 from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, publish_laptop_result
 from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
+from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 
 
@@ -45,6 +46,7 @@ class LivePipelineConfig:
     publish_result_port: int = 8770
     poll_interval_seconds: float = 0.5
     idle_log_interval_seconds: float = 5.0
+    shot_tracking_config: LiveShotTrackingStageConfig | None = None
 
 
 @dataclass
@@ -55,6 +57,8 @@ class PipelineProcessSummary:
     lane_lock_requests_skipped: int = 0
     shot_boundary_events_seen: int = 0
     completed_shot_windows_seen: int = 0
+    completed_shot_windows_processed: int = 0
+    completed_shot_windows_skipped: int = 0
     open_shot_windows_seen: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -66,6 +70,8 @@ class PipelineProcessSummary:
             "laneLockRequestsSkipped": self.lane_lock_requests_skipped,
             "shotBoundaryEventsSeen": self.shot_boundary_events_seen,
             "completedShotWindowsSeen": self.completed_shot_windows_seen,
+            "completedShotWindowsProcessed": self.completed_shot_windows_processed,
+            "completedShotWindowsSkipped": self.completed_shot_windows_skipped,
             "openShotWindowsSeen": self.open_shot_windows_seen,
             "errors": list(self.errors),
         }
@@ -108,7 +114,11 @@ class LiveSessionPipeline:
         last_idle_log_at = 0.0
         while True:
             summary = self.process_once()
-            did_work = summary.lane_lock_requests_processed > 0 or bool(summary.errors)
+            did_work = (
+                summary.lane_lock_requests_processed > 0
+                or summary.completed_shot_windows_processed > 0
+                or bool(summary.errors)
+            )
             if did_work:
                 print(json.dumps({"kind": "live_pipeline_tick", **summary.to_dict()}, separators=(",", ":")))
             else:
@@ -153,6 +163,21 @@ class LiveSessionPipeline:
         for error in shot_boundaries.errors:
             summary.errors.append(f"{session_dir}: {error}")
 
+        if self.config.shot_tracking_config is not None and shot_boundaries.completed_windows:
+            state = self._load_session_state(session_dir)
+            processed_windows = state.setdefault("processedShotWindows", {})
+            if not isinstance(processed_windows, dict):
+                raise RuntimeError("pipeline_state processedShotWindows must be an object.")
+
+            for window in shot_boundaries.completed_windows:
+                if window.window_id in processed_windows:
+                    summary.completed_shot_windows_skipped += 1
+                    continue
+
+                self._process_shot_window(session_dir, window, processed_windows)
+                summary.completed_shot_windows_processed += 1
+                self._save_session_state(session_dir, state)
+
     def _process_lane_lock_request(
         self,
         session_dir: Path,
@@ -184,6 +209,30 @@ class LiveSessionPipeline:
             "success": bool(stage_output.solve_output.result.success),
         }
 
+    def _process_shot_window(
+        self,
+        session_dir: Path,
+        window: Any,
+        processed_windows: dict[str, Any],
+    ) -> None:
+        if self.config.shot_tracking_config is None:
+            raise RuntimeError("Shot tracking config is required to process shot windows.")
+
+        stage_output = run_live_shot_tracking_stage(
+            session_dir,
+            window=window,
+            config=self.config.shot_tracking_config,
+        )
+        sam2_result = stage_output.sam2_result
+        processed_windows[window.window_id] = {
+            "status": "processed",
+            "processedUnixMs": _now_unix_ms(),
+            "resultPath": str(stage_output.result_path),
+            "yoloSuccess": bool(stage_output.yolo_result.success),
+            "sam2Success": bool(sam2_result.success) if sam2_result is not None else None,
+            "success": bool(stage_output.result_document.get("success")),
+        }
+
     def _state_dir(self, session_dir: Path) -> Path:
         return session_dir / "analysis_live_pipeline"
 
@@ -197,11 +246,15 @@ class LiveSessionPipeline:
                 "schemaVersion": PIPELINE_STATE_SCHEMA_VERSION,
                 "sessionDir": str(session_dir),
                 "processedLaneLockRequests": {},
+                "processedShotWindows": {},
             }
         if state.get("schemaVersion") != PIPELINE_STATE_SCHEMA_VERSION:
             raise RuntimeError(f"Unsupported pipeline state schemaVersion {state.get('schemaVersion')!r}.")
         if not isinstance(state.get("processedLaneLockRequests"), dict):
             raise RuntimeError("pipeline_state processedLaneLockRequests must be an object.")
+        state.setdefault("processedShotWindows", {})
+        if not isinstance(state.get("processedShotWindows"), dict):
+            raise RuntimeError("pipeline_state processedShotWindows must be an object.")
         return state
 
     def _save_session_state(self, session_dir: Path, state: dict[str, Any]) -> None:
@@ -218,6 +271,7 @@ def build_pipeline_from_paths(
     publish_result_port: int = 8770,
     poll_interval_seconds: float = 0.5,
     idle_log_interval_seconds: float = 5.0,
+    shot_tracking_config: LiveShotTrackingStageConfig | None = None,
 ) -> LiveSessionPipeline:
     return LiveSessionPipeline(
         LivePipelineConfig(
@@ -227,5 +281,6 @@ def build_pipeline_from_paths(
             publish_result_port=publish_result_port,
             poll_interval_seconds=poll_interval_seconds,
             idle_log_interval_seconds=idle_log_interval_seconds,
+            shot_tracking_config=shot_tracking_config,
         )
     )

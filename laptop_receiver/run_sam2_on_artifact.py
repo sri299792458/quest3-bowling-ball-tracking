@@ -24,6 +24,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cache-root", type=Path, default=LEGACY_SAM2_CACHE_ROOT)
     parser.add_argument("--model-cfg", default="configs/sam2.1/sam2.1_hiera_t.yaml")
     parser.add_argument("--frame-limit", type=int, default=0)
+    parser.add_argument("--source-frame-idx-start", type=int, default=0)
+    parser.add_argument("--source-frame-idx-end", type=int, default=None)
     parser.add_argument("--no-preview", action="store_true")
     parser.add_argument("--json", action="store_true", dest="emit_json")
     return parser
@@ -46,6 +48,8 @@ def main() -> int:
         preview=not args.no_preview,
         frame_limit=int(args.frame_limit),
         config=config,
+        source_frame_idx_start=int(args.source_frame_idx_start),
+        source_frame_idx_end=args.source_frame_idx_end,
     )
 
     if args.emit_json:

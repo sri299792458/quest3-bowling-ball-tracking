@@ -8,10 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import cv2
-import numpy as np
-from PIL import Image
-
 
 LEGACY_PROJECT_ROOT = Path(r"C:\Users\student\Quest3BowlingBallTracking")
 LEGACY_SAM2_ROOT = LEGACY_PROJECT_ROOT / "third_party" / "sam2"
@@ -20,6 +16,8 @@ LEGACY_SAM2_CHECKPOINT = LEGACY_SAM2_ROOT / "checkpoints" / "sam2.1_hiera_tiny.p
 
 
 def bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    import numpy as np
+
     ys, xs = np.where(mask)
     if len(xs) == 0:
         return None
@@ -27,6 +25,8 @@ def bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int] | None:
 
 
 def centroid_from_mask(mask: np.ndarray) -> tuple[float, float] | None:
+    import numpy as np
+
     ys, xs = np.where(mask)
     if len(xs) == 0:
         return None
@@ -43,6 +43,8 @@ def _list_jpg_frames(source_path: str) -> list[Path]:
 def get_source_metadata(source_path: str, preview_fps: Optional[float] = None) -> tuple[int, int, int, float]:
     source = Path(source_path)
     if source.is_dir():
+        from PIL import Image
+
         frame_files = _list_jpg_frames(source_path)
         if not frame_files:
             raise RuntimeError(f"No JPEG frames found in {source_path}")
@@ -50,6 +52,8 @@ def get_source_metadata(source_path: str, preview_fps: Optional[float] = None) -
             video_width, video_height = image.size
         fps = float(preview_fps or 0.0)
         return len(frame_files), video_width, video_height, fps if fps > 0.0 else 30.0
+
+    import cv2
 
     capture = cv2.VideoCapture(source_path)
     if not capture.isOpened():
@@ -66,6 +70,8 @@ def get_source_metadata(source_path: str, preview_fps: Optional[float] = None) -
 
 def iter_source_frames(source_path: str, start_frame: int = 0):
     source = Path(source_path)
+    import cv2
+
     if source.is_dir():
         for frame_idx, frame_path in enumerate(_list_jpg_frames(source_path)[start_frame:], start=start_frame):
             frame_bgr = cv2.imread(str(frame_path), cv2.IMREAD_COLOR)
@@ -175,6 +181,7 @@ class StandaloneWarmSam2Tracker:
         no_preview: bool = True,
         frame_limit: int = 0,
         preview_fps: Optional[float] = None,
+        end_frame_idx: Optional[int] = None,
     ) -> dict[str, object]:
         self._ensure_loaded()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +193,12 @@ class StandaloneWarmSam2Tracker:
         frame_count, video_width, video_height, preview_fps = get_source_metadata(video_path, preview_fps=preview_fps)
         if not (0 <= seed_frame < frame_count):
             raise ValueError(f"seed frame {seed_frame} is outside 0..{frame_count - 1}")
+        if end_frame_idx is not None:
+            end_frame_idx = int(end_frame_idx)
+            if end_frame_idx < seed_frame:
+                raise ValueError(f"end frame {end_frame_idx} is before seed frame {seed_frame}")
+            if end_frame_idx >= frame_count:
+                raise ValueError(f"end frame {end_frame_idx} is outside 0..{frame_count - 1}")
         if box is None and not seed_points:
             raise ValueError("Seed must include at least a box or one point prompt.")
         if seed_points and len(seed_points) != len(seed_labels):
@@ -199,11 +212,16 @@ class StandaloneWarmSam2Tracker:
         )
         init_seconds = time.perf_counter() - init_start
 
+        import numpy as np
+
         box_array = np.array(box, dtype=np.float32) if box is not None else None
         points_array = np.array(seed_points, dtype=np.float32) if seed_points else None
         labels_array = np.array(seed_labels, dtype=np.int32) if seed_labels else None
         results: dict[int, dict[str, object]] = {}
         max_to_track = None if frame_limit <= 0 else frame_limit
+        if end_frame_idx is not None:
+            window_frame_limit = int(end_frame_idx) - seed_frame + 1
+            max_to_track = window_frame_limit if max_to_track is None else min(max_to_track, window_frame_limit)
         self._torch.cuda.empty_cache()
 
         propagate_start = time.perf_counter()
@@ -237,7 +255,8 @@ class StandaloneWarmSam2Tracker:
             writer.writerow(
                 ["frame_idx", "object_id", "present", "area", "bbox_x1", "bbox_y1", "bbox_x2", "bbox_y2", "centroid_x", "centroid_y"]
             )
-            for frame_idx in range(seed_frame, frame_count):
+            stop_frame = int(end_frame_idx) + 1 if end_frame_idx is not None else frame_count
+            for frame_idx in range(seed_frame, stop_frame):
                 row = results.get(frame_idx)
                 if row is None or row["bbox"] is None:
                     writer.writerow([frame_idx, self.config.object_id, 0, 0, "", "", "", "", "", ""])
@@ -248,6 +267,8 @@ class StandaloneWarmSam2Tracker:
 
         preview_seconds = 0.0
         if not no_preview:
+            import cv2
+
             mp4_path = output_dir / "preview.mp4"
             preview_start = time.perf_counter()
             writer = cv2.VideoWriter(str(mp4_path), cv2.VideoWriter_fourcc(*"mp4v"), preview_fps, (video_width, video_height))
@@ -255,6 +276,8 @@ class StandaloneWarmSam2Tracker:
                 raise RuntimeError(f"Could not open preview writer for {mp4_path}")
             try:
                 for frame_idx, frame_rgb in iter_source_frames(video_path, start_frame=seed_frame):
+                    if end_frame_idx is not None and frame_idx > int(end_frame_idx):
+                        break
                     row = results.get(frame_idx)
                     frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
                     if row is not None and row["bbox"] is not None:
@@ -273,6 +296,8 @@ class StandaloneWarmSam2Tracker:
             handle.write(f"checkpoint={self.config.checkpoint}\n")
             handle.write(f"model_cfg={self.config.model_cfg}\n")
             handle.write(f"seed_frame={seed_frame}\n")
+            if end_frame_idx is not None:
+                handle.write(f"end_frame={end_frame_idx}\n")
             handle.write(f"seed_box={box}\n")
             handle.write(f"seed_points={seed_points}\n")
             handle.write(f"seed_point_labels={seed_labels}\n")

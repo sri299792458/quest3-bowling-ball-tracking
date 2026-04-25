@@ -33,6 +33,7 @@ Current implemented slice:
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
 - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
 - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates strict `shot_start` / `shot_end` windows from `shot_boundaries.jsonl`
+- [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) runs windowed `YOLO -> SAM2` tracking for one completed live shot window
 - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the live pipeline CLI entry point
 
 Validation checks currently include:
@@ -171,8 +172,21 @@ Process one landed session without publishing results:
 py -m laptop_receiver.run_live_session_pipeline --session-dir C:\path\to\live_<session>_<stream> --once --no-publish
 ```
 
+Enable windowed YOLO shot tracking for completed `shot_start` / `shot_end` windows:
+
+```powershell
+py -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt
+```
+
+Run SAM2 after each successful windowed YOLO seed:
+
+```powershell
+py -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt --run-sam2
+```
+
 Current honest note:
 
 - the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
 - the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
 - there is no automatic lane identity selection or view-center fallback in the solver
+- shot tracking is explicit: the live pipeline only runs it when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`

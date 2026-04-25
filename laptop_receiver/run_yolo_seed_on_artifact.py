@@ -23,6 +23,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--det-conf", type=float, default=0.05)
     parser.add_argument("--seed-conf", type=float, default=0.8)
     parser.add_argument("--min-box-size", type=float, default=10.0)
+    parser.add_argument("--frame-seq-start", type=int, default=None, help="Optional first frameSeq to search.")
+    parser.add_argument("--frame-seq-end", type=int, default=None, help="Optional final frameSeq to search.")
     parser.add_argument("--json", action="store_true", dest="emit_json", help="Emit the result document as JSON.")
     return parser
 
@@ -47,6 +49,8 @@ def main() -> int:
         det_conf=float(args.det_conf),
         seed_conf=float(args.seed_conf),
         min_box_size=float(args.min_box_size),
+        frame_seq_start=args.frame_seq_start,
+        frame_seq_end=args.frame_seq_end,
     )
 
     if args.emit_json:

@@ -4,11 +4,10 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-import cv2
-
-from laptop_receiver.local_clip_artifact import LocalClipArtifact, load_local_clip_artifact
+if TYPE_CHECKING:
+    from laptop_receiver.local_clip_artifact import LocalClipArtifact
 
 
 LEGACY_DEFAULT_CHECKPOINT = Path(
@@ -26,6 +25,8 @@ class YoloSeedSearchInfo:
     min_box_size: float
     best_candidate_conf: float | None
     best_candidate_frame: int | None
+    frame_seq_start: int | None = None
+    frame_seq_end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,8 @@ class StandaloneYoloSeedResult:
 
 
 def _draw_box(image: Any, box: list[float], color: tuple[int, int, int], label: str) -> None:
+    import cv2
+
     x1, y1, x2, y2 = (int(round(v)) for v in box)
     cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
     cv2.putText(image, label, (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
@@ -88,12 +91,36 @@ def detect_seed_causally_from_artifact(
     det_conf: float,
     seed_conf: float,
     min_box_size: float,
+    frame_seq_start: int | None = None,
+    frame_seq_end: int | None = None,
 ) -> tuple[dict[str, Any] | None, YoloSeedSearchInfo]:
     started = time.perf_counter()
     searched_frames = 0
     best_candidate: dict[str, Any] | None = None
+    search_mode = "causal_frame_seq_window" if frame_seq_start is not None or frame_seq_end is not None else "causal"
+
+    def build_search_info() -> YoloSeedSearchInfo:
+        return YoloSeedSearchInfo(
+            search_mode=search_mode,
+            search_seconds=round(time.perf_counter() - started, 3),
+            searched_frames=searched_frames,
+            seed_conf_threshold=float(seed_conf),
+            det_conf_floor=float(det_conf),
+            min_box_size=float(min_box_size),
+            best_candidate_conf=float(best_candidate["detector_confidence"]) if best_candidate is not None else None,
+            best_candidate_frame=int(best_candidate["frame_idx"]) if best_candidate is not None else None,
+            frame_seq_start=frame_seq_start,
+            frame_seq_end=frame_seq_end,
+        )
 
     for decoded_frame in artifact.iter_frames():
+        frame_metadata = decoded_frame.metadata or {}
+        frame_seq = int(frame_metadata.get("frameSeq", decoded_frame.frame_index))
+        if frame_seq_start is not None and frame_seq < int(frame_seq_start):
+            continue
+        if frame_seq_end is not None and frame_seq > int(frame_seq_end):
+            break
+
         searched_frames += 1
         candidate = _detect_seed_for_image(
             model,
@@ -111,8 +138,8 @@ def detect_seed_causally_from_artifact(
         height = max(0.0, y2 - y1)
         candidate["box_width"] = width
         candidate["box_height"] = height
+        candidate["frame_seq"] = frame_seq
 
-        frame_metadata = decoded_frame.metadata or {}
         if frame_metadata:
             candidate["frame_metadata"] = frame_metadata
             candidate["camera_timestamp_us"] = frame_metadata.get("cameraTimestampUs")
@@ -123,27 +150,9 @@ def detect_seed_causally_from_artifact(
 
         if width >= float(min_box_size) and height >= float(min_box_size) and float(candidate["detector_confidence"]) >= float(seed_conf):
             candidate["seed_mode"] = "causal_first_confident"
-            return candidate, YoloSeedSearchInfo(
-                search_mode="causal",
-                search_seconds=round(time.perf_counter() - started, 3),
-                searched_frames=searched_frames,
-                seed_conf_threshold=float(seed_conf),
-                det_conf_floor=float(det_conf),
-                min_box_size=float(min_box_size),
-                best_candidate_conf=float(best_candidate["detector_confidence"]) if best_candidate is not None else None,
-                best_candidate_frame=int(best_candidate["frame_idx"]) if best_candidate is not None else None,
-            )
+            return candidate, build_search_info()
 
-    return None, YoloSeedSearchInfo(
-        search_mode="causal",
-        search_seconds=round(time.perf_counter() - started, 3),
-        searched_frames=searched_frames,
-        seed_conf_threshold=float(seed_conf),
-        det_conf_floor=float(det_conf),
-        min_box_size=float(min_box_size),
-        best_candidate_conf=float(best_candidate["detector_confidence"]) if best_candidate is not None else None,
-        best_candidate_frame=int(best_candidate["frame_idx"]) if best_candidate is not None else None,
-    )
+    return None, build_search_info()
 
 
 def analyze_artifact_with_yolo_seed(
@@ -155,7 +164,11 @@ def analyze_artifact_with_yolo_seed(
     det_conf: float = 0.05,
     seed_conf: float = 0.8,
     min_box_size: float = 10.0,
+    frame_seq_start: int | None = None,
+    frame_seq_end: int | None = None,
 ) -> StandaloneYoloSeedResult:
+    from laptop_receiver.local_clip_artifact import load_local_clip_artifact
+
     artifact = load_local_clip_artifact(artifact_dir)
     analysis_dir = _analysis_dir_for_artifact(artifact, output_root)
     analysis_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +184,8 @@ def analyze_artifact_with_yolo_seed(
         det_conf=det_conf,
         seed_conf=seed_conf,
         min_box_size=min_box_size,
+        frame_seq_start=frame_seq_start,
+        frame_seq_end=frame_seq_end,
     )
 
     preview_path = analysis_dir / "yolo_seed_preview.jpg"
@@ -195,6 +210,8 @@ def analyze_artifact_with_yolo_seed(
     seed["seed_search"] = asdict(search_info)
     seed["artifact_dir"] = str(artifact.root_dir)
     seed["video_path"] = str(artifact.video_path)
+
+    import cv2
 
     frame_idx = int(seed["frame_idx"])
     capture = cv2.VideoCapture(str(artifact.video_path))
