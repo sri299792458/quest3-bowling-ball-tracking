@@ -27,6 +27,7 @@ Current implemented slice:
 - [run_sam2_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_sam2_on_artifact.py) is the CLI entry point for that SAM2 stage
 - [live_stream_receiver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_stream_receiver.py) runs the first real live Quest-to-laptop receiver for `H.264` media plus metadata
 - [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py) defines strict laptop-to-Quest result envelopes
+- [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py) defines strict shot result and lane-space trajectory payloads
 - the same [local_clip_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/local_clip_artifact.py) loader now also accepts a persisted live session directory directly
 - [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py) loads `lane_lock_request` events from a landed live session
 - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) contains the reusable lane-lock stage used by both CLIs and the live pipeline
@@ -194,3 +195,4 @@ Current honest note:
 - the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
 - there is no automatic lane identity selection or view-center fallback in the solver
 - shot tracking is explicit: the live pipeline only runs it when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
+- a replayable `shot_result` requires a successful lane lock; without one the laptop emits a failed shot result instead of inventing lane-space trajectory data

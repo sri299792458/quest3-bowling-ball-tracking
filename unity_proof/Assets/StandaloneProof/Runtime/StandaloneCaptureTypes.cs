@@ -143,6 +143,57 @@ namespace QuestBowlingStandalone.QuestApp
     }
 
     [Serializable]
+    public sealed class StandaloneLanePoint
+    {
+        public float xMeters;
+        public float sMeters;
+        public float hMeters;
+    }
+
+    [Serializable]
+    public sealed class StandaloneLaneSpaceBallPoint
+    {
+        public string schemaVersion = "lane_space_ball_point";
+        public string sessionId;
+        public string shotId;
+        public ulong frameSeq;
+        public long cameraTimestampUs;
+        public long ptsUs;
+        public Vector2 imagePointPx;
+        public string pointDefinition;
+        public Vector3 worldPoint;
+        public StandaloneLanePoint lanePoint;
+        public bool isOnLockedLane;
+        public float projectionConfidence;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotTrackingSummary
+    {
+        public string source;
+        public bool yoloSuccess;
+        public bool sam2Success;
+        public int trackedFrames;
+        public int trajectoryPoints;
+        public float averageProjectionConfidence;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotResult
+    {
+        public string schemaVersion = "shot_result";
+        public string sessionId;
+        public string shotId;
+        public string windowId;
+        public bool success;
+        public string failureReason;
+        public string laneLockRequestId;
+        public StandaloneSourceFrameRange sourceFrameRange;
+        public StandaloneShotTrackingSummary trackingSummary;
+        public StandaloneLaneSpaceBallPoint[] trajectory;
+    }
+
+    [Serializable]
     public sealed class StandaloneFrameMetadata
     {
         public string schemaVersion = "capture_metadata_v1";

@@ -6,7 +6,7 @@ from pathlib import Path
 import time
 from typing import Any
 
-from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, publish_laptop_result
+from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, build_shot_result_envelope, publish_laptop_result
 from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
@@ -224,10 +224,23 @@ class LiveSessionPipeline:
             config=self.config.shot_tracking_config,
         )
         sam2_result = stage_output.sam2_result
+        published = False
+        if self.config.publish_result_host:
+            envelope = build_shot_result_envelope(result=stage_output.shot_result)
+            publish_laptop_result(
+                envelope,
+                host=str(self.config.publish_result_host),
+                port=int(self.config.publish_result_port),
+            )
+            published = True
+
         processed_windows[window.window_id] = {
             "status": "processed",
             "processedUnixMs": _now_unix_ms(),
+            "published": bool(published),
             "resultPath": str(stage_output.result_path),
+            "shotResultSuccess": bool(stage_output.shot_result.success),
+            "shotResultFailureReason": str(stage_output.shot_result.failure_reason),
             "yoloSuccess": bool(stage_output.yolo_result.success),
             "sam2Success": bool(sam2_result.success) if sam2_result is not None else None,
             "success": bool(stage_output.result_document.get("success")),

@@ -214,6 +214,28 @@ Supported result kinds:
 
 The envelope `session_id` must match `lane_lock_result.sessionId`.
 
+`shot_result` envelopes must include:
+
+- `shot_result`, with `schemaVersion` exactly `shot_result`
+
+The envelope `session_id` must match `shot_result.sessionId`.
+
+The envelope `shot_id` must match `shot_result.shotId`.
+
+`shot_result` contains:
+
+- `sessionId`
+- `shotId`
+- `windowId`
+- `success`
+- `failureReason`
+- `laneLockRequestId`
+- `sourceFrameRange`
+- `trackingSummary`
+- `trajectory`
+
+`trajectory` is an ordered list of `lane_space_ball_point` entries. Each point contains the source frame identity, image point, projected world point, lane coordinates, on-lane flag, and projection confidence. A successful replayable shot result requires a successful lane lock; if no lane lock is available, the laptop may send a failed `shot_result` with an empty trajectory and `failureReason = lane_lock_result_missing`.
+
 The local result publish endpoint is laptop-local producer input for analysis stages. Producers send the same strict result envelope to `127.0.0.1:8770`; the live receiver validates it, persists it, then forwards it to connected Quest result clients.
 
 ## Laptop Persistence Shape

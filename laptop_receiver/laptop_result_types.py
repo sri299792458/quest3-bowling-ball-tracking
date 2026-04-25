@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from laptop_receiver.lane_lock_types import LaneLockResult
+from laptop_receiver.shot_result_types import ShotResult
 
 
 RESULT_ENVELOPE_SCHEMA_VERSION = "laptop_result_envelope"
@@ -82,6 +83,15 @@ class LaptopResultEnvelope:
                 raise ValueError(
                     "lane_lock_result sessionId does not match envelope session_id."
                 )
+        elif kind == RESULT_KIND_SHOT_RESULT:
+            shot_payload = payload.get("shot_result")
+            if not isinstance(shot_payload, Mapping):
+                raise ValueError("shot_result envelope requires shot_result payload.")
+            shot_result = ShotResult.from_dict(shot_payload)
+            if shot_result.session_id != session_id:
+                raise ValueError("shot_result sessionId does not match envelope session_id.")
+            if shot_result.shot_id != shot_id:
+                raise ValueError("shot_result shotId does not match envelope shot_id.")
 
         return cls(
             schema_version=schema_version,
@@ -112,6 +122,25 @@ def build_lane_lock_result_envelope(
         "message_id": message_id or uuid4().hex,
         "created_unix_ms": int(created_unix_ms or time.time() * 1000),
         "lane_lock_result": result.to_dict(),
+    }
+    LaptopResultEnvelope.from_dict(envelope)
+    return envelope
+
+
+def build_shot_result_envelope(
+    *,
+    result: ShotResult,
+    message_id: str | None = None,
+    created_unix_ms: int | None = None,
+) -> dict[str, Any]:
+    envelope = {
+        "schemaVersion": RESULT_ENVELOPE_SCHEMA_VERSION,
+        "kind": RESULT_KIND_SHOT_RESULT,
+        "session_id": result.session_id,
+        "shot_id": result.shot_id,
+        "message_id": message_id or uuid4().hex,
+        "created_unix_ms": int(created_unix_ms or time.time() * 1000),
+        "shot_result": result.to_dict(),
     }
     LaptopResultEnvelope.from_dict(envelope)
     return envelope

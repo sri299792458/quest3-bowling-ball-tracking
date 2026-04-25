@@ -35,6 +35,18 @@ namespace QuestBowlingStandalone.QuestApp
             public StandaloneLaneLockResult lane_lock_result;
         }
 
+        [Serializable]
+        private sealed class ShotResultEnvelope
+        {
+            public string schemaVersion;
+            public string kind;
+            public string session_id;
+            public string shot_id;
+            public string message_id;
+            public long created_unix_ms;
+            public StandaloneShotResult shot_result;
+        }
+
         [Header("Laptop Result Channel")]
         [SerializeField] private string host = "10.235.26.83";
         [SerializeField] private int port = 8769;
@@ -52,10 +64,12 @@ namespace QuestBowlingStandalone.QuestApp
         private volatile string _threadStatus;
 
         public event Action<StandaloneLaneLockResult> LaneLockResultReceived;
+        public event Action<StandaloneShotResult> ShotResultReceived;
 
         public bool EnabledForAutoRun => enabledForAutoRun;
         public bool IsRunning => _readerThread != null && _readerThread.IsAlive;
         public StandaloneLaneLockResult LastLaneLockResult { get; private set; }
+        public StandaloneShotResult LastShotResult { get; private set; }
         public string LastStatus { get; private set; }
 
         public bool TryBeginResultStream(string sessionId, string shotId, out string note)
@@ -218,6 +232,12 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            if (header.kind == "shot_result")
+            {
+                ProcessShotResult(line);
+                return;
+            }
+
             LastStatus = "unsupported_result_kind:" + header.kind;
             DebugLog(LastStatus);
         }
@@ -254,6 +274,41 @@ namespace QuestBowlingStandalone.QuestApp
             LastStatus = envelope.lane_lock_result.success ? "lane_lock_result_received" : "lane_lock_result_failed";
             DebugLog($"{LastStatus} requestId={envelope.lane_lock_result.requestId} confidence={envelope.lane_lock_result.confidence:0.000}");
             LaneLockResultReceived?.Invoke(envelope.lane_lock_result);
+        }
+
+        private void ProcessShotResult(string line)
+        {
+            ShotResultEnvelope envelope;
+            try
+            {
+                envelope = JsonUtility.FromJson<ShotResultEnvelope>(line);
+            }
+            catch (Exception ex)
+            {
+                LastStatus = ex.GetType().Name + ": invalid_shot_result_json";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            if (envelope == null || envelope.shot_result == null)
+            {
+                LastStatus = "shot_result_missing_payload";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            if (envelope.shot_result.schemaVersion != "shot_result")
+            {
+                LastStatus = "unsupported_shot_result_schema";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            LastShotResult = envelope.shot_result;
+            LastStatus = envelope.shot_result.success ? "shot_result_received" : "shot_result_failed";
+            var pointCount = envelope.shot_result.trajectory != null ? envelope.shot_result.trajectory.Length : 0;
+            DebugLog($"{LastStatus} windowId={envelope.shot_result.windowId} trajectoryPoints={pointCount}");
+            ShotResultReceived?.Invoke(envelope.shot_result);
         }
 
         private void EnqueueLine(string line)

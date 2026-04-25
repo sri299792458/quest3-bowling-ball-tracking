@@ -449,6 +449,15 @@ class LanePoint:
     s_meters: float
     h_meters: float
 
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | None) -> "LanePoint":
+        source = payload or {}
+        return cls(
+            x_meters=_float(source.get("xMeters")),
+            s_meters=_float(source.get("sMeters")),
+            h_meters=_float(source.get("hMeters")),
+        )
+
     def to_dict(self) -> dict[str, float]:
         return {
             "xMeters": self.x_meters,
@@ -471,6 +480,26 @@ class LaneSpaceBallPoint:
     lane_point: LanePoint
     is_on_locked_lane: bool
     projection_confidence: float
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "LaneSpaceBallPoint":
+        schema_version = _str(payload.get("schemaVersion"))
+        if schema_version != "lane_space_ball_point":
+            raise ValueError(f"Unsupported lane-space ball point schemaVersion {schema_version!r}.")
+        return cls(
+            schema_version=schema_version,
+            session_id=_str(payload.get("sessionId")),
+            shot_id=_str(payload.get("shotId")),
+            frame_seq=_int(payload.get("frameSeq")),
+            camera_timestamp_us=_int(payload.get("cameraTimestampUs")),
+            pts_us=_int(payload.get("ptsUs")),
+            image_point_px=Vector2.from_mapping(payload.get("imagePointPx")),
+            point_definition=_str(payload.get("pointDefinition")),
+            world_point=Vector3.from_mapping(payload.get("worldPoint")),
+            lane_point=LanePoint.from_dict(payload.get("lanePoint")),
+            is_on_locked_lane=bool(payload.get("isOnLockedLane")),
+            projection_confidence=_float(payload.get("projectionConfidence")),
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
