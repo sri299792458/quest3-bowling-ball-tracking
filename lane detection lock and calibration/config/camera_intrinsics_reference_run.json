@@ -1,0 +1,9 @@
+{
+  "image_width": 960,
+  "image_height": 720,
+  "fx": 643.0,
+  "fy": 643.0,
+  "cx": 480.0,
+  "cy": 360.0,
+  "source": "auto_estimated_single_focal_from_reference_lane"
+}

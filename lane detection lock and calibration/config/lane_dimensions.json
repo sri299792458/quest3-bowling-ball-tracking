@@ -1,0 +1,11 @@
+{
+  "lane_width_m": 1.0541,
+  "lane_length_m": 18.288,
+  "corner_order": [
+    "near_left",
+    "near_right",
+    "far_right",
+    "far_left"
+  ],
+  "notes": "Reference lane corners are modeled as a planar rectangle with +x across lane width and +z downlane."
+}
