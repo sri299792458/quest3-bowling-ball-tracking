@@ -15,6 +15,7 @@ namespace QuestBowlingStandalone.QuestApp
         private RenderTexture _outputTexture;
 
         public PassthroughCameraAccess CameraAccess => cameraAccess;
+        public string CameraSideName => cameraPosition.ToString();
         public RenderTexture OutputTexture => _outputTexture;
         public IntPtr OutputTextureNativePtr => _outputTexture != null ? _outputTexture.GetNativeTexturePtr() : IntPtr.Zero;
 

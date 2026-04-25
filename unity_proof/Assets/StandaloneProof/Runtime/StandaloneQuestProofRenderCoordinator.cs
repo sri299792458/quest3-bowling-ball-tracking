@@ -112,7 +112,7 @@ namespace QuestBowlingStandalone.QuestApp
                 {
                     var sent = liveMetadataSender.TrySendFrameMetadata(
                         proofCapture.ActiveSessionId,
-                        proofCapture.ActiveShotId,
+                        proofCapture.ActiveStreamId,
                         proofCapture.LastCommittedFrameMetadata,
                         out var metadataNote);
                     if (!sent)

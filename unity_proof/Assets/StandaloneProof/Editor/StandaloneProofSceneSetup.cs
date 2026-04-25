@@ -3,6 +3,8 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 namespace QuestBowlingStandalone.Editor
 {
@@ -11,9 +13,13 @@ namespace QuestBowlingStandalone.Editor
         public const string ScenePath = "Assets/StandaloneProof/Scenes/StandaloneProof.unity";
 
         private const string CameraRigPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRCameraRig.prefab";
+        private const string HandPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRHandPrefab.prefab";
+        private const string RayHelperPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRRayHelper.prefab";
         private const string CameraAccessObjectName = "PassthroughCameraAccess";
         private const string ProofRigObjectName = "StandaloneProofCaptureRig";
         private const string PassthroughObjectName = "[BuildingBlock] Passthrough";
+        private const string LockLaneCanvasObjectName = "LockLaneCanvas";
+        private const string LockLaneButtonObjectName = "LockLaneButton";
 
         [MenuItem("Tools/Standalone Proof/Create Or Update Proof Scene")]
         public static void CreateOrUpdateProofScene()
@@ -22,25 +28,52 @@ namespace QuestBowlingStandalone.Editor
 
             var scene = OpenOrCreateScene();
             var cameraRig = FindOrCreateCameraRig();
+            var trackingSpace = FindTrackingSpace(cameraRig.transform);
             var headAnchor = FindHeadAnchor(cameraRig.transform);
+            var leftHandAnchor = FindHandAnchor(cameraRig.transform, "LeftHandAnchor");
+            var rightHandAnchor = FindHandAnchor(cameraRig.transform, "RightHandAnchor");
+            var eventCamera = FindEventCamera(headAnchor, cameraRig.transform);
             var cameraAccess = FindOrCreateCameraAccess();
             var proofRig = FindOrCreateProofRig();
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(proofRig);
             var passthroughLayer = FindOrCreatePassthroughLayer();
+            var leftHand = FindOrCreateHand(OVRHand.Hand.HandLeft, leftHandAnchor);
+            var rightHand = FindOrCreateHand(OVRHand.Hand.HandRight, rightHandAnchor);
+            var leftRayHelper = FindOrCreateRayHelper("Left", leftHand != null ? leftHand.transform : null);
+            var rightRayHelper = FindOrCreateRayHelper("Right", rightHand != null ? rightHand.transform : null);
+            var eventSystemObject = FindOrCreateEventSystem();
+            var lockLaneCanvas = FindOrCreateLockLaneCanvas(headAnchor);
+            var lockLaneButton = FindOrCreateLockLaneButton(lockLaneCanvas.transform);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneCanvas);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneButton);
 
+            var sessionContext = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext>(proofRig);
             var frameSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource>(proofRig);
             var proofCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture>(proofRig);
+            var floorPlaneSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource>(proofRig);
+            var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
-            var autoRun = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneProofAutoRun>(proofRig);
+            var sessionController = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController>(proofRig);
+            var eventSystem = GetOrAddComponent<EventSystem>(eventSystemObject);
+            var inputModule = GetOrAddComponent<OVRInputModule>(eventSystemObject);
 
             ConfigureCameraAccess(cameraAccess);
             ConfigureCameraRig(cameraRig);
             ConfigurePassthroughLayer(passthroughLayer);
+            ConfigureEventSystem(eventSystemObject, eventSystem, inputModule, headAnchor);
+            ConfigureSessionContext(sessionContext);
             ConfigureFrameSource(frameSource, cameraAccess);
-            ConfigureProofCapture(proofCapture, cameraAccess, headAnchor);
+            ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
+            ConfigureFloorPlaneSource(floorPlaneSource, trackingSpace != null ? trackingSpace : cameraRig.transform);
+            ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
+            ConfigureHandRayHelper(leftHand, leftRayHelper);
+            ConfigureHandRayHelper(rightHand, rightRayHelper);
+            ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
+            ConfigureLockLaneButton(lockLaneButton, laneLockCapture);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
-            ConfigureAutoRun(autoRun, proofCapture, liveMetadataSender);
+            ConfigureSessionController(sessionController, proofCapture, liveMetadataSender);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -137,6 +170,112 @@ namespace QuestBowlingStandalone.Editor
             return Undo.AddComponent<OVRPassthroughLayer>(go);
         }
 
+        private static GameObject FindOrCreateEventSystem()
+        {
+            var existing = GameObject.Find("EventSystem");
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var go = new GameObject("EventSystem");
+            Undo.RegisterCreatedObjectUndo(go, "Create EventSystem");
+            return go;
+        }
+
+        private static GameObject FindOrCreateLockLaneCanvas(Transform headAnchor)
+        {
+            var existing = GameObject.Find(LockLaneCanvasObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var canvasObject = new GameObject(
+                LockLaneCanvasObjectName,
+                typeof(RectTransform),
+                typeof(Canvas),
+                typeof(CanvasScaler),
+                typeof(OVRRaycaster));
+            Undo.RegisterCreatedObjectUndo(canvasObject, "Create Lock Lane Canvas");
+            if (headAnchor != null)
+            {
+                Undo.SetTransformParent(canvasObject.transform, headAnchor, false, "Parent Lock Lane Canvas");
+            }
+
+            canvasObject.layer = 5;
+            return canvasObject;
+        }
+
+        private static GameObject FindOrCreateLockLaneButton(Transform canvasTransform)
+        {
+            var existing = GameObject.Find(LockLaneButtonObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var button = new GameObject(
+                LockLaneButtonObjectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Button));
+            button.name = LockLaneButtonObjectName;
+            Undo.RegisterCreatedObjectUndo(button, "Create Lock Lane Button");
+            if (canvasTransform != null)
+            {
+                Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Lock Lane Button");
+            }
+
+            button.layer = 5;
+            return button;
+        }
+
+        private static OVRRayHelper FindOrCreateRayHelper(string handLabel, Transform parent)
+        {
+            var helperName = $"Standalone{handLabel}RayHelper";
+            var existing = GameObject.Find(helperName);
+            if (existing != null)
+            {
+                return existing.GetComponent<OVRRayHelper>();
+            }
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(RayHelperPrefabPath);
+            if (prefab == null)
+            {
+                throw new System.InvalidOperationException($"Could not load ray helper prefab at {RayHelperPrefabPath}");
+            }
+
+            var helperObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (helperObject == null)
+            {
+                throw new System.InvalidOperationException("Failed to instantiate OVRRayHelper prefab.");
+            }
+
+            helperObject.name = helperName;
+            Undo.RegisterCreatedObjectUndo(helperObject, $"Create {helperName}");
+            if (parent != null)
+            {
+                Undo.SetTransformParent(helperObject.transform, parent, false, $"Parent {helperName}");
+            }
+
+            helperObject.transform.localPosition = Vector3.zero;
+            helperObject.transform.localRotation = Quaternion.identity;
+            helperObject.transform.localScale = Vector3.one;
+            return helperObject.GetComponent<OVRRayHelper>();
+        }
+
         private static Transform FindHeadAnchor(Transform root)
         {
             if (root == null)
@@ -157,6 +296,214 @@ namespace QuestBowlingStandalone.Editor
             return root.Find("CenterEyeAnchor");
         }
 
+        private static Transform FindTrackingSpace(Transform root)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            var direct = root.Find("TrackingSpace");
+            if (direct != null)
+            {
+                return direct;
+            }
+
+            return FindRecursive(root, "TrackingSpace");
+        }
+
+        private static Camera FindEventCamera(Transform headAnchor, Transform root)
+        {
+            if (headAnchor != null)
+            {
+                var directCamera = headAnchor.GetComponent<Camera>();
+                if (directCamera != null)
+                {
+                    return directCamera;
+                }
+
+                var nestedCamera = headAnchor.GetComponentInChildren<Camera>(true);
+                if (nestedCamera != null)
+                {
+                    return nestedCamera;
+                }
+            }
+
+            return root != null ? root.GetComponentInChildren<Camera>(true) : null;
+        }
+
+        private static Transform FindHandAnchor(Transform root, string anchorName)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            var trackingSpace = root.Find("TrackingSpace");
+            if (trackingSpace != null)
+            {
+                var anchor = trackingSpace.Find(anchorName);
+                if (anchor != null)
+                {
+                    return anchor;
+                }
+            }
+
+            return FindRecursive(root, anchorName);
+        }
+
+        private static Transform FindRecursive(Transform root, string targetName)
+        {
+            if (root == null)
+            {
+                return null;
+            }
+
+            if (root.name == targetName)
+            {
+                return root;
+            }
+
+            for (var index = 0; index < root.childCount; index++)
+            {
+                var result = FindRecursive(root.GetChild(index), targetName);
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+
+            return null;
+        }
+
+        private static OVRHand FindOrCreateHand(OVRHand.Hand handType, Transform parentAnchor)
+        {
+            if (parentAnchor == null)
+            {
+                return null;
+            }
+
+            var existingHands = parentAnchor.GetComponentsInChildren<OVRHand>(true);
+            foreach (var existingHand in existingHands)
+            {
+                if (existingHand != null)
+                {
+                    Undo.DestroyObjectImmediate(existingHand.gameObject);
+                }
+            }
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(HandPrefabPath);
+            if (prefab == null)
+            {
+                throw new System.InvalidOperationException($"Could not load hand prefab at {HandPrefabPath}");
+            }
+
+            var handObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (handObject == null)
+            {
+                throw new System.InvalidOperationException("Failed to instantiate OVRHandPrefab.");
+            }
+
+            handObject.name = handType == OVRHand.Hand.HandLeft ? "StandaloneProofLeftHand" : "StandaloneProofRightHand";
+            Undo.RegisterCreatedObjectUndo(handObject, $"Create {handObject.name}");
+            Undo.SetTransformParent(handObject.transform, parentAnchor, false, "Parent hand to camera rig.");
+
+            var ovrHand = handObject.GetComponent<OVRHand>();
+            if (ovrHand == null)
+            {
+                throw new System.InvalidOperationException("Instantiated hand prefab is missing OVRHand.");
+            }
+
+            ConfigureHandComponents(ovrHand, handType);
+            return ovrHand;
+        }
+
+        private static void ConfigureHandComponents(OVRHand hand, OVRHand.Hand handType)
+        {
+            if (hand == null)
+            {
+                return;
+            }
+
+            var skeletonVersion = OVRRuntimeSettings.Instance.HandSkeletonVersion;
+            var handSerializedObject = new SerializedObject(hand);
+            handSerializedObject.FindProperty("HandType").intValue = (int)handType;
+            handSerializedObject.ApplyModifiedPropertiesWithoutUndo();
+
+            var skeleton = hand.GetComponent<OVRSkeleton>();
+            if (skeleton != null)
+            {
+                var skeletonSerializedObject = new SerializedObject(skeleton);
+                var skeletonType = skeletonSerializedObject.FindProperty("_skeletonType");
+                if (skeletonType != null)
+                {
+                    skeletonType.intValue = (int)handType.AsSkeletonType(skeletonVersion);
+                    skeletonSerializedObject.ApplyModifiedPropertiesWithoutUndo();
+                }
+
+                EditorUtility.SetDirty(skeleton);
+            }
+
+            var mesh = hand.GetComponent<OVRMesh>();
+            if (mesh != null)
+            {
+                var meshSerializedObject = new SerializedObject(mesh);
+                var meshType = meshSerializedObject.FindProperty("_meshType");
+                if (meshType != null)
+                {
+                    meshType.intValue = (int)handType.AsMeshType(skeletonVersion);
+                    meshSerializedObject.ApplyModifiedPropertiesWithoutUndo();
+                }
+
+                EditorUtility.SetDirty(mesh);
+            }
+
+            EditorUtility.SetDirty(hand);
+        }
+
+        private static void ConfigureHandRayHelper(OVRHand hand, OVRRayHelper rayHelper)
+        {
+            if (hand == null || rayHelper == null)
+            {
+                return;
+            }
+
+            hand.RayHelper = rayHelper;
+            rayHelper.DefaultLength = 2.0f;
+            rayHelper.gameObject.SetActive(true);
+            EditorUtility.SetDirty(hand);
+            EditorUtility.SetDirty(rayHelper);
+        }
+
+        private static void ConfigureEventSystem(
+            GameObject eventSystemObject,
+            EventSystem eventSystem,
+            OVRInputModule inputModule,
+            Transform headAnchor)
+        {
+            if (eventSystemObject == null || eventSystem == null || inputModule == null)
+            {
+                return;
+            }
+
+            var inputModules = eventSystemObject.GetComponents<BaseInputModule>();
+            foreach (var module in inputModules)
+            {
+                if (module == null || module is OVRInputModule)
+                {
+                    continue;
+                }
+
+                Undo.DestroyObjectImmediate(module);
+            }
+
+            inputModule.rayTransform = headAnchor;
+            inputModule.allowActivationOnMobileDevice = true;
+            inputModule.performSphereCastForGazepointer = false;
+            EditorUtility.SetDirty(eventSystem);
+            EditorUtility.SetDirty(inputModule);
+        }
+
         private static T GetOrAddComponent<T>(GameObject target) where T : Component
         {
             var existing = target.GetComponent<T>();
@@ -166,6 +513,20 @@ namespace QuestBowlingStandalone.Editor
             }
 
             return Undo.AddComponent<T>(target);
+        }
+
+        private static void RemoveComponentIfExists<T>(GameObject target) where T : Component
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var existing = target.GetComponent<T>();
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
         }
 
         private static void ConfigureCameraAccess(PassthroughCameraAccess cameraAccess)
@@ -190,6 +551,8 @@ namespace QuestBowlingStandalone.Editor
                 return;
             }
 
+            ovrManager.trackingOriginType = OVRManager.TrackingOrigin.FloorLevel;
+
             var serializedObject = new SerializedObject(ovrManager);
             var insightPassthroughEnabled = serializedObject.FindProperty("isInsightPassthroughEnabled");
             var requestPassthroughPermission = serializedObject.FindProperty("requestPassthroughCameraAccessPermissionOnStartup");
@@ -201,6 +564,12 @@ namespace QuestBowlingStandalone.Editor
             if (requestPassthroughPermission != null)
             {
                 requestPassthroughPermission.boolValue = true;
+            }
+
+            var launchSimultaneousHandsControllers = serializedObject.FindProperty("launchSimultaneousHandsControllersOnStartup");
+            if (launchSimultaneousHandsControllers != null)
+            {
+                launchSimultaneousHandsControllers.boolValue = true;
             }
 
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
@@ -263,12 +632,22 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(frameSource);
         }
 
+        private static void ConfigureSessionContext(QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext sessionContext)
+        {
+            var serializedObject = new SerializedObject(sessionContext);
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(sessionContext);
+        }
+
         private static void ConfigureProofCapture(
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext sessionContext,
             PassthroughCameraAccess cameraAccess,
             Transform headAnchor)
         {
             var serializedObject = new SerializedObject(proofCapture);
+            serializedObject.FindProperty("sessionContext").objectReferenceValue = sessionContext;
             serializedObject.FindProperty("cameraAccess").objectReferenceValue = cameraAccess;
             serializedObject.FindProperty("cameraPosition").enumValueIndex = (int)PassthroughCameraAccess.CameraPositionType.Left;
             serializedObject.FindProperty("headTransform").objectReferenceValue = headAnchor;
@@ -299,6 +678,162 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(liveMetadataSender);
         }
 
+        private static void ConfigureFloorPlaneSource(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource,
+            Transform floorReference)
+        {
+            var serializedObject = new SerializedObject(floorPlaneSource);
+            serializedObject.FindProperty("floorReference").objectReferenceValue = floorReference;
+            serializedObject.FindProperty("fallbackPlanePointWorld").vector3Value = Vector3.zero;
+            serializedObject.FindProperty("fallbackPlaneNormalWorld").vector3Value = Vector3.up;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(floorPlaneSource);
+        }
+
+        private static void ConfigureLaneLockCapture(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource)
+        {
+            var serializedObject = new SerializedObject(laneLockCapture);
+            serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
+            serializedObject.FindProperty("laneWidthMeters").floatValue = 1.0541f;
+            serializedObject.FindProperty("laneLengthMeters").floatValue = 18.288f;
+            serializedObject.FindProperty("targetFrameCount").intValue = 24;
+            serializedObject.FindProperty("minimumFrameCount").intValue = 12;
+            serializedObject.FindProperty("maxCaptureDurationSeconds").floatValue = 1.0f;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(laneLockCapture);
+        }
+
+        private static void ConfigureLockLaneCanvas(GameObject lockLaneCanvas, Camera eventCamera)
+        {
+            if (lockLaneCanvas == null)
+            {
+                return;
+            }
+
+            var rectTransform = lockLaneCanvas.GetComponent<RectTransform>();
+            var canvas = lockLaneCanvas.GetComponent<Canvas>();
+            var canvasScaler = lockLaneCanvas.GetComponent<CanvasScaler>();
+            var raycaster = lockLaneCanvas.GetComponent<OVRRaycaster>();
+
+            lockLaneCanvas.layer = 5;
+            rectTransform.localPosition = new Vector3(0.0f, -0.08f, 0.75f);
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one * 0.001f;
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.sizeDelta = new Vector2(700.0f, 220.0f);
+
+            canvas.renderMode = RenderMode.WorldSpace;
+            canvas.worldCamera = eventCamera;
+            canvas.pixelPerfect = false;
+
+            canvasScaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+            canvasScaler.dynamicPixelsPerUnit = 10.0f;
+
+            raycaster.blockingObjects = GraphicRaycaster.BlockingObjects.None;
+            raycaster.ignoreReversedGraphics = true;
+
+            EditorUtility.SetDirty(rectTransform);
+            EditorUtility.SetDirty(canvas);
+            EditorUtility.SetDirty(canvasScaler);
+            EditorUtility.SetDirty(raycaster);
+        }
+
+        private static void ConfigureLockLaneButton(
+            GameObject lockLaneButton,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture)
+        {
+            if (lockLaneButton == null)
+            {
+                return;
+            }
+
+            var rectTransform = lockLaneButton.GetComponent<RectTransform>();
+            var image = lockLaneButton.GetComponent<Image>();
+            var button = lockLaneButton.GetComponent<Button>();
+            var laneLockButton = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockButton>(lockLaneButton);
+
+            lockLaneButton.layer = 5;
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.anchoredPosition = Vector2.zero;
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one;
+            rectTransform.sizeDelta = new Vector2(520.0f, 120.0f);
+
+            image.color = new Color(0.09f, 0.13f, 0.19f, 0.94f);
+            image.raycastTarget = true;
+
+            var colors = button.colors;
+            colors.normalColor = new Color(0.09f, 0.13f, 0.19f, 0.94f);
+            colors.highlightedColor = new Color(0.19f, 0.30f, 0.46f, 0.98f);
+            colors.pressedColor = new Color(0.28f, 0.42f, 0.62f, 1.0f);
+            colors.disabledColor = new Color(0.16f, 0.16f, 0.16f, 0.70f);
+            colors.fadeDuration = 0.05f;
+            button.transition = Selectable.Transition.ColorTint;
+            button.targetGraphic = image;
+            button.colors = colors;
+
+            var labelTransform = lockLaneButton.transform.Find("Label");
+            Text label;
+            if (labelTransform == null)
+            {
+                var labelObject = new GameObject("Label");
+                Undo.RegisterCreatedObjectUndo(labelObject, "Create Lock Lane Label");
+                Undo.SetTransformParent(labelObject.transform, lockLaneButton.transform, false, "Parent Lock Lane Label");
+                labelObject.layer = 5;
+                Undo.AddComponent<RectTransform>(labelObject);
+                Undo.AddComponent<CanvasRenderer>(labelObject);
+                label = Undo.AddComponent<Text>(labelObject);
+            }
+            else
+            {
+                label = labelTransform.GetComponent<Text>();
+                if (label == null)
+                {
+                    label = Undo.AddComponent<Text>(labelTransform.gameObject);
+                }
+            }
+
+            if (label != null)
+            {
+                var labelRect = label.GetComponent<RectTransform>();
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = Vector2.zero;
+                labelRect.offsetMax = Vector2.zero;
+                label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.text = "Lock Lane";
+                label.alignment = TextAnchor.MiddleCenter;
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 24;
+                label.resizeTextMaxSize = 52;
+                label.color = new Color(0.96f, 0.98f, 1.0f, 1.0f);
+                label.raycastTarget = false;
+                EditorUtility.SetDirty(label);
+            }
+
+            var serializedObject = new SerializedObject(laneLockButton);
+            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
+            serializedObject.FindProperty("label").objectReferenceValue = label;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(laneLockButton);
+            EditorUtility.SetDirty(image);
+            EditorUtility.SetDirty(button);
+            EditorUtility.SetDirty(lockLaneButton);
+        }
+
         private static void ConfigureCoordinator(
             QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator coordinator,
             QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource frameSource,
@@ -315,27 +850,25 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(coordinator);
         }
 
-        private static void ConfigureAutoRun(
-            QuestBowlingStandalone.QuestApp.StandaloneProofAutoRun autoRun,
+        private static void ConfigureSessionController(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender)
         {
-            var serializedObject = new SerializedObject(autoRun);
+            var serializedObject = new SerializedObject(sessionController);
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
             serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("autoStartSession").boolValue = true;
+            serializedObject.FindProperty("streamId").stringValue = "session-stream";
             serializedObject.FindProperty("startupDelaySeconds").floatValue = 2.0f;
             serializedObject.FindProperty("maxBeginWaitSeconds").floatValue = 20.0f;
             serializedObject.FindProperty("beginRetryIntervalSeconds").floatValue = 0.25f;
-            serializedObject.FindProperty("captureDurationSeconds").floatValue = 6.0f;
-            serializedObject.FindProperty("preRollMs").intValue = 0;
-            serializedObject.FindProperty("postRollMs").intValue = 0;
-            serializedObject.FindProperty("shotId").stringValue = "standalone-proof";
             serializedObject.FindProperty("enableLiveStreaming").boolValue = true;
             serializedObject.FindProperty("liveStreamHost").stringValue = "10.235.26.83";
             serializedObject.FindProperty("liveMediaPort").intValue = 8766;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(autoRun);
+            EditorUtility.SetDirty(sessionController);
         }
 
         private static void ConfigureBuildConfigObjects()

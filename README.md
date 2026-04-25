@@ -4,6 +4,8 @@ This repository is the clean starting point for the standalone bowling replay pr
 
 The active product definition lives in [docs/STANDALONE_PRODUCT_GOAL.md](C:/Users/student/QuestBowlingStandalone/docs/STANDALONE_PRODUCT_GOAL.md).
 
+The detailed lane-lock design lives in [docs/LANE_LOCK_MATH_AND_CONTRACT.md](C:/Users/student/QuestBowlingStandalone/docs/LANE_LOCK_MATH_AND_CONTRACT.md).
+
 ## Working Rules
 
 - keep the scope centered on the standalone product, not the old experiment stack
@@ -16,7 +18,7 @@ The active product definition lives in [docs/STANDALONE_PRODUCT_GOAL.md](C:/User
 - single camera
 - `1280 x 960 @ 30 FPS, H.264`
 - lightweight session lane lock
-- rolling encoded buffer
+- one continuous live session stream
 - `YOLO -> SAM2`
 - true lane-anchored MR replay
 
@@ -68,6 +70,7 @@ Current validation entry point:
 - `py -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
 - `py -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
 - `py -m laptop_receiver.live_stream_receiver`
+- `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
 
 Important note:
 
@@ -80,6 +83,45 @@ Live transport note:
 - the main direction is now live Quest-to-laptop streaming
 - Quest proof capture is being extended to stream encoded `H.264` media live while Unity sends frame metadata over a separate TCP side channel
 - latest milestone: a real hotspot run now lands as a decodable live `H.264` session on the laptop, with codec config persisted and the shared loader able to open the session as a `LocalClipArtifact`
+- lane lock now follows that same media path: `Lock Lane` tags a short request window inside the continuous session stream instead of creating a separate JPG bundle
+
+Lane-lock implementation note:
+
+- lane lock is now manual foul-line lane selection, not automatic lane choice
+- the user-selected inputs are:
+  - left lane edge at the foul line
+  - right lane edge at the foul line
+  - the exact frame sequence where those points were selected
+- typed request/result contracts are in:
+  - [lane_lock_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_types.py)
+- projection and lane-coordinate helpers are in:
+  - [lane_geometry.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_geometry.py)
+- the solver is in:
+  - [lane_lock_solver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_solver.py)
+- line-support extraction is still available for validation/overlay scoring:
+  - [lane_line_support.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_line_support.py)
+- Quest-side request capture is in:
+  - [StandaloneQuestLaneLockCapture.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockCapture.cs)
+  - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
+  - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
+  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
+- that Quest-side slice rejects lane-lock requests until a foul-line selection exists, then sends one `lane_lock_request` metadata event with:
+  - `selectionFrameSeq`
+  - `leftFoulLinePointNorm`
+  - `rightFoulLinePointNorm`
+  - frame range
+  - capture duration
+  - camera intrinsics
+  - floor plane
+  - regulation lane dimensions
+- the session stream itself is now managed by:
+  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
+- that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
+- the laptop receiver persists those requests in `lane_lock_requests.jsonl` next to the streamed `H.264` session
+- the current lane-lock runner is:
+  - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py)
+- the old desktop click harness was removed because those clicks were not physical foul-line endpoints
+- no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
 
 See [docs/IMPLEMENTATION_PLAN.md](C:/Users/student/QuestBowlingStandalone/docs/IMPLEMENTATION_PLAN.md) for the active build sequence.
 See [docs/PORTING_MAP.md](C:/Users/student/QuestBowlingStandalone/docs/PORTING_MAP.md) for the exact archive files we should mine and what to avoid copying.

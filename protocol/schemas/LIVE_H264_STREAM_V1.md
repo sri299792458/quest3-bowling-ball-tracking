@@ -8,10 +8,11 @@ The goal of this protocol is not to solve the entire final product at once.
 
 The goal is:
 
-- Quest continuously sends encoded `H.264` samples while the shot is happening
+- Quest continuously sends encoded `H.264` samples for the whole bowling session
 - Quest sends per-frame metadata on a separate lightweight side channel
-- laptop persists both streams in one session directory
-- laptop can later decode, align, and run `YOLO -> SAM2`
+- lane lock and shot boundaries are represented as metadata events inside that same live session
+- laptop persists the whole stream in one session directory
+- laptop can later decode, align, lane-lock, and run `YOLO -> SAM2`
 
 ## Scope
 
@@ -21,7 +22,8 @@ This protocol is intentionally simple:
 - `TCP` for live metadata JSON lines
 - no packet loss logic yet
 - no retransmission logic yet
-- no lane-lock inference here
+- no packet-loss recovery yet
+- no replay-return channel yet
 
 This is the first real live streaming path, not the final optimized transport.
 
@@ -116,6 +118,9 @@ Expected message kinds for the first slice:
 
 - `session_start`
 - `frame_metadata`
+- `lane_lock_request`
+- `lane_lock_result`
+- `lane_lock_confirm`
 - `shot_boundary`
 - `session_end`
 
@@ -134,6 +139,56 @@ Expected message kinds for the first slice:
 - `headRotation`
 - `laneLockState`
 
+`lane_lock_request` should include:
+
+- `requestId`
+- `frameSeqStart`
+- `frameSeqEnd`
+- `frameCount`
+- `captureDurationSeconds`
+- `selectionFrameSeq`
+- `leftFoulLinePointNorm`
+- `rightFoulLinePointNorm`
+- `laneWidthMeters`
+- `laneLengthMeters`
+- `fx`
+- `fy`
+- `cx`
+- `cy`
+- `imageWidth`
+- `imageHeight`
+- `floorPlanePointWorld`
+- `floorPlaneNormalWorld`
+- `cameraSide`
+
+The foul-line points are required. They are normalized image coordinates for the user-selected left and right lane edges at the foul line. The receiver must reject a lane-lock request that does not include them.
+
+`shot_boundary` should include:
+
+- `boundary_type`
+- `frame_seq`
+- `camera_timestamp_us`
+- `pts_us`
+- `reason`
+
+`lane_lock_result` should include:
+
+- `requestId`
+- `success`
+- `failureReason`
+- `lockState`
+- `requiresConfirmation`
+- `userConfirmed`
+- `previewFrameSeq`
+- `confidence`
+- lane pose fields if a candidate was found
+
+`lane_lock_confirm` should include:
+
+- `requestId`
+- `accepted`
+- optional `reason`
+
 ## Laptop Persistence Shape
 
 The laptop receiver should create one directory per live stream session and persist:
@@ -142,6 +197,8 @@ The laptop receiver should create one directory per live stream session and pers
 - `codec_config.h264`
 - `media_samples.jsonl`
 - `metadata_stream.jsonl`
+- `lane_lock_requests.jsonl`
+- `shot_boundaries.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
@@ -171,3 +228,16 @@ Media samples are generated inside the Android encoder plugin.
 Frame metadata is generated inside Unity/C# at render time.
 
 Keeping them on separate TCP channels is the cleanest first live slice because it avoids forcing Java and C# to share one socket writer.
+
+## Session Model
+
+This stream is session-level.
+
+The intended product shape is:
+
+- one continuous stream for a bowling session, e.g. `30` minutes
+- one lane-lock request near the start of the session, with optional relock later
+- many shots and replays inside that same stream
+
+So lane lock is **not** a separate media pipeline.
+It is a tagged event window inside the continuous session stream.

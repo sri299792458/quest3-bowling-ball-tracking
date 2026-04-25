@@ -50,6 +50,8 @@ class LiveStreamSession:
     media_stream_path: Path
     media_samples_path: Path
     metadata_stream_path: Path
+    lane_lock_requests_path: Path
+    shot_boundaries_path: Path
     codec_config_path: Path
     session_start_path: Path
     session_end_path: Path
@@ -57,6 +59,8 @@ class LiveStreamSession:
     media_file: Any = None
     media_samples_file: Any = None
     metadata_stream_file: Any = None
+    lane_lock_requests_file: Any = None
+    shot_boundaries_file: Any = None
     session_started_payload: dict[str, Any] | None = None
     session_ended_payload: dict[str, Any] | None = None
     sample_count: int = 0
@@ -72,9 +76,17 @@ class LiveStreamSession:
         self.media_file = self.media_stream_path.open("wb")
         self.media_samples_file = self.media_samples_path.open("w", encoding="utf-8", newline="\n")
         self.metadata_stream_file = self.metadata_stream_path.open("a", encoding="utf-8", newline="\n")
+        self.lane_lock_requests_file = self.lane_lock_requests_path.open("a", encoding="utf-8", newline="\n")
+        self.shot_boundaries_file = self.shot_boundaries_path.open("a", encoding="utf-8", newline="\n")
 
     def close(self) -> None:
-        for handle_name in ("media_file", "media_samples_file", "metadata_stream_file"):
+        for handle_name in (
+            "media_file",
+            "media_samples_file",
+            "metadata_stream_file",
+            "lane_lock_requests_file",
+            "shot_boundaries_file",
+        ):
             handle = getattr(self, handle_name)
             if handle is not None:
                 handle.close()
@@ -157,6 +169,20 @@ class LiveStreamSession:
         self.metadata_message_count += 1
         self.persist_receipt()
 
+    def append_lane_lock_request(self, payload: dict[str, Any]) -> None:
+        if self.lane_lock_requests_file is None:
+            raise RuntimeError("Lane-lock request file is not open.")
+
+        self.lane_lock_requests_file.write(json.dumps(payload) + "\n")
+        self.lane_lock_requests_file.flush()
+
+    def append_shot_boundary(self, payload: dict[str, Any]) -> None:
+        if self.shot_boundaries_file is None:
+            raise RuntimeError("Shot-boundary file is not open.")
+
+        self.shot_boundaries_file.write(json.dumps(payload) + "\n")
+        self.shot_boundaries_file.flush()
+
 
 @dataclass
 class LiveStreamRegistry:
@@ -177,6 +203,8 @@ class LiveStreamRegistry:
             media_stream_path=root_dir / "stream.h264",
             media_samples_path=root_dir / "media_samples.jsonl",
             metadata_stream_path=root_dir / "metadata_stream.jsonl",
+            lane_lock_requests_path=root_dir / "lane_lock_requests.jsonl",
+            shot_boundaries_path=root_dir / "shot_boundaries.jsonl",
             codec_config_path=root_dir / "codec_config.h264",
             session_start_path=root_dir / "session_start.json",
             session_end_path=root_dir / "session_end.json",
@@ -278,6 +306,11 @@ async def _handle_metadata_connection(
             shot_id = str(payload["shot_id"])
             session = registry.get_or_create(session_id, shot_id)
             session.append_metadata_message(payload)
+            kind = str(payload.get("kind") or "")
+            if kind == "lane_lock_request":
+                session.append_lane_lock_request(payload)
+            elif kind == "shot_boundary":
+                session.append_shot_boundary(payload)
     finally:
         writer.close()
         await writer.wait_closed()

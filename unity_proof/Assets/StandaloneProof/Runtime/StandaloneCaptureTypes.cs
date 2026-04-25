@@ -57,6 +57,32 @@ namespace QuestBowlingStandalone.QuestApp
     }
 
     [Serializable]
+    public sealed class StandaloneLaneLockRequest
+    {
+        public string schemaVersion = "lane_lock_request";
+        public string sessionId;
+        public string requestId;
+        public ulong frameSeqStart;
+        public ulong frameSeqEnd;
+        public int frameCount;
+        public float captureDurationSeconds;
+        public ulong selectionFrameSeq;
+        public Vector2 leftFoulLinePointNorm;
+        public Vector2 rightFoulLinePointNorm;
+        public float laneWidthMeters;
+        public float laneLengthMeters;
+        public float fx;
+        public float fy;
+        public float cx;
+        public float cy;
+        public int imageWidth;
+        public int imageHeight;
+        public Vector3 floorPlanePointWorld;
+        public Vector3 floorPlaneNormalWorld = Vector3.up;
+        public string cameraSide;
+    }
+
+    [Serializable]
     public sealed class StandaloneFrameMetadata
     {
         public string schemaVersion = "capture_metadata_v1";

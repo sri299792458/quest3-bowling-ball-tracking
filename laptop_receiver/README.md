@@ -27,6 +27,8 @@ Current implemented slice:
 - [run_sam2_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_sam2_on_artifact.py) is the CLI entry point for that SAM2 stage
 - [live_stream_receiver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_stream_receiver.py) runs the first real live Quest-to-laptop receiver for `H.264` media plus metadata
 - the same [local_clip_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/local_clip_artifact.py) loader now also accepts a persisted live session directory directly
+- [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py) loads `lane_lock_request` events from a landed live session
+- [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
 
 Validation checks currently include:
 
@@ -116,6 +118,8 @@ What it persists per live stream:
 - `codec_config.h264`
 - `media_samples.jsonl`
 - `metadata_stream.jsonl`
+- `lane_lock_requests.jsonl`
+- `shot_boundaries.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
@@ -127,3 +131,16 @@ Current live transport note:
 - `pts_us` is the join key between encoded samples and frame metadata
 - this is the first real live streaming slice, not the final optimized transport
 - the receiver now persists codec config ahead of media samples so desktop decoders can open `stream.h264` directly
+- lane lock now rides on this same session stream as a metadata event, not as a separate JPG bundle
+
+Lane-lock solver usage on a landed live session:
+
+```powershell
+py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream>
+```
+
+Current honest note:
+
+- the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
+- the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
+- there is no automatic lane identity selection or view-center fallback in the solver

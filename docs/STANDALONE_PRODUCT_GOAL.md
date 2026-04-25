@@ -62,16 +62,19 @@ The system must recover lane geometry once per session, but the workflow should 
 Reason:
 
 - true world-anchored replay requires a stable lane-to-world transform
-- manual clicking or physical calibration targets are not acceptable defaults
-- a completely invisible fully automatic solve is likely too brittle
+- physical calibration targets are not acceptable defaults
+- a completely invisible fully automatic lane choice is too brittle
 - Quest scene APIs give us useful spatial context, but they do not directly give us a bowling-lane model
 - bowling lanes still have strong known geometry, so lane structure should remain a core prior
 
 Practical meaning:
 
-- user naturally looks down the target lane before bowling
-- app captures a short burst of ordinary lane-view frames and fits the lane model automatically
-- app explicitly confirms success, e.g. `lane locked`
+- user selects the left and right lane edges at the foul line
+- app captures the selected frame plus a short request window inside the live session stream
+- laptop converts those two selected pixels into world rays using Quest camera intrinsics and pose
+- laptop solves the lane frame from the known lane width and floor plane
+- app shows the solved lane overlay back to the user for confirmation
+- only after user acceptance does the session become `lane locked`
 - the solved lane model is then cached for the session
 - re-registration happens only if confidence later becomes invalid
 
@@ -108,29 +111,31 @@ Use it later only if it improves:
 
 The transport goal is:
 
-- preserve the shot faithfully
-- deliver it to the laptop quickly enough for replay after the shot
+- preserve the session stream faithfully
+- keep enough fidelity and timing accuracy that lane lock, shot detection, tracking, and replay all happen from the same live stream
 
 The transport does **not** need to prioritize perfect real-time live streaming during the shot if that hurts shot fidelity.
 
-### 7. Session-Level Rolling Capture With Automatic Shot Boundaries
+### 7. One Continuous Session Stream With Automatic Event Boundaries
 
-The app should not depend on a manual record button for every shot.
+The app should not depend on a manual record button for every shot or on restarting media capture between shots.
 
 Reason:
 
 - fixed-duration shot recordings waste time and storage on useless lead-in footage
 - the user may hold the ball with both hands during approach
-- continuous session capture fits hardware `H.264` better than frequent start/stop encoder churn
+- one continuous session stream fits hardware `H.264` better than frequent encoder churn
+- lane lock and shot analysis should both come from the same session media path
 
 Practical meaning:
 
-- Quest keeps a rolling encoded buffer during the session
-- a shot is saved by marking `shot_start_time` and `shot_end_time` inside that stream
-- the saved clip includes a small pre-roll and post-roll
+- Quest starts one continuous live `H.264` session stream to the laptop
+- lane lock is requested as a tagged short window inside that stream
+- shots are also detected and tagged inside that stream
 - shot boundaries should be driven by ball/release evidence, not button presses
+- replay results come back per shot, while the media stream itself keeps running for the whole session
 
-The goal is to save the useful shot window, not an arbitrary fixed 5-second clip.
+The goal is one clean session pipeline, not a pile of unrelated per-shot capture modes.
 
 ## Data We Must Capture
 
@@ -160,10 +165,10 @@ Metadata is cheap compared to video and should be captured aggressively.
 
 ### Shot-Level
 
-- shot start marker / `shot_start_time`
-- shot end marker / `shot_end_time`
+- shot start marker / shot-boundary event
+- shot end marker / shot-boundary event
 - lane-lock state at shot start
-- pre-roll and post-roll duration used for export
+- frame range and timestamp range used for shot processing
 - shot trigger reason
 
 ## What The Standalone System Should Contain
@@ -192,15 +197,18 @@ Those can be copied in later only if they are still justified.
 The default standalone flow should be:
 
 1. user looks down the target lane naturally
-2. Quest fits lane geometry and confirms `lane locked`
-3. Quest keeps a rolling encoded session buffer in the background
-4. shot trigger fires automatically when a real release event is detected
-5. the useful shot span is cut from the rolling buffer using `shot_start_time` and `shot_end_time`
-6. laptop decodes the clip and reconstructs frames plus metadata
-7. `YOLO` finds the initial ball seed
-8. `SAM2` tracks the ball through the shot
-9. the track is projected into the registered lane frame
-10. anchored replay and analytics are returned to Quest
+2. user selects the left and right foul-line lane edges
+3. Quest is already streaming one continuous session `H.264 + metadata` feed to the laptop
+4. Quest tags the selected frame and a short lane-lock request window inside that live session stream
+5. laptop solves a candidate lane lock from the selected foul-line points, camera intrinsics, camera pose, and floor plane
+6. Quest shows the candidate overlay back to the user for confirmation
+7. only a confirmed candidate is cached as the session lane lock
+8. shot trigger fires automatically later when a real release event is detected in the same live stream
+9. laptop reconstructs the useful shot span from the continuous session stream
+10. `YOLO` finds the initial ball seed
+11. `SAM2` tracks the ball through the shot
+12. the track is projected into the registered lane frame
+13. anchored replay and analytics are returned to Quest
 
 ### Shot Trigger Principle
 
@@ -236,9 +244,9 @@ This avoids ending the shot too early just because the headset view dipped away 
 ## Recommended First Milestones
 
 1. Quest-side local `H.264` encode proof-of-life from the passthrough/render path
-2. lightweight session lane registration with explicit `lane locked` confirmation
-3. rolling encoded session buffer with automatic shot start/end markers
-4. encoded shot transport from Quest to laptop
+2. continuous live Quest-to-laptop session stream
+3. lightweight session lane registration with explicit `lane locked` confirmation inside that stream
+4. automatic shot event boundaries inside that stream
 5. decoded frame + metadata reconstruction on laptop
 6. `YOLO -> SAM2` on the standalone pipeline
 7. lane-space replay and analytics

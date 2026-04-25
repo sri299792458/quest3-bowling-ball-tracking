@@ -47,10 +47,6 @@ def _camera_side_from_eye(camera_eye: Any) -> str:
     return "Unknown"
 
 
-def _lane_lock_state_from_calibration(lane_calibration: dict[str, Any]) -> int:
-    return 1 if bool(lane_calibration.get("is_valid")) else 0
-
-
 def _legacy_run_root_paths(run_dir: Path) -> dict[str, Path]:
     raw_dir = run_dir / "raw"
     return {
@@ -59,7 +55,6 @@ def _legacy_run_root_paths(run_dir: Path) -> dict[str, Path]:
         "manifest_path": raw_dir / "manifest.json",
         "frames_metadata_path": raw_dir / "frames.jsonl",
         "session_config_path": run_dir / "session_config.json",
-        "lane_calibration_path": run_dir / "lane_calibration.json",
     }
 
 
@@ -101,8 +96,6 @@ def import_legacy_bowling_run(run_dir: Path | str, output_root: Path | str = DEF
     manifest = _load_json(paths["manifest_path"])
     frame_rows = _load_jsonl(paths["frames_metadata_path"])
     session_config = _load_json(paths["session_config_path"])
-    lane_calibration = _load_json(paths["lane_calibration_path"]) if paths["lane_calibration_path"].exists() else {}
-
     session_id = str(session_config.get("session_id") or source_run_dir.name.split("_shot_", 1)[0])
     shot_id = str(frame_rows[0].get("shot_id") or source_run_dir.name)
     artifact_dir = output_root_path / f"{source_run_dir.name}_standalone-artifact"
@@ -139,16 +132,13 @@ def import_legacy_bowling_run(run_dir: Path | str, output_root: Path | str = DEF
         "lensOffsetRotation": _quaternion(session_config.get("lens_rotation")),
     }
 
-    lane_lock_state = _lane_lock_state_from_calibration(lane_calibration)
+    lane_lock_state = 0
     lane_lock_metadata = {
         "schemaVersion": "capture_metadata_v1",
         "laneLockState": lane_lock_state,
-        "lockedAtUnixMs": int(lane_calibration.get("timestamp_ms") or 0),
-        "confidence": 1.0 if lane_lock_state == 1 else 0.0,
-        "laneOriginWorld": _vector3(lane_calibration.get("origin")),
-        "laneRotationWorld": _quaternion(lane_calibration.get("rotation")),
-        "laneWidthMeters": float(lane_calibration.get("lane_width_m") or 1.0668),
-        "laneLengthMeters": float(lane_calibration.get("lane_length_m") or 18.288),
+        "lockedAtUnixMs": 0,
+        "confidence": 0.0,
+        "note": "Legacy imports do not carry a real standalone lane lock result.",
     }
 
     frame_metadata_path = artifact_dir / "frame_metadata.jsonl"

@@ -7,7 +7,10 @@ namespace QuestBowlingStandalone.QuestApp
 {
     public sealed class StandaloneQuestLocalProofCapture : MonoBehaviour
     {
+        public event Action<StandaloneFrameMetadata> FrameMetadataCommitted;
+
         [Header("Camera")]
+        [SerializeField] private StandaloneQuestSessionContext sessionContext;
         [SerializeField] private PassthroughCameraAccess cameraAccess;
         [SerializeField] private PassthroughCameraAccess.CameraPositionType cameraPosition = PassthroughCameraAccess.CameraPositionType.Left;
         [SerializeField] private Transform headTransform;
@@ -55,6 +58,7 @@ namespace QuestBowlingStandalone.QuestApp
         public string ActiveClipDirectory => _artifactWriter?.ClipDirectoryPath ?? string.Empty;
         public string ActiveSessionId => _sessionId ?? string.Empty;
         public string ActiveShotId => _shotId ?? string.Empty;
+        public string ActiveStreamId => _shotId ?? string.Empty;
         public StandaloneSessionMetadata CurrentSessionMetadata => _sessionMetadata;
         public StandaloneLaneLockMetadata CurrentLaneLockMetadata => _laneLockMetadata;
         public StandaloneShotMetadata CurrentShotMetadata => _shotMetadata;
@@ -86,7 +90,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return false;
             }
 
-            _sessionId = Guid.NewGuid().ToString("N");
+            _sessionId = sessionContext != null ? sessionContext.EnsureSessionId() : Guid.NewGuid().ToString("N");
             _shotId = string.IsNullOrWhiteSpace(shotId) ? "proof-shot" : shotId.Trim();
             _nextFrameSeq = 0;
             _hasFrameRange = false;
@@ -172,6 +176,11 @@ namespace QuestBowlingStandalone.QuestApp
             return true;
         }
 
+        public bool TryBeginSessionStream(string streamId)
+        {
+            return TryBeginProofClip(streamId, preRollMs: 0, postRollMs: 0, triggerReason: "session_stream");
+        }
+
         public bool TryPrepareCurrentFrameMetadata(out long ptsUs, out bool isKeyframe, out string note)
         {
             ptsUs = -1L;
@@ -250,6 +259,7 @@ namespace QuestBowlingStandalone.QuestApp
             _lastFrameTimestampUs = _preparedFrameMetadata.cameraTimestampUs;
             _lastCommittedPtsUs = _preparedFrameMetadata.ptsUs;
             _lastCommittedFrameMetadata = _preparedFrameMetadata;
+            FrameMetadataCommitted?.Invoke(_lastCommittedFrameMetadata);
             _nextFrameSeq++;
             _preparedFrameMetadata = null;
             _hasPreparedFrameMetadata = false;
@@ -302,6 +312,11 @@ namespace QuestBowlingStandalone.QuestApp
             DebugLog($"Proof clip finalized at {ActiveClipDirectory}");
             _artifactWriter = null;
             return true;
+        }
+
+        public bool TryFinalizeSessionStream()
+        {
+            return TryFinalizeProofClip();
         }
 
         public void CancelProofClip()

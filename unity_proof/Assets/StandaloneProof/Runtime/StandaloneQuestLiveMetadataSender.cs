@@ -29,6 +29,28 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Serializable]
+        private sealed class LaneLockRequestEnvelope
+        {
+            public string kind = "lane_lock_request";
+            public string session_id;
+            public string shot_id;
+            public StandaloneLaneLockRequest lane_lock_request;
+        }
+
+        [Serializable]
+        private sealed class ShotBoundaryEnvelope
+        {
+            public string kind = "shot_boundary";
+            public string session_id;
+            public string shot_id;
+            public string boundary_type;
+            public long camera_timestamp_us;
+            public long pts_us;
+            public ulong frame_seq;
+            public string reason;
+        }
+
+        [Serializable]
         private sealed class SessionEndEnvelope
         {
             public string kind = "session_end";
@@ -167,6 +189,88 @@ namespace QuestBowlingStandalone.QuestApp
             finally
             {
                 AbortSession();
+            }
+        }
+
+        public bool TrySendLaneLockRequest(string sessionId, string shotId, StandaloneLaneLockRequest laneLockRequest, out string note)
+        {
+            note = "metadata_sender_failed";
+            if (!enabledForAutoRun)
+            {
+                note = "metadata_sender_disabled";
+                return false;
+            }
+
+            if (_writer == null)
+            {
+                note = "metadata_stream_not_connected";
+                return false;
+            }
+
+            try
+            {
+                var payload = new LaneLockRequestEnvelope
+                {
+                    session_id = sessionId ?? _activeSessionId ?? string.Empty,
+                    shot_id = shotId ?? _activeShotId ?? string.Empty,
+                    lane_lock_request = laneLockRequest,
+                };
+                WriteJsonLine(payload);
+                note = "lane_lock_request_sent";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                note = ex.GetType().Name + ": " + ex.Message;
+                AbortSession();
+                return false;
+            }
+        }
+
+        public bool TrySendShotBoundary(
+            string sessionId,
+            string shotId,
+            string boundaryType,
+            ulong frameSeq,
+            long cameraTimestampUs,
+            long ptsUs,
+            string reason,
+            out string note)
+        {
+            note = "metadata_sender_failed";
+            if (!enabledForAutoRun)
+            {
+                note = "metadata_sender_disabled";
+                return false;
+            }
+
+            if (_writer == null)
+            {
+                note = "metadata_stream_not_connected";
+                return false;
+            }
+
+            try
+            {
+                var payload = new ShotBoundaryEnvelope
+                {
+                    session_id = sessionId ?? _activeSessionId ?? string.Empty,
+                    shot_id = shotId ?? _activeShotId ?? string.Empty,
+                    boundary_type = string.IsNullOrWhiteSpace(boundaryType) ? "unknown" : boundaryType,
+                    frame_seq = frameSeq,
+                    camera_timestamp_us = cameraTimestampUs,
+                    pts_us = ptsUs,
+                    reason = string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason,
+                };
+                WriteJsonLine(payload);
+                note = "shot_boundary_sent";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                note = ex.GetType().Name + ": " + ex.Message;
+                AbortSession();
+                return false;
             }
         }
 

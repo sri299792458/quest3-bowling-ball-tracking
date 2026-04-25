@@ -1,6 +1,6 @@
 # Running Notes
 
-Last updated: 2026-04-19
+Last updated: 2026-04-25
 
 ## Purpose
 
@@ -14,6 +14,19 @@ Use it to keep:
 - dataset or validation notes
 
 The goal is to avoid drifting into disconnected experiments.
+
+## Latest Session Update
+
+- Lane lock is now explicitly the manual foul-line selection workflow.
+- The user-selected contract is:
+  - left lane edge at the foul line
+  - right lane edge at the foul line
+  - `selectionFrameSeq` for the frame where those two points were selected
+- The solver converts those two selected pixels into world rays using camera intrinsics and camera pose, infers the lane plane offset from known lane width, and builds the lane basis from the selected foul-line segment.
+- The old automatic lane identity path, view-center aim fallback, and image-template lane search are no longer part of the active workflow.
+- The old desktop click harness was removed because those points were not physical foul-line endpoints.
+- The live request is invalid unless it contains `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
+- Old annotation/result artifact folders were deleted so they cannot be mistaken for valid foul-line analysis.
 
 ## Current State
 
@@ -76,6 +89,9 @@ The goal is to avoid drifting into disconnected experiments.
   - interpretation: expected, because the proof clip is not a bowling-shot artifact
 - Legacy-to-standalone adapter is now in place:
   - [import_legacy_bowling_run.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/import_legacy_bowling_run.py)
+- Important cleanup:
+  - the adapter no longer fabricates a fake standalone lane lock from old `lane_calibration.json`
+  - new imports now write `laneLockState = 0` and a note instead of pretending the old debug payload is real standalone lock data
 - First imported bowling artifact:
   - `C:\Users\student\QuestBowlingStandalone\data\imported_artifacts\a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746015082_20260328_200013_standalone-artifact`
 - Validation result on that imported artifact:
@@ -113,7 +129,6 @@ The goal is to avoid drifting into disconnected experiments.
   - [StandaloneQuestLiveMetadataSender.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLiveMetadataSender.cs)
   - [StandaloneQuestVideoEncoderBridge.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestVideoEncoderBridge.cs) now exposes live media connect/disconnect
   - [StandaloneVideoEncoderPlugin.java](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin/src/main/java/com/questbowling/standalone/StandaloneVideoEncoderPlugin.java) now streams encoded `H.264` samples from the encoder drain loop
-  - [StandaloneProofAutoRun.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneProofAutoRun.cs) now starts live media + metadata streaming alongside proof capture
   - [StandaloneQuestProofRenderCoordinator.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestProofRenderCoordinator.cs) now mirrors committed frame metadata to the live metadata channel
 - Real live hotspot streaming is now proven end to end:
   - live session directories land under `C:\Users\student\QuestBowlingStandalone\data\incoming_live_streams`
@@ -133,6 +148,47 @@ The goal is to avoid drifting into disconnected experiments.
   - failure reason: `yolo_detection_failed`
   - interpretation: expected, because the proof clip was not a real bowling shot
   - important part: the standalone YOLO seed path now runs directly on a live landed session directory
+- Lane-lock design is now written down explicitly in:
+  - [LANE_LOCK_MATH_AND_CONTRACT.md](C:/Users/student/QuestBowlingStandalone/docs/LANE_LOCK_MATH_AND_CONTRACT.md)
+  - this is the source of truth for:
+    - lane model parameterization
+    - ray-plane projection math
+    - lock request/result JSON contracts
+    - lane-space ball coordinate contract
+- Lane-lock implementation is now the foul-line selection path:
+  - [lane_lock_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_types.py)
+  - [lane_geometry.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_geometry.py)
+  - [lane_lock_solver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_solver.py)
+  - [lane_line_support.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_line_support.py)
+- Important lane-lock cleanup:
+  - removed the automatic image-lane fit/template-search path from active code
+  - lane identity is no longer inferred from the view center, a best candidate, or early multi-lane footage
+  - old click/benchmark artifacts were removed because they were not foul-line endpoint selections
+  - the legacy importer still avoids fabricating a fake standalone lane lock from old `lane_calibration.json`
+- Line-support extraction remains inside the live-session solver only as overlay/scoring support; it does not choose the lane identity.
+- Quest-side lane-lock request capture is now started in the real runtime path:
+  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
+  - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
+  - [StandaloneQuestLaneLockCapture.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockCapture.cs)
+  - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
+- That runtime slice now does the right high-level thing:
+  - keep one shared Quest session id
+  - keep one continuous live `H.264 + metadata` session stream active
+  - start and hold that stream through [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs) instead of a short proof autorun
+  - reject lane-lock requests until the user-selected foul-line points exist
+  - capture the selected frame plus a short lock window inside that stream
+  - emit one `lane_lock_request` metadata event instead of creating a second JPG pipeline
+  - include selected foul-line points, frame range, capture duration, intrinsics, floor plane, and lane dimensions in that event
+- Laptop-side lane-lock session ingestion is now started:
+  - [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py)
+  - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py)
+- The live receiver now persists lane-lock and shot event sidecars next to the session stream:
+  - `lane_lock_requests.jsonl`
+  - `shot_boundaries.jsonl`
+- Current explicit lane-selection decision:
+  - the user must provide the two foul-line edge selections before `Lock Lane` can send a request
+  - the selection frame is part of the request and is the only anchor frame the solver accepts
+  - line support may score or visualize the result, but it does not choose the lane identity
 - The earlier `passthrough_not_updated` concern is now understood as expected cadence mismatch:
   - render loop is polling around `72 Hz`
   - camera source is updating around `30 FPS`
@@ -140,22 +196,17 @@ The goal is to avoid drifting into disconnected experiments.
 
 ## Immediate Next Focus
 
-1. Keep building on the clean laptop-side ingest path rather than jumping into lane lock first.
-2. Port only the necessary old laptop pieces onto the new artifact boundary:
-   - decode
-   - YOLO seed ingest
-   - SAM2 tracking input
-3. Keep `unity_proof` as the primary Quest-side testbed and avoid falling back to the old bowling app project for proof runs.
-4. Decide the next analysis move now that live intake is real:
-   - causal YOLO directly over a live session directory after landing
-   - or a tighter rolling/near-live decode path
+1. Keep `unity_proof` as the primary Quest-side testbed and avoid falling back to the old bowling app project for proof runs.
+2. Finish the Quest-side foul-line selection UI that calls `TrySetFoulLineSelection(left, right, out note)`.
+3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
+4. Run `run_lane_lock_on_live_session.py` on that landed session and review the overlay.
 5. When a real bowling clip is available, validate one live bowling session end to end through:
    - live stream landing
+   - lane lock
    - YOLO seed
    - SAM2 tracking
 6. Expand validation from one imported bowling clip to a small batch, so we know whether the standalone adapter holds up across multiple runs.
 7. Decide whether the tiny SAM2 drift versus the old JPEG-first path is acceptable or worth deeper investigation.
-8. Inspect the proof clip visually and with richer media tooling when convenient so we have a human-quality check in addition to metadata checks.
 
 ## Important Assumption
 
