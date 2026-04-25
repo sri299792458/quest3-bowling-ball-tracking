@@ -65,15 +65,19 @@ The clean next slice after Quest proof is now in place:
 
 Current validation entry point:
 
-- `py -m pip install -r laptop_receiver/requirements.txt`
-- `py -m laptop_receiver.validate_local_clip_artifact <artifact_dir>`
-- `py -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>`
-- `py -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
-- `py -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
-- `py -m laptop_receiver.live_stream_receiver`
-- `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
-- `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
-- `py -m laptop_receiver.run_live_session_pipeline`
+- `py -m venv .venv`
+- `.\.venv\Scripts\python.exe -m pip install --upgrade pip`
+- `.\.venv\Scripts\python.exe -m pip install -r laptop_receiver/requirements-cuda.txt`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact <artifact_dir>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline`
+
+Use the repo-local `.venv` for standalone work. The old `Quest3BowlingBallTracking\laptop_pipeline\.venv` should only be a reference while we finish cutting dependencies over.
 
 Important note:
 

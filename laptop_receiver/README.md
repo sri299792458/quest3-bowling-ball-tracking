@@ -47,20 +47,24 @@ Validation checks currently include:
 Usage:
 
 ```powershell
-py -m pip install -r laptop_receiver/requirements.txt
-py -m laptop_receiver.validate_local_clip_artifact C:\path\to\clip_<session>_<shot>
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r laptop_receiver/requirements-cuda.txt
+.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact C:\path\to\clip_<session>_<shot>
 ```
+
+Use the repo-local `.venv` for laptop-side validation and analysis. The old `Quest3BowlingBallTracking\laptop_pipeline\.venv` can still be useful as a reference, but this standalone repo should not depend on it for normal runs.
 
 Optional JSON output:
 
 ```powershell
-py -m laptop_receiver.validate_local_clip_artifact --json C:\path\to\clip_<session>_<shot>
+.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact --json C:\path\to\clip_<session>_<shot>
 ```
 
 YOLO seed usage:
 
 ```powershell
-py -m laptop_receiver.run_yolo_seed_on_artifact C:\path\to\clip_<session>_<shot> --checkpoint C:\path\to\best.pt
+.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact C:\path\to\clip_<session>_<shot> --checkpoint C:\path\to\best.pt
 ```
 
 What it writes:
@@ -79,7 +83,7 @@ Current note:
 Legacy import usage:
 
 ```powershell
-py -m laptop_receiver.import_legacy_bowling_run C:\path\to\legacy_run_dir
+.\.venv\Scripts\python.exe -m laptop_receiver.import_legacy_bowling_run C:\path\to\legacy_run_dir
 ```
 
 This writes an ignored local artifact under:
@@ -91,7 +95,7 @@ That imported artifact can then be validated and seeded with the same standalone
 SAM2 usage:
 
 ```powershell
-py -m laptop_receiver.run_sam2_on_artifact C:\path\to\clip_<session>_<shot>
+.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact C:\path\to\clip_<session>_<shot>
 ```
 
 Current SAM2 environment note:
@@ -103,7 +107,7 @@ Current SAM2 environment note:
 Live stream receiver usage:
 
 ```powershell
-py -m laptop_receiver.live_stream_receiver
+.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver
 ```
 
 By default it listens on:
@@ -151,37 +155,37 @@ Current live transport note:
 Lane-lock solver usage on a landed live session:
 
 ```powershell
-py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream>
+.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream>
 ```
 
 Publish the lane-lock result to a connected Quest session:
 
 ```powershell
-py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream> --publish-result-host 127.0.0.1
+.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream> --publish-result-host 127.0.0.1
 ```
 
 Live session pipeline usage:
 
 ```powershell
-py -m laptop_receiver.run_live_session_pipeline
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline
 ```
 
 Process one landed session without publishing results:
 
 ```powershell
-py -m laptop_receiver.run_live_session_pipeline --session-dir C:\path\to\live_<session>_<stream> --once --no-publish
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --session-dir C:\path\to\live_<session>_<stream> --once --no-publish
 ```
 
 Enable windowed YOLO shot tracking for completed `shot_start` / `shot_end` windows:
 
 ```powershell
-py -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt
 ```
 
 Run SAM2 after each successful windowed YOLO seed:
 
 ```powershell
-py -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt --run-sam2
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt --run-sam2
 ```
 
 Current honest note:

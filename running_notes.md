@@ -48,6 +48,8 @@ The goal is to avoid drifting into disconnected experiments.
   - [standalone_sam2_tracking.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_sam2_tracking.py) can materialize and track only a requested source-frame range
   - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) ties those together for completed live shot windows
   - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) enables this only when `--yolo-checkpoint` is passed, with SAM2 behind `--run-sam2`
+- The standalone repo now has its own local `.venv` for laptop analysis.
+- Use [requirements-cuda.txt](C:/Users/student/QuestBowlingStandalone/laptop_receiver/requirements-cuda.txt) for the full CUDA/SAM2-capable environment; the old `Quest3BowlingBallTracking\laptop_pipeline\.venv` is no longer the default validation environment.
 
 ## Current State
 
