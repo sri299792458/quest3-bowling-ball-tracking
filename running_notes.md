@@ -40,6 +40,9 @@ The goal is to avoid drifting into disconnected experiments.
   - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
   - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
 - The live pipeline polls landed live session folders, processes each strict `lane_lock_request` once, writes `analysis_live_pipeline/pipeline_state.json`, and publishes the lane-lock result through the existing result channel.
+- Shot boundaries are now strict `shot_start` / `shot_end` events:
+  - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
+  - the live pipeline reports completed shot windows, open shot windows, and malformed boundary errors before YOLO/SAM2 is attached to those windows
 
 ## Current State
 
@@ -207,6 +210,7 @@ The goal is to avoid drifting into disconnected experiments.
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) can now publish a solved lane lock with `--publish-result-host 127.0.0.1`.
 - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) holds the shared lane-lock solve/write/preview stage used by the one-shot CLI and live pipeline.
 - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the first laptop session orchestrator: it processes pending live `lane_lock_request` events once, persists pipeline state, and can publish results to Quest through the live receiver.
+- [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates completed shot windows from `shot_boundaries.jsonl`; only `shot_start` and `shot_end` are accepted boundary types.
 - Quest-side foul-line selection now has a common input layer:
   - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs) emits shared hand/controller ray selections
   - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs) is the lane-specific consumer
@@ -227,7 +231,7 @@ The goal is to avoid drifting into disconnected experiments.
 3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
 5. Run `run_live_session_pipeline.py` beside `live_stream_receiver.py` and confirm the lane-lock result is processed and returned automatically.
-6. Add shot tracking as the next stage in [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py), fed by the same landed session media and the solved lane lock.
+6. Attach range-aware `YOLO -> SAM2` shot tracking to the completed shot windows now exposed by [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py).
 7. When a real bowling clip is available, validate one live bowling session end to end through:
    - live stream landing
    - lane lock

@@ -134,7 +134,10 @@ Lane-lock implementation note:
   - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py)
   - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
   - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
+- strict shot-boundary parsing is in:
+  - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
 - lane-lock results can now be processed and forwarded to Quest through the same session channel instead of being only local files
+- shot boundaries are now validated as `shot_start` / `shot_end` windows before the tracking stage is attached
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
 - no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
 

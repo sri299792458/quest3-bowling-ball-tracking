@@ -8,6 +8,7 @@ from typing import Any
 
 from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, publish_laptop_result
 from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
+from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 
 
@@ -52,6 +53,9 @@ class PipelineProcessSummary:
     lane_lock_requests_seen: int = 0
     lane_lock_requests_processed: int = 0
     lane_lock_requests_skipped: int = 0
+    shot_boundary_events_seen: int = 0
+    completed_shot_windows_seen: int = 0
+    open_shot_windows_seen: int = 0
     errors: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -60,6 +64,9 @@ class PipelineProcessSummary:
             "laneLockRequestsSeen": self.lane_lock_requests_seen,
             "laneLockRequestsProcessed": self.lane_lock_requests_processed,
             "laneLockRequestsSkipped": self.lane_lock_requests_skipped,
+            "shotBoundaryEventsSeen": self.shot_boundary_events_seen,
+            "completedShotWindowsSeen": self.completed_shot_windows_seen,
+            "openShotWindowsSeen": self.open_shot_windows_seen,
             "errors": list(self.errors),
         }
 
@@ -114,31 +121,37 @@ class LiveSessionPipeline:
 
     def _process_session_dir(self, session_dir: Path, summary: PipelineProcessSummary) -> None:
         envelopes = _load_jsonl(session_dir / "lane_lock_requests.jsonl")
-        if not envelopes:
-            return
+        if envelopes:
+            state = self._load_session_state(session_dir)
+            processed_requests = state.setdefault("processedLaneLockRequests", {})
 
-        state = self._load_session_state(session_dir)
-        processed_requests = state.setdefault("processedLaneLockRequests", {})
+            for envelope in envelopes:
+                payload = envelope.get("lane_lock_request")
+                if not isinstance(payload, dict):
+                    summary.errors.append(f"{session_dir}: lane_lock_request envelope missing payload")
+                    continue
 
-        for envelope in envelopes:
-            payload = envelope.get("lane_lock_request")
-            if not isinstance(payload, dict):
-                summary.errors.append(f"{session_dir}: lane_lock_request envelope missing payload")
-                continue
+                request_id = str(payload.get("requestId") or "")
+                if not request_id:
+                    summary.errors.append(f"{session_dir}: lane_lock_request missing requestId")
+                    continue
 
-            request_id = str(payload.get("requestId") or "")
-            if not request_id:
-                summary.errors.append(f"{session_dir}: lane_lock_request missing requestId")
-                continue
+                summary.lane_lock_requests_seen += 1
+                if request_id in processed_requests:
+                    summary.lane_lock_requests_skipped += 1
+                    continue
 
-            summary.lane_lock_requests_seen += 1
-            if request_id in processed_requests:
-                summary.lane_lock_requests_skipped += 1
-                continue
+                self._process_lane_lock_request(session_dir, request_id, processed_requests)
+                summary.lane_lock_requests_processed += 1
+                self._save_session_state(session_dir, state)
 
-            self._process_lane_lock_request(session_dir, request_id, processed_requests)
-            summary.lane_lock_requests_processed += 1
-            self._save_session_state(session_dir, state)
+        shot_boundaries = load_shot_boundaries(session_dir)
+        summary.shot_boundary_events_seen += len(shot_boundaries.events)
+        summary.completed_shot_windows_seen += len(shot_boundaries.completed_windows)
+        if shot_boundaries.open_start is not None:
+            summary.open_shot_windows_seen += 1
+        for error in shot_boundaries.errors:
+            summary.errors.append(f"{session_dir}: {error}")
 
     def _process_lane_lock_request(
         self,

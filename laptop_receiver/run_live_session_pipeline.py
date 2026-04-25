@@ -94,6 +94,9 @@ def main() -> int:
             print(f"lane seen:     {summary.lane_lock_requests_seen}")
             print(f"lane done:     {summary.lane_lock_requests_processed}")
             print(f"lane skipped:  {summary.lane_lock_requests_skipped}")
+            print(f"shot events:   {summary.shot_boundary_events_seen}")
+            print(f"shot windows:  {summary.completed_shot_windows_seen}")
+            print(f"shot open:     {summary.open_shot_windows_seen}")
             for error in summary.errors:
                 print(f"error:         {error}")
         return 1 if summary.errors else 0

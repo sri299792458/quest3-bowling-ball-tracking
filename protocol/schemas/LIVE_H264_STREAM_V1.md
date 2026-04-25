@@ -173,6 +173,13 @@ The foul-line points are required. They are normalized image coordinates for the
 - `pts_us`
 - `reason`
 
+`boundary_type` must be one of:
+
+- `shot_start`
+- `shot_end`
+
+The laptop pairs one `shot_start` with the next valid `shot_end` from the same `session_id` and `shot_id`. Nested starts, unmatched ends, and end frames earlier than their start frames are invalid.
+
 `lane_lock_confirm` should include:
 
 - `requestId`

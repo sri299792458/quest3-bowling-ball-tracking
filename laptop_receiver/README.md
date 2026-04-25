@@ -32,6 +32,7 @@ Current implemented slice:
 - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) contains the reusable lane-lock stage used by both CLIs and the live pipeline
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
 - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
+- [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates strict `shot_start` / `shot_end` windows from `shot_boundaries.jsonl`
 - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the live pipeline CLI entry point
 
 Validation checks currently include:
@@ -130,6 +131,11 @@ What it persists per live stream:
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
+
+Shot-boundary note:
+
+- `shot_boundaries.jsonl` is strict: `boundary_type` must be `shot_start` or `shot_end`
+- the live pipeline reports completed shot windows, open shot windows, and malformed boundary errors in its polling summary
 
 Current live transport note:
 
