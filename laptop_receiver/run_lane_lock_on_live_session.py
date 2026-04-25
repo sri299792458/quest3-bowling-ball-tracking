@@ -4,12 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-import cv2
-import numpy as np
-
-from laptop_receiver.lane_lock_live_session import load_live_session_lane_lock_request
-from laptop_receiver.lane_line_support import extract_lane_support_segments
-from laptop_receiver.lane_lock_solver import solve_lane_lock_from_image
+from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, publish_laptop_result
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -24,11 +19,26 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional explicit output directory. Defaults to analysis_lane_lock/<requestId> inside the session.",
     )
+    parser.add_argument(
+        "--publish-result-host",
+        type=str,
+        default=None,
+        help="Optional host for the local live receiver result publish endpoint.",
+    )
+    parser.add_argument(
+        "--publish-result-port",
+        type=int,
+        default=8770,
+        help="Port for the local live receiver result publish endpoint.",
+    )
     parser.add_argument("--json", action="store_true", dest="emit_json", help="Emit the full result document as JSON.")
     return parser
 
 
 def _draw_lane_fit_preview(image_bgr, solve_output) -> None:
+    import cv2
+    import numpy as np
+
     for segment in solve_output.support_segments:
         x1, y1, x2, y2 = segment.line_xyxy
         cv2.line(image_bgr, (x1, y1), (x2, y2), (0, 120, 255), 1, cv2.LINE_AA)
@@ -59,6 +69,11 @@ def _draw_lane_fit_preview(image_bgr, solve_output) -> None:
 def main() -> int:
     parser = _build_argument_parser()
     args = parser.parse_args()
+
+    import cv2
+    from laptop_receiver.lane_lock_live_session import load_live_session_lane_lock_request
+    from laptop_receiver.lane_line_support import extract_lane_support_segments
+    from laptop_receiver.lane_lock_solver import solve_lane_lock_from_image
 
     live_request = load_live_session_lane_lock_request(args.session_dir, request_id=args.request_id)
     request = live_request.request
@@ -135,6 +150,21 @@ def main() -> int:
     }
     result_path.write_text(json.dumps(result_document, indent=2), encoding="utf-8")
 
+    if args.publish_result_host:
+        shot_id = str(live_request.request_envelope.get("shot_id") or "")
+        envelope = build_lane_lock_result_envelope(
+            result=solve_output.result,
+            shot_id=shot_id,
+        )
+        publish_laptop_result(
+            envelope,
+            host=str(args.publish_result_host),
+            port=int(args.publish_result_port),
+        )
+        published_note = f"published: tcp://{args.publish_result_host}:{args.publish_result_port}"
+    else:
+        published_note = ""
+
     if args.emit_json:
         print(json.dumps(result_document, indent=2))
     else:
@@ -145,6 +175,8 @@ def main() -> int:
         print(f"frame_seq: {anchor_frame_seq} (requested {requested_anchor_frame_seq})")
         print(f"success:   {solve_output.result.success}")
         print(f"conf:      {solve_output.result.confidence:.3f}")
+        if published_note:
+            print(published_note)
 
     return 0
 

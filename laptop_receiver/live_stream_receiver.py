@@ -8,6 +8,8 @@ from pathlib import Path
 import struct
 from typing import Any
 
+from laptop_receiver.laptop_result_types import validate_laptop_result_envelope
+
 
 DEFAULT_MEDIA_HOST = "0.0.0.0"
 DEFAULT_MEDIA_PORT = 8766
@@ -15,6 +17,10 @@ DEFAULT_METADATA_HOST = "0.0.0.0"
 DEFAULT_METADATA_PORT = 8767
 DEFAULT_HEALTH_HOST = "0.0.0.0"
 DEFAULT_HEALTH_PORT = 8768
+DEFAULT_RESULT_HOST = "0.0.0.0"
+DEFAULT_RESULT_PORT = 8769
+DEFAULT_RESULT_PUBLISH_HOST = "127.0.0.1"
+DEFAULT_RESULT_PUBLISH_PORT = 8770
 DEFAULT_INCOMING_ROOT = Path(r"C:\Users\student\QuestBowlingStandalone\data\incoming_live_streams")
 
 PACKET_MAGIC = b"QBLS"
@@ -52,6 +58,7 @@ class LiveStreamSession:
     metadata_stream_path: Path
     lane_lock_requests_path: Path
     shot_boundaries_path: Path
+    outbound_results_path: Path
     codec_config_path: Path
     session_start_path: Path
     session_end_path: Path
@@ -61,11 +68,13 @@ class LiveStreamSession:
     metadata_stream_file: Any = None
     lane_lock_requests_file: Any = None
     shot_boundaries_file: Any = None
+    outbound_results_file: Any = None
     session_started_payload: dict[str, Any] | None = None
     session_ended_payload: dict[str, Any] | None = None
     sample_count: int = 0
     keyframe_count: int = 0
     metadata_message_count: int = 0
+    outbound_result_count: int = 0
     first_pts_us: int | None = None
     last_pts_us: int | None = None
     codec_config_seen: bool = False
@@ -78,6 +87,7 @@ class LiveStreamSession:
         self.metadata_stream_file = self.metadata_stream_path.open("a", encoding="utf-8", newline="\n")
         self.lane_lock_requests_file = self.lane_lock_requests_path.open("a", encoding="utf-8", newline="\n")
         self.shot_boundaries_file = self.shot_boundaries_path.open("a", encoding="utf-8", newline="\n")
+        self.outbound_results_file = self.outbound_results_path.open("a", encoding="utf-8", newline="\n")
 
     def close(self) -> None:
         for handle_name in (
@@ -86,6 +96,7 @@ class LiveStreamSession:
             "metadata_stream_file",
             "lane_lock_requests_file",
             "shot_boundaries_file",
+            "outbound_results_file",
         ):
             handle = getattr(self, handle_name)
             if handle is not None:
@@ -101,6 +112,7 @@ class LiveStreamSession:
             "sample_count": self.sample_count,
             "keyframe_count": self.keyframe_count,
             "metadata_message_count": self.metadata_message_count,
+            "outbound_result_count": self.outbound_result_count,
             "first_pts_us": self.first_pts_us,
             "last_pts_us": self.last_pts_us,
             "session_start_seen": self.session_started_payload is not None,
@@ -183,6 +195,15 @@ class LiveStreamSession:
         self.shot_boundaries_file.write(json.dumps(payload) + "\n")
         self.shot_boundaries_file.flush()
 
+    def append_outbound_result(self, payload: dict[str, Any]) -> None:
+        if self.outbound_results_file is None:
+            raise RuntimeError("Outbound result file is not open.")
+
+        self.outbound_results_file.write(json.dumps(payload) + "\n")
+        self.outbound_results_file.flush()
+        self.outbound_result_count += 1
+        self.persist_receipt()
+
 
 @dataclass
 class LiveStreamRegistry:
@@ -205,6 +226,7 @@ class LiveStreamRegistry:
             metadata_stream_path=root_dir / "metadata_stream.jsonl",
             lane_lock_requests_path=root_dir / "lane_lock_requests.jsonl",
             shot_boundaries_path=root_dir / "shot_boundaries.jsonl",
+            outbound_results_path=root_dir / "outbound_results.jsonl",
             codec_config_path=root_dir / "codec_config.h264",
             session_start_path=root_dir / "session_start.json",
             session_end_path=root_dir / "session_end.json",
@@ -215,10 +237,85 @@ class LiveStreamRegistry:
         self.sessions[key] = session
         return session
 
+    def get_existing(self, session_id: str, shot_id: str) -> LiveStreamSession | None:
+        return self.sessions.get((session_id, shot_id))
+
     def close_all(self) -> None:
         for session in self.sessions.values():
             session.persist_receipt()
             session.close()
+
+
+@dataclass
+class LiveResultHub:
+    registry: LiveStreamRegistry
+    clients: set[asyncio.StreamWriter] = field(default_factory=set)
+
+    async def handle_result_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        self.clients.add(writer)
+        try:
+            await reader.read()
+        finally:
+            self.clients.discard(writer)
+            writer.close()
+            await writer.wait_closed()
+
+    async def handle_result_publish(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            while True:
+                line = await reader.readline()
+                if not line:
+                    break
+                stripped = line.decode("utf-8").strip()
+                if not stripped:
+                    continue
+                try:
+                    payload = json.loads(stripped)
+                    envelope = validate_laptop_result_envelope(payload)
+                    session = self.registry.get_existing(envelope.session_id, envelope.shot_id)
+                    if session is None:
+                        raise RuntimeError(
+                            f"Unknown active stream session_id={envelope.session_id!r} shot_id={envelope.shot_id!r}."
+                        )
+                    session.append_outbound_result(dict(payload))
+                    await self.broadcast(dict(payload))
+                    response = {"ok": True, "kind": envelope.kind, "message_id": envelope.message_id}
+                except Exception as exc:
+                    response = {"ok": False, "error": exc.__class__.__name__ + ": " + str(exc)}
+                writer.write((json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8"))
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def broadcast(self, payload: dict[str, Any]) -> None:
+        if not self.clients:
+            return
+
+        encoded = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+        dead_clients: list[asyncio.StreamWriter] = []
+        for client in list(self.clients):
+            try:
+                client.write(encoded)
+                await client.drain()
+            except Exception:
+                dead_clients.append(client)
+
+        for client in dead_clients:
+            self.clients.discard(client)
+            try:
+                client.close()
+                await client.wait_closed()
+            except Exception:
+                pass
 
 
 async def _read_exact(reader: asyncio.StreamReader, size: int) -> bytes:
@@ -346,6 +443,10 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metadata-port", type=int, default=DEFAULT_METADATA_PORT)
     parser.add_argument("--health-host", default=DEFAULT_HEALTH_HOST)
     parser.add_argument("--health-port", type=int, default=DEFAULT_HEALTH_PORT)
+    parser.add_argument("--result-host", default=DEFAULT_RESULT_HOST)
+    parser.add_argument("--result-port", type=int, default=DEFAULT_RESULT_PORT)
+    parser.add_argument("--result-publish-host", default=DEFAULT_RESULT_PUBLISH_HOST)
+    parser.add_argument("--result-publish-port", type=int, default=DEFAULT_RESULT_PUBLISH_PORT)
     return parser
 
 
@@ -353,6 +454,7 @@ async def _run_servers(args: argparse.Namespace) -> None:
     incoming_root = args.incoming_root.expanduser().resolve()
     incoming_root.mkdir(parents=True, exist_ok=True)
     registry = LiveStreamRegistry(incoming_root=incoming_root)
+    result_hub = LiveResultHub(registry=registry)
 
     media_server = await asyncio.start_server(
         lambda r, w: _handle_media_connection(r, w, registry),
@@ -369,18 +471,32 @@ async def _run_servers(args: argparse.Namespace) -> None:
         host=str(args.health_host),
         port=int(args.health_port),
     )
+    result_server = await asyncio.start_server(
+        result_hub.handle_result_client,
+        host=str(args.result_host),
+        port=int(args.result_port),
+    )
+    result_publish_server = await asyncio.start_server(
+        result_hub.handle_result_publish,
+        host=str(args.result_publish_host),
+        port=int(args.result_publish_port),
+    )
 
     print(f"live media receiver listening on tcp://{args.media_host}:{args.media_port}")
     print(f"live metadata receiver listening on tcp://{args.metadata_host}:{args.metadata_port}")
     print(f"live health endpoint listening on http://{args.health_host}:{args.health_port}/health")
+    print(f"Quest result channel listening on tcp://{args.result_host}:{args.result_port}")
+    print(f"local result publish endpoint listening on tcp://{args.result_publish_host}:{args.result_publish_port}")
     print(f"incoming_root={incoming_root}")
 
     try:
-        async with media_server, metadata_server, health_server:
+        async with media_server, metadata_server, health_server, result_server, result_publish_server:
             await asyncio.gather(
                 media_server.serve_forever(),
                 metadata_server.serve_forever(),
                 health_server.serve_forever(),
+                result_server.serve_forever(),
+                result_publish_server.serve_forever(),
             )
     finally:
         registry.close_all()

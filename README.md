@@ -60,6 +60,7 @@ The clean next slice after Quest proof is now in place:
 - import one legacy `bowling_tests` run into the standalone artifact shape for real bowling-content validation
 - run warm SAM2 from the standalone `yolo_seed.json` contract
 - receive a live Quest `H.264` stream plus live metadata on the laptop
+- keep a live laptop-to-Quest result channel open for lane/replay payloads
 - make the landed live session decodable and loadable through the same analysis boundary as offline artifacts
 
 Current validation entry point:
@@ -71,6 +72,7 @@ Current validation entry point:
 - `py -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
 - `py -m laptop_receiver.live_stream_receiver`
 - `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
+- `py -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
 
 Important note:
 
@@ -118,8 +120,13 @@ Lane-lock implementation note:
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
 - the laptop receiver persists those requests in `lane_lock_requests.jsonl` next to the streamed `H.264` session
+- the laptop receiver also owns the Quest-facing result channel:
+  - Quest listens as a client on `tcp://<laptop>:8769`
+  - laptop analysis stages publish strict result envelopes to `tcp://127.0.0.1:8770`
+  - forwarded results are persisted in `outbound_results.jsonl`
 - the current lane-lock runner is:
   - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py)
+- lane-lock results can now be forwarded to Quest through the same session channel instead of being only local files
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
 - no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
 

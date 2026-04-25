@@ -21,5 +21,6 @@ Current first contract:
 Current transport direction:
 
 - Quest streams encoded `H.264` media live to the laptop while Unity sends frame metadata on a separate side channel
+- Quest also keeps a laptop result connection open so the laptop can return compact lane-lock and replay payloads
 
 The live transport exists so laptop-side `YOLO -> SAM2` can move toward true streaming instead of waiting for a finished clip.

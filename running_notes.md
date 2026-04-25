@@ -27,6 +27,10 @@ The goal is to avoid drifting into disconnected experiments.
 - The old desktop click harness was removed because those points were not physical foul-line endpoints.
 - The live request is invalid unless it contains `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 - Old annotation/result artifact folders were deleted so they cannot be mistaken for valid foul-line analysis.
+- The live session now has a laptop-to-Quest result channel:
+  - Quest connects to `tcp://<laptop>:8769`
+  - laptop analysis producers publish strict result envelopes to `tcp://127.0.0.1:8770`
+  - forwarded results are persisted as `outbound_results.jsonl`
 
 ## Current State
 
@@ -185,6 +189,13 @@ The goal is to avoid drifting into disconnected experiments.
 - The live receiver now persists lane-lock and shot event sidecars next to the session stream:
   - `lane_lock_requests.jsonl`
   - `shot_boundaries.jsonl`
+  - `outbound_results.jsonl`
+- Laptop-to-Quest result return is now started:
+  - [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py)
+  - [StandaloneQuestLiveResultReceiver.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLiveResultReceiver.cs)
+  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
+- Result envelopes require `schemaVersion = laptop_result_envelope`; lane-lock result payloads require `schemaVersion = lane_lock_result`.
+- [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) can now publish a solved lane lock with `--publish-result-host 127.0.0.1`.
 - Current explicit lane-selection decision:
   - the user must provide the two foul-line edge selections before `Lock Lane` can send a request
   - the selection frame is part of the request and is the only anchor frame the solver accepts
@@ -197,16 +208,18 @@ The goal is to avoid drifting into disconnected experiments.
 ## Immediate Next Focus
 
 1. Keep `unity_proof` as the primary Quest-side testbed and avoid falling back to the old bowling app project for proof runs.
-2. Finish the Quest-side foul-line selection UI that calls `TrySetFoulLineSelection(left, right, out note)`.
+2. Finish the shared Quest hand-ray/select service and make lane selection call `TrySetFoulLineSelection(left, right, out note)` through that service.
 3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
-4. Run `run_lane_lock_on_live_session.py` on that landed session and review the overlay.
-5. When a real bowling clip is available, validate one live bowling session end to end through:
+4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
+5. Build the laptop live session orchestrator so lane lock, shot tracking, and replay generation are stages of one session pipeline instead of separate CLIs.
+6. When a real bowling clip is available, validate one live bowling session end to end through:
    - live stream landing
    - lane lock
+   - result return to Quest
    - YOLO seed
    - SAM2 tracking
-6. Expand validation from one imported bowling clip to a small batch, so we know whether the standalone adapter holds up across multiple runs.
-7. Decide whether the tiny SAM2 drift versus the old JPEG-first path is acceptable or worth deeper investigation.
+7. Expand validation from one imported bowling clip to a small batch, so we know whether the standalone adapter holds up across multiple runs.
+8. Decide whether the tiny SAM2 drift versus the old JPEG-first path is acceptable or worth deeper investigation.
 
 ## Important Assumption
 

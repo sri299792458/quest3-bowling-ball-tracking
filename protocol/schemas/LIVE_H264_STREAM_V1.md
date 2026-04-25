@@ -1,6 +1,6 @@
 # LIVE_H264_STREAM_V1
 
-Last updated: 2026-04-19
+Last updated: 2026-04-25
 
 This document defines the first live Quest-to-laptop streaming slice for the standalone bowling project.
 
@@ -11,6 +11,7 @@ The goal is:
 - Quest continuously sends encoded `H.264` samples for the whole bowling session
 - Quest sends per-frame metadata on a separate lightweight side channel
 - lane lock and shot boundaries are represented as metadata events inside that same live session
+- laptop sends compact analysis results back to Quest on one result channel
 - laptop persists the whole stream in one session directory
 - laptop can later decode, align, lane-lock, and run `YOLO -> SAM2`
 
@@ -20,10 +21,10 @@ This protocol is intentionally simple:
 
 - `TCP` for live media samples
 - `TCP` for live metadata JSON lines
+- `TCP` for laptop-to-Quest result JSON lines
 - no packet loss logic yet
 - no retransmission logic yet
 - no packet-loss recovery yet
-- no replay-return channel yet
 
 This is the first real live streaming path, not the final optimized transport.
 
@@ -34,6 +35,8 @@ Default port layout:
 - media stream: `8766`
 - metadata stream: `8767`
 - health HTTP: `8768`
+- Quest result channel: `8769`
+- local result publish endpoint: `8770`
 
 ## Media Channel
 
@@ -119,7 +122,6 @@ Expected message kinds for the first slice:
 - `session_start`
 - `frame_metadata`
 - `lane_lock_request`
-- `lane_lock_result`
 - `lane_lock_confirm`
 - `shot_boundary`
 - `session_end`
@@ -171,23 +173,41 @@ The foul-line points are required. They are normalized image coordinates for the
 - `pts_us`
 - `reason`
 
-`lane_lock_result` should include:
-
-- `requestId`
-- `success`
-- `failureReason`
-- `lockState`
-- `requiresConfirmation`
-- `userConfirmed`
-- `previewFrameSeq`
-- `confidence`
-- lane pose fields if a candidate was found
-
 `lane_lock_confirm` should include:
 
 - `requestId`
 - `accepted`
 - optional `reason`
+
+## Result Channel
+
+The result channel is newline-delimited UTF-8 JSON over TCP.
+
+Quest opens one long-lived client connection to the laptop result channel and reads result envelopes. The laptop writes compact result messages on that connection.
+
+Every result line must contain:
+
+- `schemaVersion`, exactly `laptop_result_envelope`
+- `kind`
+- `session_id`
+- `shot_id`
+- `message_id`
+- `created_unix_ms`
+
+Supported result kinds:
+
+- `lane_lock_result`
+- `shot_result`
+- `replay_path`
+- `pipeline_error`
+
+`lane_lock_result` envelopes must include:
+
+- `lane_lock_result`, with `schemaVersion` exactly `lane_lock_result`
+
+The envelope `session_id` must match `lane_lock_result.sessionId`.
+
+The local result publish endpoint is laptop-local producer input for analysis stages. Producers send the same strict result envelope to `127.0.0.1:8770`; the live receiver validates it, persists it, then forwards it to connected Quest result clients.
 
 ## Laptop Persistence Shape
 
@@ -199,6 +219,7 @@ The laptop receiver should create one directory per live stream session and pers
 - `metadata_stream.jsonl`
 - `lane_lock_requests.jsonl`
 - `shot_boundaries.jsonl`
+- `outbound_results.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`

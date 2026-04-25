@@ -53,6 +53,7 @@ namespace QuestBowlingStandalone.Editor
             var floorPlaneSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource>(proofRig);
             var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
+            var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
             var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
             var sessionController = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController>(proofRig);
             var eventSystem = GetOrAddComponent<EventSystem>(eventSystemObject);
@@ -72,8 +73,9 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture);
             ConfigureLiveMetadataSender(liveMetadataSender);
+            ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
-            ConfigureSessionController(sessionController, proofCapture, liveMetadataSender);
+            ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -678,6 +680,17 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(liveMetadataSender);
         }
 
+        private static void ConfigureLiveResultReceiver(QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+        {
+            var serializedObject = new SerializedObject(liveResultReceiver);
+            serializedObject.FindProperty("host").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("port").intValue = 8769;
+            serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(liveResultReceiver);
+        }
+
         private static void ConfigureFloorPlaneSource(
             QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource,
             Transform floorReference)
@@ -853,11 +866,13 @@ namespace QuestBowlingStandalone.Editor
         private static void ConfigureSessionController(
             QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
         {
             var serializedObject = new SerializedObject(sessionController);
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
             serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("autoStartSession").boolValue = true;
             serializedObject.FindProperty("streamId").stringValue = "session-stream";
             serializedObject.FindProperty("startupDelaySeconds").floatValue = 2.0f;

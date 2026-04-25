@@ -1,6 +1,6 @@
 # Standalone Implementation Plan
 
-Last updated: 2026-04-18
+Last updated: 2026-04-25
 
 This document turns the product goal into a concrete build layout and a small first execution slice.
 
@@ -15,6 +15,7 @@ Owns everything that runs on Quest:
 - hardware `H.264` encode path
 - rolling encoded session buffer
 - shot markers and per-frame metadata capture
+- live laptop result receiver
 - replay rendering on the locked lane
 
 ### `laptop_receiver/`
@@ -22,6 +23,7 @@ Owns everything that runs on Quest:
 Owns everything that runs on the laptop:
 
 - media ingest
+- result return channel
 - clip reconstruction
 - frame plus metadata decode
 - `YOLO` seed
@@ -82,6 +84,7 @@ Success means:
 
 - user can enter a lightweight lane-lock flow
 - Quest confirms `lane locked`
+- laptop can return a strict lane-lock result to Quest
 - a lane model is cached for the session
 
 ### Milestone 3: Rolling Buffer + Shot Boundaries
@@ -106,6 +109,7 @@ Success means:
 Success means:
 
 - tracked trajectory is projected into the locked lane frame
+- replay payload returns over the same laptop result channel
 - replay appears anchored on Quest in the intended place
 
 ## First Validation Rule

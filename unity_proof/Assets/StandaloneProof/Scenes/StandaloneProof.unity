@@ -147,7 +147,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8f1a9a1d119a5944aacfb87d1ec283a2, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Oculus.VR::UnityEngine.EventSystems.OVRInputModule
   m_SendPointerHoverToParent: 1
   rayTransform: {fileID: 1642275084}
@@ -866,6 +866,7 @@ GameObject:
   - component: {fileID: 1545997010}
   - component: {fileID: 1545997009}
   - component: {fileID: 1545997008}
+  - component: {fileID: 1545997011}
   - component: {fileID: 1545997005}
   m_Layer: 0
   m_Name: StandaloneProofCaptureRig
@@ -985,6 +986,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController
   proofCapture: {fileID: 1545997001}
   liveMetadataSender: {fileID: 1545997004}
+  liveResultReceiver: {fileID: 1545997011}
   autoStartSession: 1
   streamId: session-stream
   startupDelaySeconds: 2
@@ -993,6 +995,22 @@ MonoBehaviour:
   enableLiveStreaming: 1
   liveStreamHost: 10.235.26.83
   liveMediaPort: 8766
+  verboseLogging: 1
+--- !u!114 &1545997011
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1545996998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8f0a1d3e27a4bdc9f1a5a3e5d8f7b21, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver
+  host: 10.235.26.83
+  port: 8769
+  enabledForAutoRun: 1
   verboseLogging: 1
 --- !u!114 &1545997008
 MonoBehaviour:

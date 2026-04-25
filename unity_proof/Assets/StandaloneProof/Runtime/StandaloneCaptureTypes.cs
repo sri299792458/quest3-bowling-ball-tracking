@@ -83,6 +83,66 @@ namespace QuestBowlingStandalone.QuestApp
     }
 
     [Serializable]
+    public sealed class StandaloneLaneLockConfidenceBreakdown
+    {
+        public float edgeFit;
+        public float selectionAgreement;
+        public float markingAgreement;
+        public float temporalStability;
+        public float candidateMargin;
+        public float visibleExtent;
+    }
+
+    [Serializable]
+    public sealed class StandaloneReleaseCorridor
+    {
+        public float sStartMeters;
+        public float sEndMeters;
+        public float halfWidthMeters;
+    }
+
+    [Serializable]
+    public sealed class StandaloneReprojectionMetrics
+    {
+        public float meanErrorPx;
+        public float p95ErrorPx;
+        public float runnerUpMargin;
+    }
+
+    [Serializable]
+    public sealed class StandaloneSourceFrameRange
+    {
+        public int start;
+        public int end;
+    }
+
+    [Serializable]
+    public sealed class StandaloneLaneLockResult
+    {
+        public string schemaVersion = "lane_lock_result";
+        public string sessionId;
+        public string requestId;
+        public bool success;
+        public string failureReason;
+        public float confidence;
+        public StandaloneLaneLockConfidenceBreakdown confidenceBreakdown;
+        public string lockState;
+        public bool requiresConfirmation;
+        public bool userConfirmed;
+        public int previewFrameSeq;
+        public Vector3 laneOriginWorld;
+        public Quaternion laneRotationWorld = Quaternion.identity;
+        public float laneWidthMeters;
+        public float laneLengthMeters;
+        public Vector3 floorPlanePointWorld;
+        public Vector3 floorPlaneNormalWorld = Vector3.up;
+        public float visibleDownlaneMeters;
+        public StandaloneReleaseCorridor releaseCorridor;
+        public StandaloneReprojectionMetrics reprojectionMetrics;
+        public StandaloneSourceFrameRange sourceFrameRange;
+    }
+
+    [Serializable]
     public sealed class StandaloneFrameMetadata
     {
         public string schemaVersion = "capture_metadata_v1";

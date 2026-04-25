@@ -8,6 +8,7 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Session Stream")]
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
         [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
+        [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
         [SerializeField] private bool autoStartSession = true;
         [SerializeField] private string streamId = "session-stream";
 
@@ -112,6 +113,21 @@ namespace QuestBowlingStandalone.QuestApp
                         return false;
                     }
                 }
+
+                if (liveResultReceiver != null && liveResultReceiver.EnabledForAutoRun)
+                {
+                    var resultStarted = liveResultReceiver.TryBeginResultStream(
+                        proofCapture.ActiveSessionId,
+                        proofCapture.ActiveStreamId,
+                        out var resultNote);
+                    DebugLog($"Begin live result stream: {(resultStarted ? "ok" : "failed")} | {resultNote}");
+                    if (!resultStarted)
+                    {
+                        proofCapture.CancelProofClip();
+                        note = $"live_result_start_failed:{resultNote}";
+                        return false;
+                    }
+                }
             }
 
             _sessionActive = true;
@@ -140,6 +156,12 @@ namespace QuestBowlingStandalone.QuestApp
                     string.IsNullOrWhiteSpace(reason) ? "session_complete" : reason,
                     out var metadataNote);
                 DebugLog($"End live metadata stream: {(metadataEnded ? "ok" : "failed")} | {metadataNote}");
+            }
+
+            if (liveResultReceiver != null && liveResultReceiver.EnabledForAutoRun)
+            {
+                liveResultReceiver.StopResultStream();
+                DebugLog("End live result stream: ok");
             }
 
             var finalized = proofCapture.TryFinalizeSessionStream();

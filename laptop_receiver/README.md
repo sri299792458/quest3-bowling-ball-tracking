@@ -26,6 +26,7 @@ Current implemented slice:
 - [standalone_sam2_tracking.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_sam2_tracking.py) runs warm SAM2 against `video.mp4 + yolo_seed.json`
 - [run_sam2_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_sam2_on_artifact.py) is the CLI entry point for that SAM2 stage
 - [live_stream_receiver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_stream_receiver.py) runs the first real live Quest-to-laptop receiver for `H.264` media plus metadata
+- [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py) defines strict laptop-to-Quest result envelopes
 - the same [local_clip_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/local_clip_artifact.py) loader now also accepts a persisted live session directory directly
 - [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py) loads `lane_lock_request` events from a landed live session
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
@@ -105,6 +106,8 @@ By default it listens on:
 - media TCP: `0.0.0.0:8766`
 - metadata TCP: `0.0.0.0:8767`
 - health HTTP: `0.0.0.0:8768`
+- Quest result TCP: `0.0.0.0:8769`
+- local result publish TCP: `127.0.0.1:8770`
 
 Health check:
 
@@ -120,6 +123,7 @@ What it persists per live stream:
 - `metadata_stream.jsonl`
 - `lane_lock_requests.jsonl`
 - `shot_boundaries.jsonl`
+- `outbound_results.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
@@ -132,11 +136,18 @@ Current live transport note:
 - this is the first real live streaming slice, not the final optimized transport
 - the receiver now persists codec config ahead of media samples so desktop decoders can open `stream.h264` directly
 - lane lock now rides on this same session stream as a metadata event, not as a separate JPG bundle
+- laptop-to-Quest messages now use strict `laptop_result_envelope` JSON lines on the result channel
 
 Lane-lock solver usage on a landed live session:
 
 ```powershell
 py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream>
+```
+
+Publish the lane-lock result to a connected Quest session:
+
+```powershell
+py -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream> --publish-result-host 127.0.0.1
 ```
 
 Current honest note:
