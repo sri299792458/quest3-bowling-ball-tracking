@@ -35,6 +35,8 @@ namespace QuestBowlingStandalone.QuestApp
 
         public string LastStatus { get; private set; } = string.Empty;
         public int RenderedPointCount => _positions.Length;
+        public bool HasReplay { get; private set; }
+        public bool IsReplaying => _isReplaying;
 
         private void Awake()
         {
@@ -85,6 +87,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 _markerObject.transform.position = _positions[0];
                 _isReplaying = false;
+                SetStatus("shot_replay_complete");
                 return;
             }
 
@@ -128,8 +131,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             _positions = BuildWorldPositions(result);
             _replayDurationSeconds = ComputeReplayDurationSeconds(result);
-            _replayStartTime = Time.time;
-            _isReplaying = true;
+            HasReplay = _positions.Length > 0;
 
             _lineRenderer.positionCount = _positions.Length;
             _lineRenderer.SetPositions(_positions);
@@ -139,13 +141,48 @@ namespace QuestBowlingStandalone.QuestApp
             _markerObject.transform.position = _positions[0];
             _markerObject.transform.localScale = Vector3.one * Mathf.Max(0.01f, markerRadiusMeters * 2.0f);
 
-            SetStatus($"shot_replay_started points={_positions.Length}");
+            StartReplay("shot_replay_started");
+        }
+
+        public bool ReplayLatest(out string note)
+        {
+            note = "shot_replay_unavailable";
+
+            if (!HasReplay || _positions.Length == 0)
+            {
+                return false;
+            }
+
+            StartReplay("shot_replay_restarted");
+            note = "shot_replay_restarted";
+            return true;
+        }
+
+        private void StartReplay(string status)
+        {
+            if (_positions.Length == 0 || _markerObject == null)
+            {
+                SetStatus("shot_replay_unavailable");
+                return;
+            }
+
+            _markerObject.SetActive(true);
+            _markerObject.transform.position = _positions[0];
+            if (_lineRenderer != null)
+            {
+                _lineRenderer.enabled = _positions.Length > 1;
+            }
+
+            _replayStartTime = Time.time;
+            _isReplaying = true;
+            SetStatus($"{status} points={_positions.Length}");
         }
 
         public void ClearReplay(string reason)
         {
             _positions = Array.Empty<Vector3>();
             _isReplaying = false;
+            HasReplay = false;
 
             if (_lineRenderer != null)
             {

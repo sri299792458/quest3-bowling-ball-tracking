@@ -20,6 +20,7 @@ namespace QuestBowlingStandalone.Editor
         private const string PassthroughObjectName = "[BuildingBlock] Passthrough";
         private const string LockLaneCanvasObjectName = "LockLaneCanvas";
         private const string LockLaneButtonObjectName = "LockLaneButton";
+        private const string ReplayShotListObjectName = "ReplayShotList";
 
         [MenuItem("Tools/Standalone Proof/Create Or Update Proof Scene")]
         public static void CreateOrUpdateProofScene()
@@ -43,9 +44,12 @@ namespace QuestBowlingStandalone.Editor
             var rightRayHelper = FindOrCreateRayHelper("Right", rightHand != null ? rightHand.transform : null);
             var eventSystemObject = FindOrCreateEventSystem();
             var lockLaneCanvas = FindOrCreateLockLaneCanvas(headAnchor);
+            DestroyObjectIfPresent("ReplayShotButton");
             var lockLaneButton = FindOrCreateLockLaneButton(lockLaneCanvas.transform);
+            var replayShotList = FindOrCreateReplayShotList(lockLaneCanvas.transform);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneCanvas);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneButton);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(replayShotList);
 
             var sessionContext = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext>(proofRig);
             var frameSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource>(proofRig);
@@ -67,7 +71,8 @@ namespace QuestBowlingStandalone.Editor
             ConfigureCameraAccess(cameraAccess);
             ConfigureCameraRig(cameraRig);
             ConfigurePassthroughLayer(passthroughLayer);
-            ConfigureEventSystem(eventSystemObject, eventSystem, inputModule, headAnchor);
+            var sharedRayTransform = rightRayHelper != null ? rightRayHelper.transform : headAnchor;
+            ConfigureEventSystem(eventSystemObject, eventSystem, inputModule, sharedRayTransform);
             ConfigureSessionContext(sessionContext);
             ConfigureFrameSource(frameSource, cameraAccess);
             ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
@@ -75,10 +80,11 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
             ConfigureHandRayHelper(leftHand, leftRayHelper);
             ConfigureHandRayHelper(rightHand, rightRayHelper);
-            ConfigureRayInteractor(rayInteractor, rightRayHelper != null ? rightRayHelper.transform : headAnchor);
+            ConfigureRayInteractor(rayInteractor, sharedRayTransform);
             ConfigureFoulLineRaySelector(foulLineRaySelector, rayInteractor, laneLockCapture, proofCapture, floorPlaneSource);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
+            ConfigureReplayShotList(replayShotList, liveResultReceiver, shotReplayRenderer);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
@@ -195,6 +201,15 @@ namespace QuestBowlingStandalone.Editor
             return go;
         }
 
+        private static void DestroyObjectIfPresent(string objectName)
+        {
+            var existing = GameObject.Find(objectName);
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+        }
+
         private static GameObject FindOrCreateLockLaneCanvas(Transform headAnchor)
         {
             var existing = GameObject.Find(LockLaneCanvasObjectName);
@@ -248,6 +263,33 @@ namespace QuestBowlingStandalone.Editor
             if (canvasTransform != null)
             {
                 Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Lock Lane Button");
+            }
+
+            button.layer = 5;
+            return button;
+        }
+
+        private static GameObject FindOrCreateReplayShotList(Transform canvasTransform)
+        {
+            var existing = GameObject.Find(ReplayShotListObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var button = new GameObject(
+                ReplayShotListObjectName,
+                typeof(RectTransform));
+            button.name = ReplayShotListObjectName;
+            Undo.RegisterCreatedObjectUndo(button, "Create Replay Shot List");
+            if (canvasTransform != null)
+            {
+                Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Replay Shot List");
             }
 
             button.layer = 5;
@@ -505,7 +547,7 @@ namespace QuestBowlingStandalone.Editor
             GameObject eventSystemObject,
             EventSystem eventSystem,
             OVRInputModule inputModule,
-            Transform headAnchor)
+            Transform rayTransform)
         {
             if (eventSystemObject == null || eventSystem == null || inputModule == null)
             {
@@ -523,7 +565,7 @@ namespace QuestBowlingStandalone.Editor
                 Undo.DestroyObjectImmediate(module);
             }
 
-            inputModule.rayTransform = headAnchor;
+            inputModule.rayTransform = rayTransform;
             inputModule.allowActivationOnMobileDevice = true;
             inputModule.performSphereCastForGazepointer = false;
             EditorUtility.SetDirty(eventSystem);
@@ -862,7 +904,7 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.sizeDelta = new Vector2(700.0f, 220.0f);
+            rectTransform.sizeDelta = new Vector2(960.0f, 220.0f);
 
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = eventCamera;
@@ -899,10 +941,10 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = Vector2.zero;
+            rectTransform.anchoredPosition = new Vector2(-260.0f, 0.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(520.0f, 120.0f);
+            rectTransform.sizeDelta = new Vector2(390.0f, 120.0f);
 
             image.color = new Color(0.09f, 0.13f, 0.19f, 0.94f);
             image.raycastTarget = true;
@@ -971,6 +1013,87 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(image);
             EditorUtility.SetDirty(button);
             EditorUtility.SetDirty(lockLaneButton);
+        }
+
+        private static void ConfigureReplayShotList(
+            GameObject replayShotList,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer)
+        {
+            if (replayShotList == null)
+            {
+                return;
+            }
+
+            var rectTransform = replayShotList.GetComponent<RectTransform>();
+            var replayList = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList>(replayShotList);
+
+            replayShotList.layer = 5;
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.anchoredPosition = new Vector2(220.0f, 0.0f);
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one;
+            rectTransform.sizeDelta = new Vector2(500.0f, 120.0f);
+
+            var labelTransform = replayShotList.transform.Find("EmptyLabel");
+            Text label;
+            if (labelTransform == null)
+            {
+                var labelObject = new GameObject("EmptyLabel");
+                Undo.RegisterCreatedObjectUndo(labelObject, "Create Replay List Empty Label");
+                Undo.SetTransformParent(labelObject.transform, replayShotList.transform, false, "Parent Replay List Empty Label");
+                labelObject.layer = 5;
+                Undo.AddComponent<RectTransform>(labelObject);
+                Undo.AddComponent<CanvasRenderer>(labelObject);
+                label = Undo.AddComponent<Text>(labelObject);
+            }
+            else
+            {
+                label = labelTransform.GetComponent<Text>();
+                if (label == null)
+                {
+                    label = Undo.AddComponent<Text>(labelTransform.gameObject);
+                }
+            }
+
+            if (label != null)
+            {
+                var labelRect = label.GetComponent<RectTransform>();
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = Vector2.zero;
+                labelRect.offsetMax = Vector2.zero;
+                label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.text = "Waiting Shot";
+                label.alignment = TextAnchor.MiddleCenter;
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 20;
+                label.resizeTextMaxSize = 42;
+                label.color = new Color(0.94f, 1.0f, 1.0f, 1.0f);
+                label.raycastTarget = false;
+                EditorUtility.SetDirty(label);
+            }
+
+            var serializedObject = new SerializedObject(replayList);
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("shotReplayRenderer").objectReferenceValue = shotReplayRenderer;
+            serializedObject.FindProperty("listRoot").objectReferenceValue = rectTransform;
+            serializedObject.FindProperty("emptyLabel").objectReferenceValue = label;
+            serializedObject.FindProperty("maxVisibleShots").intValue = 4;
+            serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(110.0f, 92.0f);
+            serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
+            serializedObject.FindProperty("emptyText").stringValue = "Waiting Shot";
+            serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
+            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
+            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.16f, 0.44f, 0.48f, 1.0f);
+            serializedObject.FindProperty("disabledButtonColor").colorValue = new Color(0.13f, 0.15f, 0.15f, 0.70f);
+            serializedObject.FindProperty("labelColor").colorValue = new Color(0.94f, 1.0f, 1.0f, 1.0f);
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(replayList);
+            EditorUtility.SetDirty(replayShotList);
         }
 
         private static void ConfigureCoordinator(

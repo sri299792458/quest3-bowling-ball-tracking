@@ -69,6 +69,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            DebugLog($"Selection emitted: source={selection.Source} origin={selection.OriginWorld} direction={selection.DirectionWorld}");
             SelectionPerformed?.Invoke(selection);
         }
 
@@ -115,6 +116,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             SelectionPerformed?.Invoke(selection);
             note = "selection_emitted";
+            DebugLog($"Selection emitted manually: source={selection.Source} origin={selection.OriginWorld} direction={selection.DirectionWorld}");
             return true;
         }
 
