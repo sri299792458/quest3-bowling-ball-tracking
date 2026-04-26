@@ -508,6 +508,8 @@ MonoBehaviour:
   foulLineSelector: {fileID: 1545997013}
   label: {fileID: 429554783}
   idleText: Lock Lane
+  selectLeftText: Select Left Edge
+  selectRightText: Select Right Edge
   activeText: Locking...
   statusHoldSeconds: 2
   verboseLogging: 1
@@ -961,6 +963,7 @@ MonoBehaviour:
   floorPlaneSource: {fileID: 1545997009}
   maxFloorHitDistanceMeters: 25
   minimumCameraDepthMeters: 0.05
+  armInputDebounceSeconds: 0.2
   clearPendingPointOnDisable: 1
   verboseLogging: 1
 --- !u!114 &1545997014

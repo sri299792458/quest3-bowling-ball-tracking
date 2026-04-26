@@ -10,6 +10,8 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private StandaloneQuestFoulLineRaySelector foulLineSelector;
         [SerializeField] private Text label;
         [SerializeField] private string idleText = "Lock Lane";
+        [SerializeField] private string selectLeftText = "Select Left Edge";
+        [SerializeField] private string selectRightText = "Select Right Edge";
         [SerializeField] private string activeText = "Locking...";
         [SerializeField] private float statusHoldSeconds = 2.0f;
         [SerializeField] private bool verboseLogging;
@@ -49,6 +51,30 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            if (laneLockCapture.IsRequestActive)
+            {
+                RefreshVisualState(force: true);
+                return;
+            }
+
+            if (!laneLockCapture.HasFoulLineSelection)
+            {
+                if (foulLineSelector == null)
+                {
+                    ShowTransientStatus("Selector Missing");
+                    RefreshVisualState(force: true);
+                    return;
+                }
+
+                if (!foulLineSelector.IsSelectionActive)
+                {
+                    foulLineSelector.BeginFoulLineSelection();
+                }
+
+                RefreshVisualState(force: true);
+                return;
+            }
+
             var started = laneLockCapture.TryBeginLaneLockRequest(out var note);
             DebugLog($"Lane lock button pressed: {(started ? "started" : "ignored")} | {note}");
             if (!started)
@@ -61,11 +87,12 @@ namespace QuestBowlingStandalone.QuestApp
         private void RefreshVisualState(bool force)
         {
             var isActive = laneLockCapture != null && laneLockCapture.IsRequestActive;
+            var isSelectingFoulLine = foulLineSelector != null && foulLineSelector.IsSelectionActive;
             var latestNote = laneLockCapture != null ? laneLockCapture.LastCompletionNote : string.Empty;
             if (!string.IsNullOrWhiteSpace(latestNote) && latestNote != _lastObservedNote)
             {
                 _lastObservedNote = latestNote;
-                if (!isActive)
+                if (!isActive && !isSelectingFoulLine)
                 {
                     ShowTransientStatus(_noteToLabel(latestNote));
                 }
@@ -75,7 +102,7 @@ namespace QuestBowlingStandalone.QuestApp
             if (!string.IsNullOrWhiteSpace(latestSelectionStatus) && latestSelectionStatus != _lastObservedSelectionStatus)
             {
                 _lastObservedSelectionStatus = latestSelectionStatus;
-                if (!isActive)
+                if (!isActive && !isSelectingFoulLine)
                 {
                     ShowTransientStatus(_noteToLabel(latestSelectionStatus));
                 }
@@ -93,6 +120,10 @@ namespace QuestBowlingStandalone.QuestApp
                 if (isActive)
                 {
                     label.text = activeText;
+                }
+                else if (isSelectingFoulLine)
+                {
+                    label.text = _selectionStatusToPersistentLabel(latestSelectionStatus);
                 }
                 else if (!string.IsNullOrEmpty(_transientStatusText) && Time.realtimeSinceStartup <= _transientStatusUntilRealtime)
                 {
@@ -199,6 +230,56 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             return "Try Again";
+        }
+
+        private string _selectionStatusToPersistentLabel(string note)
+        {
+            if (foulLineSelector != null && foulLineSelector.HasPendingLeftPoint)
+            {
+                return selectRightText;
+            }
+
+            if (string.IsNullOrWhiteSpace(note) || note.StartsWith("select_left_foul_line_point"))
+            {
+                return selectLeftText;
+            }
+
+            if (note.StartsWith("left_foul_line_point_selected"))
+            {
+                return selectRightText;
+            }
+
+            if (note.StartsWith("selection_frame_metadata_missing"))
+            {
+                return "Camera Not Ready";
+            }
+
+            if (note.StartsWith("floor_plane_unavailable:"))
+            {
+                return "Floor Not Ready";
+            }
+
+            if (note.StartsWith("floor_hit_outside_camera_image"))
+            {
+                return "Aim In View";
+            }
+
+            if (note.StartsWith("floor_hit_too_far"))
+            {
+                return "Aim Closer";
+            }
+
+            if (note.StartsWith("ray_parallel_to_floor") || note.StartsWith("floor_hit_behind_ray"))
+            {
+                return "Aim At Floor";
+            }
+
+            if (note.StartsWith("foul_line_selection_order_invalid"))
+            {
+                return "Right Edge Again";
+            }
+
+            return selectLeftText;
         }
 
         private void DebugLog(string message)

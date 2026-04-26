@@ -15,15 +15,19 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Projection")]
         [SerializeField] private float maxFloorHitDistanceMeters = 25.0f;
         [SerializeField] private float minimumCameraDepthMeters = 0.05f;
+        [SerializeField] private float armInputDebounceSeconds = 0.2f;
         [SerializeField] private bool clearPendingPointOnDisable = true;
 
         [Header("Diagnostics")]
         [SerializeField] private bool verboseLogging;
 
+        private bool _selectionActive;
         private bool _hasPendingLeftPoint;
         private Vector2 _pendingLeftPointNorm;
+        private float _ignoreSelectionsUntilRealtime;
 
         public string LastStatus { get; private set; } = string.Empty;
+        public bool IsSelectionActive => _selectionActive;
         public bool HasPendingLeftPoint => _hasPendingLeftPoint;
 
         private void OnEnable()
@@ -44,6 +48,22 @@ namespace QuestBowlingStandalone.QuestApp
         {
             _hasPendingLeftPoint = false;
             _pendingLeftPointNorm = Vector2.zero;
+        }
+
+        public void BeginFoulLineSelection()
+        {
+            ClearPendingSelection();
+            laneLockCapture?.ClearFoulLineSelection();
+            _selectionActive = true;
+            _ignoreSelectionsUntilRealtime = Time.realtimeSinceStartup + Mathf.Max(0.0f, armInputDebounceSeconds);
+            SetStatus("select_left_foul_line_point");
+        }
+
+        public void CancelFoulLineSelection()
+        {
+            _selectionActive = false;
+            ClearPendingSelection();
+            SetStatus("foul_line_selection_cancelled");
         }
 
         private void Subscribe()
@@ -69,6 +89,16 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void OnSelectionPerformed(StandaloneQuestRaySelection selection)
         {
+            if (!_selectionActive)
+            {
+                return;
+            }
+
+            if (selection.RealtimeSeconds < _ignoreSelectionsUntilRealtime)
+            {
+                return;
+            }
+
             if (!TryMapSelectionToImagePoint(selection, out var pointNorm, out var note))
             {
                 SetStatus(note);
@@ -92,8 +122,15 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             var accepted = laneLockCapture.TrySetFoulLineSelection(_pendingLeftPointNorm, pointNorm, out note);
-            ClearPendingSelection();
-            SetStatus(accepted ? "foul_line_selection_ready" : note);
+            if (accepted)
+            {
+                _selectionActive = false;
+                ClearPendingSelection();
+                SetStatus("foul_line_selection_ready");
+                return;
+            }
+
+            SetStatus(note);
         }
 
         private bool TryMapSelectionToImagePoint(

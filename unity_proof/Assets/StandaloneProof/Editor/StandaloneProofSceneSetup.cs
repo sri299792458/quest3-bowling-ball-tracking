@@ -836,6 +836,7 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
             serializedObject.FindProperty("maxFloorHitDistanceMeters").floatValue = 25.0f;
             serializedObject.FindProperty("minimumCameraDepthMeters").floatValue = 0.05f;
+            serializedObject.FindProperty("armInputDebounceSeconds").floatValue = 0.2f;
             serializedObject.FindProperty("clearPendingPointOnDisable").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
@@ -959,6 +960,11 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
             serializedObject.FindProperty("foulLineSelector").objectReferenceValue = foulLineRaySelector;
             serializedObject.FindProperty("label").objectReferenceValue = label;
+            serializedObject.FindProperty("idleText").stringValue = "Lock Lane";
+            serializedObject.FindProperty("selectLeftText").stringValue = "Select Left Edge";
+            serializedObject.FindProperty("selectRightText").stringValue = "Select Right Edge";
+            serializedObject.FindProperty("activeText").stringValue = "Locking...";
+            serializedObject.FindProperty("statusHoldSeconds").floatValue = 2.0f;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(laneLockButton);
