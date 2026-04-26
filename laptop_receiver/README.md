@@ -114,6 +114,7 @@ Live stream receiver usage:
 
 By default it listens on:
 
+- Quest laptop discovery UDP: `0.0.0.0:8765`
 - media TCP: `0.0.0.0:8766`
 - metadata TCP: `0.0.0.0:8767`
 - health HTTP: `0.0.0.0:8768`

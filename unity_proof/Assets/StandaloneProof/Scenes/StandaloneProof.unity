@@ -723,6 +723,7 @@ GameObject:
   - component: {fileID: 1545997013}
   - component: {fileID: 1545997014}
   - component: {fileID: 1545997005}
+  - component: {fileID: 1545997016}
   m_Layer: 0
   m_Name: StandaloneProofCaptureRig
   m_TagString: Untagged
@@ -823,8 +824,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 11cb39b7c7b76004cb3f8921cc9a83bf, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender
-  host: 10.235.26.83
+  host:
   port: 8767
+  connectTimeoutMs: 1000
   enabledForAutoRun: 1
   verboseLogging: 1
 --- !u!114 &1545997005
@@ -842,13 +844,15 @@ MonoBehaviour:
   proofCapture: {fileID: 1545997001}
   liveMetadataSender: {fileID: 1545997004}
   liveResultReceiver: {fileID: 1545997011}
+  laptopDiscovery: {fileID: 1545997016}
   autoStartSession: 1
   streamId: session-stream
   startupDelaySeconds: 2
   maxBeginWaitSeconds: 20
   beginRetryIntervalSeconds: 0.25
   enableLiveStreaming: 1
-  liveStreamHost: 10.235.26.83
+  requireLaptopDiscovery: 1
+  liveStreamHost:
   liveMediaPort: 8766
   verboseLogging: 1
 --- !u!114 &1545997008
@@ -913,8 +917,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c8f0a1d3e27a4bdc9f1a5a3e5d8f7b21, type: 3}
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver
-  host: 10.235.26.83
+  host:
   port: 8769
+  connectTimeoutMs: 1000
   enabledForAutoRun: 1
   verboseLogging: 1
 --- !u!114 &1545997012
@@ -1007,6 +1012,23 @@ MonoBehaviour:
   foulLineColor: {r: 0.25, g: 0.75, b: 1, a: 1}
   centerLineColor: {r: 1, g: 1, b: 1, a: 0.85}
   releaseCorridorColor: {r: 1, g: 0.78, b: 0.12, a: 1}
+  verboseLogging: 1
+--- !u!114 &1545997016
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1545996998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9d2b3b9e0a2543c4bb3b8c9b4a2b6f10, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery
+  enabledForAutoRun: 1
+  discoveryPort: 8765
+  attemptTimeoutSeconds: 0.5
+  maxAttempts: 8
   verboseLogging: 1
 --- !u!1001 &1588580007
 PrefabInstance:

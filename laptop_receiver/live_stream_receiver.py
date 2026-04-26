@@ -5,12 +5,18 @@ import asyncio
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
+import socket
 import struct
 from typing import Any
 
 from laptop_receiver.laptop_result_types import validate_laptop_result_envelope
 
 
+DISCOVERY_SCHEMA_VERSION = "quest_bowling_laptop_discovery_v1"
+DISCOVERY_REQUEST_KIND = "quest_bowling_laptop_discovery_request"
+DISCOVERY_RESPONSE_KIND = "quest_bowling_laptop_discovery_response"
+DEFAULT_DISCOVERY_HOST = "0.0.0.0"
+DEFAULT_DISCOVERY_PORT = 8765
 DEFAULT_MEDIA_HOST = "0.0.0.0"
 DEFAULT_MEDIA_PORT = 8766
 DEFAULT_METADATA_HOST = "0.0.0.0"
@@ -46,6 +52,69 @@ def _sanitize_file_part(value: str) -> str:
         return "unknown"
     invalid = set('<>:"/\\|?*')
     return "".join("_" if ch in invalid else ch for ch in text)
+
+
+def _resolve_advertise_host(advertise_host: str, peer: tuple[Any, ...] | None) -> str:
+    configured = (advertise_host or "").strip()
+    if configured:
+        return configured
+
+    peer_host = str(peer[0]) if peer else ""
+    peer_port = int(peer[1]) if peer and len(peer) > 1 else DEFAULT_DISCOVERY_PORT
+    if peer_host:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+                route_socket.connect((peer_host, max(1, peer_port)))
+                route_host = str(route_socket.getsockname()[0])
+                if route_host:
+                    return route_host
+        except OSError:
+            pass
+
+    try:
+        host = socket.gethostbyname(socket.gethostname())
+        if host:
+            return str(host)
+    except OSError:
+        pass
+
+    return "127.0.0.1"
+
+
+class LaptopDiscoveryResponder(asyncio.DatagramProtocol):
+    def __init__(self, args: argparse.Namespace) -> None:
+        self._args = args
+        self._transport: asyncio.DatagramTransport | None = None
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self._transport = transport  # type: ignore[assignment]
+
+    def datagram_received(self, data: bytes, addr: tuple[Any, ...]) -> None:
+        if self._transport is None:
+            return
+
+        try:
+            payload = json.loads(data.decode("utf-8"))
+        except Exception:
+            return
+
+        if payload.get("schemaVersion") != DISCOVERY_SCHEMA_VERSION:
+            return
+        if payload.get("kind") != DISCOVERY_REQUEST_KIND:
+            return
+
+        response = {
+            "schemaVersion": DISCOVERY_SCHEMA_VERSION,
+            "kind": DISCOVERY_RESPONSE_KIND,
+            "host": _resolve_advertise_host(str(self._args.advertise_host), addr),
+            "mediaPort": int(self._args.media_port),
+            "metadataPort": int(self._args.metadata_port),
+            "resultPort": int(self._args.result_port),
+            "healthPort": int(self._args.health_port),
+            "resultPublishPort": int(self._args.result_publish_port),
+        }
+        encoded = json.dumps(response, separators=(",", ":")).encode("utf-8")
+        self._transport.sendto(encoded, addr)
 
 
 @dataclass
@@ -437,6 +506,9 @@ async def _handle_health_connection(
 def _build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the standalone live H.264 Quest-to-laptop receiver.")
     parser.add_argument("--incoming-root", type=Path, default=DEFAULT_INCOMING_ROOT)
+    parser.add_argument("--discovery-host", default=DEFAULT_DISCOVERY_HOST)
+    parser.add_argument("--discovery-port", type=int, default=DEFAULT_DISCOVERY_PORT)
+    parser.add_argument("--advertise-host", default="")
     parser.add_argument("--media-host", default=DEFAULT_MEDIA_HOST)
     parser.add_argument("--media-port", type=int, default=DEFAULT_MEDIA_PORT)
     parser.add_argument("--metadata-host", default=DEFAULT_METADATA_HOST)
@@ -455,6 +527,12 @@ async def _run_servers(args: argparse.Namespace) -> None:
     incoming_root.mkdir(parents=True, exist_ok=True)
     registry = LiveStreamRegistry(incoming_root=incoming_root)
     result_hub = LiveResultHub(registry=registry)
+    loop = asyncio.get_running_loop()
+    discovery_transport, _ = await loop.create_datagram_endpoint(
+        lambda: LaptopDiscoveryResponder(args),
+        local_addr=(str(args.discovery_host), int(args.discovery_port)),
+        allow_broadcast=True,
+    )
 
     media_server = await asyncio.start_server(
         lambda r, w: _handle_media_connection(r, w, registry),
@@ -484,6 +562,7 @@ async def _run_servers(args: argparse.Namespace) -> None:
 
     print(f"live media receiver listening on tcp://{args.media_host}:{args.media_port}")
     print(f"live metadata receiver listening on tcp://{args.metadata_host}:{args.metadata_port}")
+    print(f"Quest laptop discovery listening on udp://{args.discovery_host}:{args.discovery_port}")
     print(f"live health endpoint listening on http://{args.health_host}:{args.health_port}/health")
     print(f"Quest result channel listening on tcp://{args.result_host}:{args.result_port}")
     print(f"local result publish endpoint listening on tcp://{args.result_publish_host}:{args.result_publish_port}")
@@ -499,6 +578,7 @@ async def _run_servers(args: argparse.Namespace) -> None:
                 result_publish_server.serve_forever(),
             )
     finally:
+        discovery_transport.close()
         registry.close_all()
 
 

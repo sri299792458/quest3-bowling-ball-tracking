@@ -48,8 +48,9 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Header("Laptop Result Channel")]
-        [SerializeField] private string host = "10.235.26.83";
+        [SerializeField] private string host = "";
         [SerializeField] private int port = 8769;
+        [SerializeField] private int connectTimeoutMs = 1000;
         [SerializeField] private bool enabledForAutoRun = true;
         [SerializeField] private bool verboseLogging = true;
 
@@ -71,6 +72,12 @@ namespace QuestBowlingStandalone.QuestApp
         public StandaloneLaneLockResult LastLaneLockResult { get; private set; }
         public StandaloneShotResult LastShotResult { get; private set; }
         public string LastStatus { get; private set; }
+
+        public void SetEndpoint(string targetHost, int targetPort)
+        {
+            host = targetHost ?? string.Empty;
+            port = targetPort;
+        }
 
         public bool TryBeginResultStream(string sessionId, string shotId, out string note)
         {
@@ -155,7 +162,7 @@ namespace QuestBowlingStandalone.QuestApp
                 {
                     _client = client;
                     client.NoDelay = true;
-                    client.Connect(host, port);
+                    ConnectWithTimeout(client, host, port, Math.Max(1, connectTimeoutMs));
                     SetThreadStatus($"result_receiver_connected {host}:{port}");
 
                     using (var stream = client.GetStream())
@@ -189,6 +196,17 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 _client = null;
             }
+        }
+
+        private static void ConnectWithTimeout(TcpClient client, string targetHost, int targetPort, int timeoutMs)
+        {
+            var asyncResult = client.BeginConnect(targetHost, targetPort, null, null);
+            if (!asyncResult.AsyncWaitHandle.WaitOne(timeoutMs))
+            {
+                throw new TimeoutException($"Timed out connecting to {targetHost}:{targetPort} after {timeoutMs}ms.");
+            }
+
+            client.EndConnect(asyncResult);
         }
 
         private void ProcessResultLine(string line)

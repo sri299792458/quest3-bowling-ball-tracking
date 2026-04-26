@@ -60,8 +60,9 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Header("Live Metadata Target")]
-        [SerializeField] private string host = "10.235.26.83";
+        [SerializeField] private string host = "";
         [SerializeField] private int port = 8767;
+        [SerializeField] private int connectTimeoutMs = 1000;
         [SerializeField] private bool enabledForAutoRun = true;
         [SerializeField] private bool verboseLogging;
 
@@ -71,6 +72,12 @@ namespace QuestBowlingStandalone.QuestApp
         private string _activeShotId;
 
         public bool EnabledForAutoRun => enabledForAutoRun;
+
+        public void SetEndpoint(string targetHost, int targetPort)
+        {
+            host = targetHost ?? string.Empty;
+            port = targetPort;
+        }
 
         public bool TryBeginSession(
             string sessionId,
@@ -311,15 +318,39 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             AbortSession();
-            _client = new TcpClient();
-            _client.NoDelay = true;
-            _client.Connect(host, port);
+            var client = new TcpClient
+            {
+                NoDelay = true,
+            };
+
+            try
+            {
+                ConnectWithTimeout(client, host, port, Mathf.Max(1, connectTimeoutMs));
+            }
+            catch
+            {
+                client.Close();
+                throw;
+            }
+
+            _client = client;
             _writer = new StreamWriter(_client.GetStream(), new UTF8Encoding(false))
             {
                 NewLine = "\n",
                 AutoFlush = true,
             };
             DebugLog($"Connected metadata sender to {host}:{port}");
+        }
+
+        private static void ConnectWithTimeout(TcpClient client, string targetHost, int targetPort, int timeoutMs)
+        {
+            var asyncResult = client.BeginConnect(targetHost, targetPort, null, null);
+            if (!asyncResult.AsyncWaitHandle.WaitOne(timeoutMs))
+            {
+                throw new TimeoutException($"Timed out connecting to {targetHost}:{targetPort} after {timeoutMs}ms.");
+            }
+
+            client.EndConnect(asyncResult);
         }
 
         private void WriteJsonLine(object payload)

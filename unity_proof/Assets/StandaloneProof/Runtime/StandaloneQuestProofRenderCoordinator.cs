@@ -132,6 +132,14 @@ namespace QuestBowlingStandalone.QuestApp
             ResetInteropState();
         }
 
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            if (pauseStatus)
+            {
+                ResetInteropState();
+            }
+        }
+
         private void OnDestroy()
         {
             _surfaceInterop?.Dispose();

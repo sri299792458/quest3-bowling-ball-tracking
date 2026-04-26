@@ -9,6 +9,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
         [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
         [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
+        [SerializeField] private StandaloneQuestLaptopDiscovery laptopDiscovery;
         [SerializeField] private bool autoStartSession = true;
         [SerializeField] private string streamId = "session-stream";
 
@@ -19,7 +20,8 @@ namespace QuestBowlingStandalone.QuestApp
 
         [Header("Live Transport")]
         [SerializeField] private bool enableLiveStreaming = true;
-        [SerializeField] private string liveStreamHost = "10.235.26.83";
+        [SerializeField] private bool requireLaptopDiscovery = true;
+        [SerializeField] private string liveStreamHost = "";
         [SerializeField] private int liveMediaPort = 8766;
 
         [Header("Diagnostics")]
@@ -27,6 +29,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         private Coroutine _startupCoroutine;
         private bool _sessionActive;
+        private bool _isQuitting;
 
         public bool IsSessionActive => _sessionActive && proofCapture != null && proofCapture.IsCapturing;
         public string ActiveSessionId => proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
@@ -44,21 +47,35 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void OnDisable()
         {
-            if (_startupCoroutine != null)
-            {
-                StopCoroutine(_startupCoroutine);
-                _startupCoroutine = null;
-            }
+            CancelStartupCoroutine();
+            AbortSession("disabled");
         }
 
         private void OnDestroy()
         {
-            TryEndSession("destroyed", out _);
+            AbortSession("destroyed");
         }
 
         private void OnApplicationQuit()
         {
-            TryEndSession("application_quit", out _);
+            _isQuitting = true;
+            AbortSession("application_quit");
+        }
+
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            if (pauseStatus)
+            {
+                AbortSession("application_pause");
+                return;
+            }
+
+            if (_isQuitting || !autoStartSession || _sessionActive || _startupCoroutine != null)
+            {
+                return;
+            }
+
+            _startupCoroutine = StartCoroutine(BeginSessionWhenReady());
         }
 
         public bool TryBeginSession(out string note)
@@ -74,6 +91,12 @@ namespace QuestBowlingStandalone.QuestApp
             if (proofCapture == null)
             {
                 note = "proof_capture_missing";
+                return false;
+            }
+
+            if (enableLiveStreaming && (string.IsNullOrWhiteSpace(liveStreamHost) || liveMediaPort <= 0))
+            {
+                note = "live_stream_target_missing";
                 return false;
             }
 
@@ -171,6 +194,33 @@ namespace QuestBowlingStandalone.QuestApp
             return finalized;
         }
 
+        public void AbortSession(string reason)
+        {
+            CancelStartupCoroutine();
+
+            if (liveMetadataSender != null && liveMetadataSender.EnabledForAutoRun)
+            {
+                liveMetadataSender.AbortSession();
+            }
+
+            if (liveResultReceiver != null && liveResultReceiver.EnabledForAutoRun)
+            {
+                liveResultReceiver.StopResultStream();
+            }
+
+            if (proofCapture != null && proofCapture.IsCapturing)
+            {
+                proofCapture.CancelProofClip();
+            }
+
+            if (_sessionActive)
+            {
+                DebugLog("Session aborted: " + (string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason));
+            }
+
+            _sessionActive = false;
+        }
+
         public bool TrySendShotBoundary(string boundaryType, string reason, out string note)
         {
             note = "shot_boundary_failed";
@@ -208,6 +258,37 @@ namespace QuestBowlingStandalone.QuestApp
         {
             yield return new WaitForSeconds(startupDelaySeconds);
 
+            if (enableLiveStreaming && requireLaptopDiscovery)
+            {
+                if (laptopDiscovery == null || !laptopDiscovery.EnabledForAutoRun)
+                {
+                    DebugLog("Laptop discovery required but discovery component is missing or disabled.");
+                    _startupCoroutine = null;
+                    yield break;
+                }
+
+                var discoveryComplete = false;
+                var discoverySucceeded = false;
+                StandaloneQuestLaptopEndpoint endpoint = default;
+                string discoveryNote = null;
+                yield return laptopDiscovery.Discover((success, resolvedEndpoint, note) =>
+                {
+                    discoverySucceeded = success;
+                    endpoint = resolvedEndpoint;
+                    discoveryNote = note;
+                    discoveryComplete = true;
+                });
+
+                if (!discoveryComplete || !discoverySucceeded || !endpoint.IsValid)
+                {
+                    DebugLog("Laptop discovery failed; live session will not start. " + (discoveryNote ?? "no_discovery_note"));
+                    _startupCoroutine = null;
+                    yield break;
+                }
+
+                ApplyLaptopEndpoint(endpoint);
+            }
+
             var beginDeadline = Time.realtimeSinceStartup + Mathf.Max(0.0f, maxBeginWaitSeconds);
             var retryInterval = Mathf.Max(0.05f, beginRetryIntervalSeconds);
             var started = false;
@@ -228,6 +309,31 @@ namespace QuestBowlingStandalone.QuestApp
                 DebugLog("Giving up on session start because the camera/session stream never became ready.");
             }
 
+            _startupCoroutine = null;
+        }
+
+        private void ApplyLaptopEndpoint(StandaloneQuestLaptopEndpoint endpoint)
+        {
+            if (!endpoint.IsValid)
+            {
+                return;
+            }
+
+            liveStreamHost = endpoint.Host;
+            liveMediaPort = endpoint.MediaPort;
+            liveMetadataSender?.SetEndpoint(endpoint.Host, endpoint.MetadataPort);
+            liveResultReceiver?.SetEndpoint(endpoint.Host, endpoint.ResultPort);
+            DebugLog("Using laptop endpoint: " + endpoint);
+        }
+
+        private void CancelStartupCoroutine()
+        {
+            if (_startupCoroutine == null)
+            {
+                return;
+            }
+
+            StopCoroutine(_startupCoroutine);
             _startupCoroutine = null;
         }
 

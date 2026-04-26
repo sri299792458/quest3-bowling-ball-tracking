@@ -14,10 +14,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 
 public final class StandaloneVideoEncoderPlugin {
     private static final String MIME_TYPE = "video/avc";
+    private static final int LIVE_CONNECT_TIMEOUT_MS = 1000;
     private static final byte[] STREAM_PACKET_MAGIC = new byte[] { 'Q', 'B', 'L', 'S' };
     private static final int STREAM_PACKET_VERSION = 1;
     private static final int STREAM_PACKET_TYPE_SESSION_START = 1;
@@ -173,7 +175,8 @@ public final class StandaloneVideoEncoderPlugin {
 
             try {
                 closeLiveStreamLocked(false, "reset");
-                liveStreamSocket = new Socket(host, port);
+                liveStreamSocket = new Socket();
+                liveStreamSocket.connect(new InetSocketAddress(host, port), LIVE_CONNECT_TIMEOUT_MS);
                 liveStreamSocket.setTcpNoDelay(true);
                 liveStreamOutput = liveStreamSocket.getOutputStream();
                 liveStreamHost = host == null ? "" : host;

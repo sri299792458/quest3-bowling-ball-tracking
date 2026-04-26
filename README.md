@@ -127,6 +127,7 @@ Lane-lock implementation note:
 - the session stream itself is now managed by:
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
+- the Quest app discovers the laptop at runtime over UDP `8765`, so the scene no longer needs a hardcoded laptop IP
 - the laptop receiver persists those requests in `lane_lock_requests.jsonl` next to the streamed `H.264` session
 - the laptop receiver also owns the Quest-facing result channel:
   - Quest listens as a client on `tcp://<laptop>:8769`

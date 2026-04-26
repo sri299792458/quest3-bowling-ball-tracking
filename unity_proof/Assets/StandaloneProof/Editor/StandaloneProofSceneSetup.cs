@@ -54,6 +54,7 @@ namespace QuestBowlingStandalone.Editor
             var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
+            var laptopDiscovery = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery>(proofRig);
             var laneLockResultRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer>(proofRig);
             var shotReplayRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer>(proofRig);
             var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
@@ -80,10 +81,11 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
+            ConfigureLaptopDiscovery(laptopDiscovery);
             ConfigureLaneLockResultRenderer(laneLockResultRenderer, liveResultReceiver);
             ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
-            ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver);
+            ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver, laptopDiscovery);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene, ScenePath);
@@ -694,8 +696,9 @@ namespace QuestBowlingStandalone.Editor
         private static void ConfigureLiveMetadataSender(QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender)
         {
             var serializedObject = new SerializedObject(liveMetadataSender);
-            serializedObject.FindProperty("host").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("host").stringValue = string.Empty;
             serializedObject.FindProperty("port").intValue = 8767;
+            serializedObject.FindProperty("connectTimeoutMs").intValue = 1000;
             serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
@@ -705,12 +708,25 @@ namespace QuestBowlingStandalone.Editor
         private static void ConfigureLiveResultReceiver(QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
         {
             var serializedObject = new SerializedObject(liveResultReceiver);
-            serializedObject.FindProperty("host").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("host").stringValue = string.Empty;
             serializedObject.FindProperty("port").intValue = 8769;
+            serializedObject.FindProperty("connectTimeoutMs").intValue = 1000;
             serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(liveResultReceiver);
+        }
+
+        private static void ConfigureLaptopDiscovery(QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery laptopDiscovery)
+        {
+            var serializedObject = new SerializedObject(laptopDiscovery);
+            serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
+            serializedObject.FindProperty("discoveryPort").intValue = 8765;
+            serializedObject.FindProperty("attemptTimeoutSeconds").floatValue = 0.5f;
+            serializedObject.FindProperty("maxAttempts").intValue = 8;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(laptopDiscovery);
         }
 
         private static void ConfigureLaneLockResultRenderer(
@@ -971,19 +987,22 @@ namespace QuestBowlingStandalone.Editor
             QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery laptopDiscovery)
         {
             var serializedObject = new SerializedObject(sessionController);
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
             serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("laptopDiscovery").objectReferenceValue = laptopDiscovery;
             serializedObject.FindProperty("autoStartSession").boolValue = true;
             serializedObject.FindProperty("streamId").stringValue = "session-stream";
             serializedObject.FindProperty("startupDelaySeconds").floatValue = 2.0f;
             serializedObject.FindProperty("maxBeginWaitSeconds").floatValue = 20.0f;
             serializedObject.FindProperty("beginRetryIntervalSeconds").floatValue = 0.25f;
             serializedObject.FindProperty("enableLiveStreaming").boolValue = true;
-            serializedObject.FindProperty("liveStreamHost").stringValue = "10.235.26.83";
+            serializedObject.FindProperty("requireLaptopDiscovery").boolValue = true;
+            serializedObject.FindProperty("liveStreamHost").stringValue = string.Empty;
             serializedObject.FindProperty("liveMediaPort").intValue = 8766;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
