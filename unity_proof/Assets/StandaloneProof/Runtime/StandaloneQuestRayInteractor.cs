@@ -1,4 +1,5 @@
 using System;
+using Oculus.Interaction;
 using UnityEngine;
 
 namespace QuestBowlingStandalone.QuestApp
@@ -28,54 +29,69 @@ namespace QuestBowlingStandalone.QuestApp
 
     public sealed class StandaloneQuestRayInteractor : MonoBehaviour
     {
+        [Header("Interaction SDK")]
+        [SerializeField] private RayInteractor interactionRayInteractor;
+        [SerializeField] private UnityEngine.Object interactionSelector;
+        [SerializeField] private bool selectWithInteractionSdk = true;
+
         [Header("Ray Source")]
         [SerializeField] private Transform rayTransform;
         [SerializeField] private float maxRayDistanceMeters = 30.0f;
 
-        [Header("Selection Input")]
-        [SerializeField] private bool selectWithHandPinch = true;
-        [SerializeField] private bool selectWithControllerTrigger = true;
-        [SerializeField] private OVRInput.Controller controller = OVRInput.Controller.RTouch;
-        [SerializeField] private OVRInput.Button selectButton = OVRInput.Button.PrimaryIndexTrigger;
-        [SerializeField] private bool debugKeyboardSelect = true;
-        [SerializeField] private KeyCode debugSelectKey = KeyCode.Space;
-
         [Header("Diagnostics")]
+        [SerializeField] private bool debugKeyboardSelect;
+        [SerializeField] private KeyCode debugSelectKey = KeyCode.Space;
         [SerializeField] private bool verboseLogging;
 
-        private OVRHand _cachedHand;
-        private bool _wasHandPinching;
+        private ISelector _cachedInteractionSelector;
 
         public event Action<StandaloneQuestRaySelection> SelectionPerformed;
 
+        public RayInteractor InteractionRayInteractor => interactionRayInteractor;
         public Transform RayTransform => rayTransform;
         public float MaxRayDistanceMeters => Mathf.Max(0.1f, maxRayDistanceMeters);
 
         private void Awake()
         {
-            CacheHandFromRayTransform();
+            CacheInteractionSelector();
+        }
+
+        private void OnEnable()
+        {
+            SubscribeInteractionSelector();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeInteractionSelector();
         }
 
         private void Update()
         {
-            if (!WasSelectionPressedThisFrame())
+            if (!debugKeyboardSelect || !Input.GetKeyDown(debugSelectKey))
             {
                 return;
             }
 
-            if (!TryGetCurrentRay(out var selection, out var note))
-            {
-                DebugLog($"Selection ignored: {note}");
-                return;
-            }
-
-            SelectionPerformed?.Invoke(selection);
+            EmitSelection("debug_keyboard_select");
         }
 
         public void SetRayTransform(Transform value)
         {
             rayTransform = value;
-            CacheHandFromRayTransform();
+        }
+
+        public void SetInteractionRaySource(
+            RayInteractor rayInteractor,
+            UnityEngine.Object selector,
+            Transform rayOrigin)
+        {
+            UnsubscribeInteractionSelector();
+            interactionRayInteractor = rayInteractor;
+            interactionSelector = selector;
+            rayTransform = rayOrigin;
+            CacheInteractionSelector();
+            SubscribeInteractionSelector();
         }
 
         public bool TryGetCurrentRay(out StandaloneQuestRaySelection selection, out string note)
@@ -100,7 +116,7 @@ namespace QuestBowlingStandalone.QuestApp
                 rayTransform.position,
                 direction,
                 MaxRayDistanceMeters,
-                rayTransform.name,
+                interactionRayInteractor != null ? interactionRayInteractor.name : rayTransform.name,
                 Time.realtimeSinceStartup);
             note = "ray_ready";
             return true;
@@ -118,47 +134,57 @@ namespace QuestBowlingStandalone.QuestApp
             return true;
         }
 
-        private bool WasSelectionPressedThisFrame()
+        private void CacheInteractionSelector()
         {
-            var pressed = false;
-
-            if (selectWithHandPinch)
-            {
-                var isPinching = IsHandPinching();
-                pressed |= isPinching && !_wasHandPinching;
-                _wasHandPinching = isPinching;
-            }
-
-            if (selectWithControllerTrigger)
-            {
-                pressed |= OVRInput.GetDown(selectButton, controller);
-            }
-
-            if (debugKeyboardSelect)
-            {
-                pressed |= Input.GetKeyDown(debugSelectKey);
-            }
-
-            return pressed;
+            _cachedInteractionSelector = interactionSelector as ISelector;
         }
 
-        private bool IsHandPinching()
+        private void SubscribeInteractionSelector()
         {
-            var hand = _cachedHand;
-            if (hand == null)
+            if (!selectWithInteractionSdk)
             {
-                CacheHandFromRayTransform();
-                hand = _cachedHand;
+                return;
             }
 
-            return hand != null
-                && hand.IsTracked
-                && hand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+            if (_cachedInteractionSelector == null)
+            {
+                CacheInteractionSelector();
+            }
+
+            if (_cachedInteractionSelector == null)
+            {
+                DebugLog("Interaction SDK selector missing.");
+                return;
+            }
+
+            _cachedInteractionSelector.WhenSelected -= OnInteractionSdkSelected;
+            _cachedInteractionSelector.WhenSelected += OnInteractionSdkSelected;
         }
 
-        private void CacheHandFromRayTransform()
+        private void UnsubscribeInteractionSelector()
         {
-            _cachedHand = rayTransform != null ? rayTransform.GetComponentInParent<OVRHand>() : null;
+            if (_cachedInteractionSelector == null)
+            {
+                return;
+            }
+
+            _cachedInteractionSelector.WhenSelected -= OnInteractionSdkSelected;
+        }
+
+        private void OnInteractionSdkSelected()
+        {
+            EmitSelection("interaction_sdk_select");
+        }
+
+        private void EmitSelection(string reason)
+        {
+            if (!TryGetCurrentRay(out var selection, out var note))
+            {
+                DebugLog($"Selection ignored ({reason}): {note}");
+                return;
+            }
+
+            SelectionPerformed?.Invoke(selection);
         }
 
         private static bool IsFinite(Vector3 value)
