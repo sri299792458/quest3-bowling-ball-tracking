@@ -1,8 +1,4 @@
 using Meta.XR;
-using Oculus.Interaction;
-using Oculus.Interaction.Input;
-using System;
-using System.Linq;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -18,10 +14,9 @@ namespace QuestBowlingStandalone.Editor
 
         private const string CameraRigPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRCameraRig.prefab";
         private const string HandPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRHandPrefab.prefab";
-        private const string InteractionRigPrefabPath = "Packages/com.meta.xr.sdk.interaction.ovr/Runtime/Prefabs/OVRInteractionComprehensive.prefab";
+        private const string RayHelperPrefabPath = "Packages/com.meta.xr.sdk.core/Prefabs/OVRRayHelper.prefab";
         private const string CameraAccessObjectName = "PassthroughCameraAccess";
         private const string ProofRigObjectName = "StandaloneProofCaptureRig";
-        private const string InteractionRigObjectName = "StandaloneOVRInteractionComprehensive";
         private const string PassthroughObjectName = "[BuildingBlock] Passthrough";
         private const string LockLaneCanvasObjectName = "LockLaneCanvas";
         private const string LockLaneButtonObjectName = "LockLaneButton";
@@ -44,12 +39,8 @@ namespace QuestBowlingStandalone.Editor
             var passthroughLayer = FindOrCreatePassthroughLayer();
             var leftHand = FindOrCreateHand(OVRHand.Hand.HandLeft, leftHandAnchor);
             var rightHand = FindOrCreateHand(OVRHand.Hand.HandRight, rightHandAnchor);
-            RemoveLegacyOVRRayHelpers(leftHand, rightHand);
-            var interactionRig = FindOrCreateInteractionRig(cameraRig);
-            ConfigureInteractionRig(interactionRig, cameraRig, leftHand, rightHand);
-            var interactionRayInteractor = FindPreferredInteractionRayInteractor(interactionRig);
-            var interactionRayTransform = FindInteractionRayTransform(interactionRayInteractor);
-            var interactionSelector = FindInteractionSelector(interactionRayInteractor);
+            var leftRayHelper = FindOrCreateRayHelper("Left", leftHand != null ? leftHand.transform : null);
+            var rightRayHelper = FindOrCreateRayHelper("Right", rightHand != null ? rightHand.transform : null);
             var eventSystemObject = FindOrCreateEventSystem();
             var lockLaneCanvas = FindOrCreateLockLaneCanvas(headAnchor);
             var lockLaneButton = FindOrCreateLockLaneButton(lockLaneCanvas.transform);
@@ -75,13 +66,15 @@ namespace QuestBowlingStandalone.Editor
             ConfigureCameraAccess(cameraAccess);
             ConfigureCameraRig(cameraRig);
             ConfigurePassthroughLayer(passthroughLayer);
-            ConfigureEventSystem(eventSystemObject, eventSystem, inputModule, interactionRayTransform);
+            ConfigureEventSystem(eventSystemObject, eventSystem, inputModule, headAnchor);
             ConfigureSessionContext(sessionContext);
             ConfigureFrameSource(frameSource, cameraAccess);
             ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
             ConfigureFloorPlaneSource(floorPlaneSource, trackingSpace != null ? trackingSpace : cameraRig.transform);
             ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
-            ConfigureRayInteractor(rayInteractor, interactionRayInteractor, interactionSelector, interactionRayTransform);
+            ConfigureHandRayHelper(leftHand, leftRayHelper);
+            ConfigureHandRayHelper(rightHand, rightRayHelper);
+            ConfigureRayInteractor(rayInteractor, rightRayHelper != null ? rightRayHelper.transform : headAnchor);
             ConfigureFoulLineRaySelector(foulLineRaySelector, rayInteractor, laneLockCapture, proofCapture, floorPlaneSource);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
@@ -150,7 +143,7 @@ namespace QuestBowlingStandalone.Editor
 
         private static PassthroughCameraAccess FindOrCreateCameraAccess()
         {
-            var existing = UnityEngine.Object.FindFirstObjectByType<PassthroughCameraAccess>(FindObjectsInactive.Include);
+            var existing = Object.FindFirstObjectByType<PassthroughCameraAccess>(FindObjectsInactive.Include);
             if (existing != null)
             {
                 return existing;
@@ -176,7 +169,7 @@ namespace QuestBowlingStandalone.Editor
 
         private static OVRPassthroughLayer FindOrCreatePassthroughLayer()
         {
-            var existing = UnityEngine.Object.FindFirstObjectByType<OVRPassthroughLayer>(FindObjectsInactive.Include);
+            var existing = Object.FindFirstObjectByType<OVRPassthroughLayer>(FindObjectsInactive.Include);
             if (existing != null)
             {
                 return existing;
@@ -259,217 +252,38 @@ namespace QuestBowlingStandalone.Editor
             return button;
         }
 
-        private static GameObject FindOrCreateInteractionRig(GameObject cameraRig)
+        private static OVRRayHelper FindOrCreateRayHelper(string handLabel, Transform parent)
         {
-            if (cameraRig == null)
-            {
-                throw new InvalidOperationException("OVRCameraRig is required before creating the Interaction SDK rig.");
-            }
-
-            var existing = cameraRig.transform.Find(InteractionRigObjectName);
+            var helperName = $"Standalone{handLabel}RayHelper";
+            var existing = GameObject.Find(helperName);
             if (existing != null)
             {
-                return existing.gameObject;
+                return existing.GetComponent<OVRRayHelper>();
             }
 
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(InteractionRigPrefabPath);
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(RayHelperPrefabPath);
             if (prefab == null)
             {
-                throw new InvalidOperationException($"Could not load Interaction SDK rig prefab at {InteractionRigPrefabPath}");
+                throw new System.InvalidOperationException($"Could not load ray helper prefab at {RayHelperPrefabPath}");
             }
 
-            var interactionRig = PrefabUtility.InstantiatePrefab(prefab, cameraRig.transform) as GameObject;
-            if (interactionRig == null)
+            var helperObject = PrefabUtility.InstantiatePrefab(prefab) as GameObject;
+            if (helperObject == null)
             {
-                throw new InvalidOperationException("Failed to instantiate Interaction SDK rig prefab.");
+                throw new System.InvalidOperationException("Failed to instantiate OVRRayHelper prefab.");
             }
 
-            interactionRig.name = InteractionRigObjectName;
-            Undo.RegisterCreatedObjectUndo(interactionRig, $"Create {InteractionRigObjectName}");
-            interactionRig.transform.localPosition = Vector3.zero;
-            interactionRig.transform.localRotation = Quaternion.identity;
-            interactionRig.transform.localScale = Vector3.one;
-            return interactionRig;
-        }
-
-        private static void ConfigureInteractionRig(
-            GameObject interactionRig,
-            GameObject cameraRig,
-            OVRHand leftHand,
-            OVRHand rightHand)
-        {
-            if (interactionRig == null || cameraRig == null)
+            helperObject.name = helperName;
+            Undo.RegisterCreatedObjectUndo(helperObject, $"Create {helperName}");
+            if (parent != null)
             {
-                throw new InvalidOperationException("Interaction SDK rig and OVRCameraRig are both required.");
+                Undo.SetTransformParent(helperObject.transform, parent, false, $"Parent {helperName}");
             }
 
-            var cameraRigComponent = cameraRig.GetComponent<OVRCameraRig>();
-            if (cameraRigComponent == null)
-            {
-                throw new InvalidOperationException("OVRCameraRig component missing on camera rig.");
-            }
-
-            var cameraRigRef = interactionRig.GetComponentInChildren<OVRCameraRigRef>(true);
-            if (cameraRigRef == null)
-            {
-                throw new InvalidOperationException("Interaction SDK rig is missing OVRCameraRigRef.");
-            }
-
-            cameraRigRef.InjectAllOVRCameraRigRef(cameraRigComponent, requireHands: true);
-            DisableDuplicateHandVisuals(leftHand);
-            DisableDuplicateHandVisuals(rightHand);
-            EditorUtility.SetDirty(cameraRigRef);
-        }
-
-        private static void RemoveLegacyOVRRayHelpers(params OVRHand[] hands)
-        {
-            foreach (var hand in hands)
-            {
-                if (hand == null)
-                {
-                    continue;
-                }
-
-                var helper = hand.RayHelper;
-                if (helper != null)
-                {
-                    hand.RayHelper = null;
-                    if (helper.name.StartsWith("Standalone", StringComparison.Ordinal))
-                    {
-                        Undo.DestroyObjectImmediate(helper.gameObject);
-                    }
-                }
-
-                EditorUtility.SetDirty(hand);
-            }
-
-            DestroyObjectIfExists("StandaloneLeftRayHelper");
-            DestroyObjectIfExists("StandaloneRightRayHelper");
-        }
-
-        private static RayInteractor FindPreferredInteractionRayInteractor(GameObject interactionRig)
-        {
-            var interactor = interactionRig
-                .GetComponentsInChildren<RayInteractor>(true)
-                .FirstOrDefault(ray => PathContains(ray.transform, interactionRig.transform, "Right")
-                    && PathContains(ray.transform, interactionRig.transform, "Hand"));
-
-            if (interactor == null)
-            {
-                throw new InvalidOperationException("Could not find the right hand Interaction SDK RayInteractor.");
-            }
-
-            return interactor;
-        }
-
-        private static Transform FindInteractionRayTransform(RayInteractor rayInteractor)
-        {
-            if (rayInteractor == null)
-            {
-                throw new InvalidOperationException("Interaction SDK RayInteractor is required.");
-            }
-
-            var handPointerPose = rayInteractor.GetComponentInChildren<HandPointerPose>(true);
-            if (handPointerPose != null)
-            {
-                return handPointerPose.transform;
-            }
-
-            var controllerPointerPose = rayInteractor.GetComponentInChildren<ControllerPointerPose>(true);
-            if (controllerPointerPose != null)
-            {
-                return controllerPointerPose.transform;
-            }
-
-            throw new InvalidOperationException("Interaction SDK RayInteractor is missing a pointer pose transform.");
-        }
-
-        private static UnityEngine.Object FindInteractionSelector(RayInteractor rayInteractor)
-        {
-            if (rayInteractor == null)
-            {
-                throw new InvalidOperationException("Interaction SDK RayInteractor is required.");
-            }
-
-            var selectorBehaviours = rayInteractor
-                .GetComponentsInChildren<MonoBehaviour>(true)
-                .Where(component => component is ISelector)
-                .ToArray();
-
-            var selector = selectorBehaviours.FirstOrDefault(component => component is IndexPinchSelector)
-                ?? selectorBehaviours.FirstOrDefault();
-
-            if (selector == null)
-            {
-                throw new InvalidOperationException("Interaction SDK RayInteractor is missing an ISelector.");
-            }
-
-            return selector;
-        }
-
-        private static bool PathContains(Transform target, Transform root, string value)
-        {
-            return GetHierarchyPath(target, root)
-                .IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static string GetHierarchyPath(Transform target, Transform root)
-        {
-            if (target == null)
-            {
-                return string.Empty;
-            }
-
-            var path = target.name;
-            var current = target.parent;
-            while (current != null && current != root)
-            {
-                path = $"{current.name}/{path}";
-                current = current.parent;
-            }
-
-            return path;
-        }
-
-        private static void DisableDuplicateHandVisuals(OVRHand hand)
-        {
-            if (hand == null)
-            {
-                return;
-            }
-
-            if (hand.TryGetComponent<OVRSkeletonRenderer>(out var skeletonRenderer))
-            {
-                skeletonRenderer.enabled = false;
-                EditorUtility.SetDirty(skeletonRenderer);
-            }
-
-            if (hand.TryGetComponent<OVRMesh>(out var mesh))
-            {
-                mesh.enabled = false;
-                EditorUtility.SetDirty(mesh);
-            }
-
-            if (hand.TryGetComponent<OVRMeshRenderer>(out var meshRenderer))
-            {
-                meshRenderer.enabled = false;
-                EditorUtility.SetDirty(meshRenderer);
-            }
-
-            if (hand.TryGetComponent<SkinnedMeshRenderer>(out var skinnedMeshRenderer))
-            {
-                skinnedMeshRenderer.enabled = false;
-                EditorUtility.SetDirty(skinnedMeshRenderer);
-            }
-        }
-
-        private static void DestroyObjectIfExists(string objectName)
-        {
-            var existing = GameObject.Find(objectName);
-            if (existing != null)
-            {
-                Undo.DestroyObjectImmediate(existing);
-            }
+            helperObject.transform.localPosition = Vector3.zero;
+            helperObject.transform.localRotation = Quaternion.identity;
+            helperObject.transform.localScale = Vector3.one;
+            return helperObject.GetComponent<OVRRayHelper>();
         }
 
         private static Transform FindHeadAnchor(Transform root)
@@ -669,6 +483,20 @@ namespace QuestBowlingStandalone.Editor
             }
 
             EditorUtility.SetDirty(hand);
+        }
+
+        private static void ConfigureHandRayHelper(OVRHand hand, OVRRayHelper rayHelper)
+        {
+            if (hand == null || rayHelper == null)
+            {
+                return;
+            }
+
+            hand.RayHelper = rayHelper;
+            rayHelper.DefaultLength = 2.0f;
+            rayHelper.gameObject.SetActive(true);
+            EditorUtility.SetDirty(hand);
+            EditorUtility.SetDirty(rayHelper);
         }
 
         private static void ConfigureEventSystem(
@@ -964,22 +792,14 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureRayInteractor(
             QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
-            RayInteractor interactionRayInteractor,
-            UnityEngine.Object interactionSelector,
             Transform rayTransform)
         {
-            if (interactionRayInteractor == null || interactionSelector == null || rayTransform == null)
-            {
-                throw new InvalidOperationException("Interaction SDK ray interactor, selector, and pointer transform are required.");
-            }
-
             var serializedObject = new SerializedObject(rayInteractor);
-            serializedObject.FindProperty("interactionRayInteractor").objectReferenceValue = interactionRayInteractor;
-            serializedObject.FindProperty("interactionSelector").objectReferenceValue = interactionSelector;
-            serializedObject.FindProperty("selectWithInteractionSdk").boolValue = true;
             serializedObject.FindProperty("rayTransform").objectReferenceValue = rayTransform;
             serializedObject.FindProperty("maxRayDistanceMeters").floatValue = 30.0f;
-            serializedObject.FindProperty("debugKeyboardSelect").boolValue = false;
+            serializedObject.FindProperty("selectWithHandPinch").boolValue = true;
+            serializedObject.FindProperty("selectWithControllerTrigger").boolValue = true;
+            serializedObject.FindProperty("debugKeyboardSelect").boolValue = true;
             serializedObject.FindProperty("debugSelectKey").intValue = (int)KeyCode.Space;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
@@ -1172,8 +992,8 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureBuildConfigObjects()
         {
-            var xrGeneralSettings = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/XR/XRGeneralSettingsPerBuildTarget.asset");
-            var openXrPackageSettings = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>("Assets/XR/Settings/OpenXR Package Settings.asset");
+            var xrGeneralSettings = AssetDatabase.LoadAssetAtPath<Object>("Assets/XR/XRGeneralSettingsPerBuildTarget.asset");
+            var openXrPackageSettings = AssetDatabase.LoadAssetAtPath<Object>("Assets/XR/Settings/OpenXR Package Settings.asset");
 
             if (xrGeneralSettings != null)
             {
