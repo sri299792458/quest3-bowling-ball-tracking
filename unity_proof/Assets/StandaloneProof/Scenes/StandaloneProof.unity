@@ -718,6 +718,7 @@ GameObject:
   - component: {fileID: 1545997009}
   - component: {fileID: 1545997008}
   - component: {fileID: 1545997011}
+  - component: {fileID: 1545997015}
   - component: {fileID: 1545997012}
   - component: {fileID: 1545997013}
   - component: {fileID: 1545997014}
@@ -979,6 +980,33 @@ MonoBehaviour:
   clearOnFailedShotResult: 1
   trajectoryColor: {r: 0.05, g: 0.9, b: 1, a: 1}
   markerColor: {r: 1, g: 0.74, b: 0.16, a: 1}
+  verboseLogging: 1
+--- !u!114 &1545997015
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1545996998}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7cf14dcba98f4ba583243c27df602e57, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer
+  liveResultReceiver: {fileID: 1545997011}
+  visualizationRoot: {fileID: 0}
+  renderVisibleDownlaneOnly: 1
+  renderSurface: 1
+  clearOnFailedLaneResult: 1
+  verticalOffsetMeters: 0.025
+  lineWidthMeters: 0.025
+  releaseLineWidthMeters: 0.02
+  minimumRenderLengthMeters: 1
+  laneSurfaceColor: {r: 0, g: 0.9, b: 0.35, a: 0.18}
+  outlineColor: {r: 0, g: 1, b: 0.45, a: 1}
+  foulLineColor: {r: 0.25, g: 0.75, b: 1, a: 1}
+  centerLineColor: {r: 1, g: 1, b: 1, a: 0.85}
+  releaseCorridorColor: {r: 1, g: 0.78, b: 0.12, a: 1}
   verboseLogging: 1
 --- !u!1001 &1588580007
 PrefabInstance:

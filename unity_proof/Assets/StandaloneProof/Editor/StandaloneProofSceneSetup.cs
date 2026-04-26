@@ -54,6 +54,7 @@ namespace QuestBowlingStandalone.Editor
             var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
+            var laneLockResultRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer>(proofRig);
             var shotReplayRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer>(proofRig);
             var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
             var foulLineRaySelector = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector>(proofRig);
@@ -79,6 +80,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
+            ConfigureLaneLockResultRenderer(laneLockResultRenderer, liveResultReceiver);
             ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
             ConfigureCoordinator(coordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver);
@@ -709,6 +711,30 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(liveResultReceiver);
+        }
+
+        private static void ConfigureLaneLockResultRenderer(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+        {
+            var serializedObject = new SerializedObject(laneLockResultRenderer);
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("visualizationRoot").objectReferenceValue = null;
+            serializedObject.FindProperty("renderVisibleDownlaneOnly").boolValue = true;
+            serializedObject.FindProperty("renderSurface").boolValue = true;
+            serializedObject.FindProperty("clearOnFailedLaneResult").boolValue = true;
+            serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.025f;
+            serializedObject.FindProperty("lineWidthMeters").floatValue = 0.025f;
+            serializedObject.FindProperty("releaseLineWidthMeters").floatValue = 0.02f;
+            serializedObject.FindProperty("minimumRenderLengthMeters").floatValue = 1.0f;
+            serializedObject.FindProperty("laneSurfaceColor").colorValue = new Color(0.0f, 0.9f, 0.35f, 0.18f);
+            serializedObject.FindProperty("outlineColor").colorValue = new Color(0.0f, 1.0f, 0.45f, 1.0f);
+            serializedObject.FindProperty("foulLineColor").colorValue = new Color(0.25f, 0.75f, 1.0f, 1.0f);
+            serializedObject.FindProperty("centerLineColor").colorValue = new Color(1.0f, 1.0f, 1.0f, 0.85f);
+            serializedObject.FindProperty("releaseCorridorColor").colorValue = new Color(1.0f, 0.78f, 0.12f, 1.0f);
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(laneLockResultRenderer);
         }
 
         private static void ConfigureShotReplayRenderer(
