@@ -55,7 +55,14 @@ def _analysis_dir_for_artifact(artifact: LocalClipArtifact, output_root: Path | 
     return output_root.expanduser().resolve()
 
 
-def _detect_seed_for_image(model: Any, image_bgr: Any, frame_idx: int, imgsz: int, device: str, det_conf: float) -> dict[str, Any] | None:
+def detect_yolo_seed_for_image(
+    model: Any,
+    image_bgr: Any,
+    frame_idx: int,
+    imgsz: int,
+    device: str,
+    det_conf: float,
+) -> dict[str, Any] | None:
     results = model.predict(
         source=[image_bgr],
         imgsz=int(imgsz),
@@ -81,6 +88,17 @@ def _detect_seed_for_image(model: Any, image_bgr: Any, frame_idx: int, imgsz: in
         "source": "yolo",
         "detector_confidence": float(confs[best_idx]),
     }
+
+
+def _detect_seed_for_image(model: Any, image_bgr: Any, frame_idx: int, imgsz: int, device: str, det_conf: float) -> dict[str, Any] | None:
+    return detect_yolo_seed_for_image(
+        model=model,
+        image_bgr=image_bgr,
+        frame_idx=frame_idx,
+        imgsz=imgsz,
+        device=device,
+        det_conf=det_conf,
+    )
 
 
 def detect_seed_causally_from_artifact(

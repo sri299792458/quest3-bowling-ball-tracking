@@ -140,13 +140,15 @@ Lane-lock implementation note:
   - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
 - strict shot-boundary parsing is in:
   - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
+- automatic YOLO/lane-space shot-boundary detection is in:
+  - [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py)
 - lane-lock results can now be processed and forwarded to Quest through the same session channel instead of being only local files
-- shot boundaries are now validated as `shot_start` / `shot_end` windows before the tracking stage is attached
+- shot boundaries are now generated after lane lock, then validated as `shot_start` / `shot_end` windows before the tracking stage is attached
 - windowed live shot tracking is in:
   - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py)
 - strict shot result payloads are in:
   - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
-- the live pipeline can now run `YOLO -> SAM2` only inside completed shot windows when configured with `--yolo-checkpoint` and optional `--run-sam2`
+- the live pipeline can now auto-detect shot windows and run `YOLO -> SAM2` inside completed windows when configured with `--yolo-checkpoint` and optional `--run-sam2`
 - `shot_result` messages require lane-space trajectory data from a successful lane lock; missing lane lock is reported as a failed result, not guessed
 - Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints

@@ -42,12 +42,13 @@ The goal is to avoid drifting into disconnected experiments.
 - The live pipeline polls landed live session folders, processes each strict `lane_lock_request` once, writes `analysis_live_pipeline/pipeline_state.json`, and publishes the lane-lock result through the existing result channel.
 - Shot boundaries are now strict `shot_start` / `shot_end` events:
   - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
+  - [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py) auto-writes those events after lane lock by projecting YOLO detections into the locked lane frame
   - the live pipeline reports completed shot windows, open shot windows, and malformed boundary errors before YOLO/SAM2 is attached to those windows
 - Live shot tracking is now window-aware:
   - [standalone_yolo_seed.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_yolo_seed.py) can search only a requested `frameSeq` window
   - [standalone_sam2_tracking.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_sam2_tracking.py) can materialize and track only a requested source-frame range
   - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) ties those together for completed live shot windows
-  - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) enables this only when `--yolo-checkpoint` is passed, with SAM2 behind `--run-sam2`
+  - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) enables automatic boundaries and tracking when `--yolo-checkpoint` is passed, with SAM2 behind `--run-sam2`
 - The standalone repo now has its own local `.venv` for laptop analysis.
 - Use [requirements-cuda.txt](C:/Users/student/QuestBowlingStandalone/laptop_receiver/requirements-cuda.txt) for the full CUDA/SAM2-capable environment; the old `Quest3BowlingBallTracking\laptop_pipeline\.venv` is no longer the default validation environment.
 - `shot_result` is now a strict laptop-to-Quest payload:

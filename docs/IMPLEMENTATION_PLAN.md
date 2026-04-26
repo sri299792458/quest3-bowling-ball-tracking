@@ -92,8 +92,8 @@ Success means:
 Success means:
 
 - Quest keeps a rolling encoded buffer
-- release logic marks `shot_start_time`
-- track/end logic marks `shot_end_time`
+- laptop-side YOLO/release logic writes strict `shot_start` events after lane lock
+- laptop-side track/end logic writes strict `shot_end` events
 - a useful shot clip can be cut with pre-roll and post-roll
 
 ### Milestone 4: Laptop Decode + Tracking

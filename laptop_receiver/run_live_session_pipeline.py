@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from laptop_receiver.live_session_pipeline import build_pipeline_from_paths
+from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 
@@ -103,6 +104,7 @@ def main() -> int:
     if session_dir is not None and not session_dir.exists():
         parser.error(f"--session-dir does not exist: {session_dir}")
 
+    shot_boundary_detector_config = None
     shot_tracking_config = None
     if args.run_sam2 and args.yolo_checkpoint is None:
         parser.error("--run-sam2 requires --yolo-checkpoint.")
@@ -142,6 +144,14 @@ def main() -> int:
             sam2_preview=not bool(args.sam2_no_preview),
             sam2_frame_limit=int(args.sam2_frame_limit),
         )
+        shot_boundary_detector_config = LiveShotBoundaryDetectorConfig(
+            yolo_checkpoint_path=yolo_checkpoint,
+            yolo_imgsz=int(args.yolo_imgsz),
+            yolo_device=str(args.yolo_device),
+            yolo_det_conf=float(args.yolo_det_conf),
+            yolo_start_conf=float(args.yolo_seed_conf),
+            yolo_min_box_size=float(args.yolo_min_box_size),
+        )
 
     pipeline = build_pipeline_from_paths(
         incoming_root=args.incoming_root.expanduser().resolve(),
@@ -150,6 +160,7 @@ def main() -> int:
         publish_result_port=args.publish_result_port,
         poll_interval_seconds=args.poll_interval,
         idle_log_interval_seconds=args.idle_log_interval,
+        shot_boundary_detector_config=shot_boundary_detector_config,
         shot_tracking_config=shot_tracking_config,
     )
 
@@ -163,6 +174,9 @@ def main() -> int:
             print(f"lane seen:     {summary.lane_lock_requests_seen}")
             print(f"lane done:     {summary.lane_lock_requests_processed}")
             print(f"lane skipped:  {summary.lane_lock_requests_skipped}")
+            print(f"auto frames:   {summary.auto_shot_boundary_frames_scanned}")
+            print(f"auto yolo:     {summary.auto_shot_boundary_yolo_frames}")
+            print(f"auto events:   {summary.auto_shot_boundary_events_emitted}")
             print(f"shot events:   {summary.shot_boundary_events_seen}")
             print(f"shot windows:  {summary.completed_shot_windows_seen}")
             print(f"shot done:     {summary.completed_shot_windows_processed}")

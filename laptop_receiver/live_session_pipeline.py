@@ -8,6 +8,7 @@ from typing import Any
 
 from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, build_shot_result_envelope, publish_laptop_result
 from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
+from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetector, LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
@@ -46,6 +47,7 @@ class LivePipelineConfig:
     publish_result_port: int = 8770
     poll_interval_seconds: float = 0.5
     idle_log_interval_seconds: float = 5.0
+    shot_boundary_detector_config: LiveShotBoundaryDetectorConfig | None = None
     shot_tracking_config: LiveShotTrackingStageConfig | None = None
 
 
@@ -55,6 +57,9 @@ class PipelineProcessSummary:
     lane_lock_requests_seen: int = 0
     lane_lock_requests_processed: int = 0
     lane_lock_requests_skipped: int = 0
+    auto_shot_boundary_frames_scanned: int = 0
+    auto_shot_boundary_yolo_frames: int = 0
+    auto_shot_boundary_events_emitted: int = 0
     shot_boundary_events_seen: int = 0
     completed_shot_windows_seen: int = 0
     completed_shot_windows_processed: int = 0
@@ -68,6 +73,9 @@ class PipelineProcessSummary:
             "laneLockRequestsSeen": self.lane_lock_requests_seen,
             "laneLockRequestsProcessed": self.lane_lock_requests_processed,
             "laneLockRequestsSkipped": self.lane_lock_requests_skipped,
+            "autoShotBoundaryFramesScanned": self.auto_shot_boundary_frames_scanned,
+            "autoShotBoundaryYoloFrames": self.auto_shot_boundary_yolo_frames,
+            "autoShotBoundaryEventsEmitted": self.auto_shot_boundary_events_emitted,
             "shotBoundaryEventsSeen": self.shot_boundary_events_seen,
             "completedShotWindowsSeen": self.completed_shot_windows_seen,
             "completedShotWindowsProcessed": self.completed_shot_windows_processed,
@@ -80,6 +88,11 @@ class PipelineProcessSummary:
 class LiveSessionPipeline:
     def __init__(self, config: LivePipelineConfig) -> None:
         self.config = config
+        self._shot_boundary_detector = (
+            LiveShotBoundaryDetector(config.shot_boundary_detector_config)
+            if config.shot_boundary_detector_config is not None
+            else None
+        )
 
     def discover_session_dirs(self) -> list[Path]:
         if self.config.session_dir is not None:
@@ -116,6 +129,7 @@ class LiveSessionPipeline:
             summary = self.process_once()
             did_work = (
                 summary.lane_lock_requests_processed > 0
+                or summary.auto_shot_boundary_events_emitted > 0
                 or summary.completed_shot_windows_processed > 0
                 or bool(summary.errors)
             )
@@ -154,6 +168,12 @@ class LiveSessionPipeline:
                 self._process_lane_lock_request(session_dir, request_id, processed_requests)
                 summary.lane_lock_requests_processed += 1
                 self._save_session_state(session_dir, state)
+
+        if self._shot_boundary_detector is not None:
+            detector_result = self._shot_boundary_detector.process_session_dir(session_dir)
+            summary.auto_shot_boundary_frames_scanned += int(detector_result.scanned_frames)
+            summary.auto_shot_boundary_yolo_frames += int(detector_result.yolo_frames)
+            summary.auto_shot_boundary_events_emitted += int(detector_result.events_emitted)
 
         shot_boundaries = load_shot_boundaries(session_dir)
         summary.shot_boundary_events_seen += len(shot_boundaries.events)
@@ -284,6 +304,7 @@ def build_pipeline_from_paths(
     publish_result_port: int = 8770,
     poll_interval_seconds: float = 0.5,
     idle_log_interval_seconds: float = 5.0,
+    shot_boundary_detector_config: LiveShotBoundaryDetectorConfig | None = None,
     shot_tracking_config: LiveShotTrackingStageConfig | None = None,
 ) -> LiveSessionPipeline:
     return LiveSessionPipeline(
@@ -294,6 +315,7 @@ def build_pipeline_from_paths(
             publish_result_port=publish_result_port,
             poll_interval_seconds=poll_interval_seconds,
             idle_log_interval_seconds=idle_log_interval_seconds,
+            shot_boundary_detector_config=shot_boundary_detector_config,
             shot_tracking_config=shot_tracking_config,
         )
     )

@@ -34,6 +34,7 @@ Current implemented slice:
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
 - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
 - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates strict `shot_start` / `shot_end` windows from `shot_boundaries.jsonl`
+- [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py) writes automatic `shot_start` / `shot_end` events after lane lock by projecting YOLO ball detections into the locked lane frame
 - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) runs windowed `YOLO -> SAM2` tracking for one completed live shot window
 - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the live pipeline CLI entry point
 
@@ -141,6 +142,9 @@ What it persists per live stream:
 Shot-boundary note:
 
 - `shot_boundaries.jsonl` is strict: `boundary_type` must be `shot_start` or `shot_end`
+- when `--yolo-checkpoint` is configured, the live pipeline creates shot boundaries automatically after a successful lane lock
+- automatic `shot_start` requires a confident YOLO ball projected into the lane-lock release corridor plus short downlane confirmation
+- automatic `shot_end` uses terminal downlane region, sustained YOLO/projection loss with grace, or max shot duration
 - the live pipeline reports completed shot windows, open shot windows, and malformed boundary errors in its polling summary
 
 Current live transport note:
@@ -177,7 +181,7 @@ Process one landed session without publishing results:
 .\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --session-dir C:\path\to\live_<session>_<stream> --once --no-publish
 ```
 
-Enable windowed YOLO shot tracking for completed `shot_start` / `shot_end` windows:
+Enable automatic YOLO shot boundaries and windowed shot tracking:
 
 ```powershell
 .\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt
@@ -194,5 +198,5 @@ Current honest note:
 - the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
 - the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
 - there is no automatic lane identity selection or view-center fallback in the solver
-- shot tracking is explicit: the live pipeline only runs it when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
+- shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
 - a replayable `shot_result` requires a successful lane lock; without one the laptop emits a failed shot result instead of inventing lane-space trajectory data

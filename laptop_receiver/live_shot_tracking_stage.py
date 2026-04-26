@@ -8,6 +8,7 @@ from typing import Any
 
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult, SourceFrameRange
+from laptop_receiver.live_lane_lock_results import load_latest_successful_lane_lock
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
 
@@ -58,30 +59,6 @@ def _frame_index_bounds_for_window(
             "to decoded frame indices."
         )
     return start_index, end_index
-
-
-def _load_latest_successful_lane_lock(session_dir: Path) -> LaneLockResult | None:
-    lane_lock_root = session_dir / "analysis_lane_lock"
-    if not lane_lock_root.exists():
-        return None
-
-    result_paths = sorted(
-        lane_lock_root.glob("*/lane_lock_result.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    for result_path in result_paths:
-        document = json.loads(result_path.read_text(encoding="utf-8"))
-        solve_payload = document.get("solve")
-        if not isinstance(solve_payload, dict):
-            continue
-        result_payload = solve_payload.get("result")
-        if not isinstance(result_payload, dict):
-            continue
-        lane_lock = LaneLockResult.from_dict(result_payload)
-        if lane_lock.success:
-            return lane_lock
-    return None
 
 
 def _frame_state_for_index(frame_metadata: list[dict[str, Any]], frame_index: int) -> FrameCameraState:
@@ -168,7 +145,7 @@ def _build_shot_result(
     trajectory = []
     failure_reason = ""
 
-    lane_lock = _load_latest_successful_lane_lock(artifact.root_dir)
+    lane_lock = load_latest_successful_lane_lock(artifact.root_dir)
     if not yolo_result.success:
         failure_reason = str(yolo_result.failure_reason or "yolo_detection_failed")
     elif lane_lock is None:
