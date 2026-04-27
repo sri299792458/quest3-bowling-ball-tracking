@@ -67,6 +67,7 @@ The clean next slice after Quest proof is now in place:
 Current validation entry point:
 
 - `powershell -ExecutionPolicy Bypass -File .\laptop_receiver\setup_laptop_env.ps1`
+- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact <artifact_dir>`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir>` uses the repo-local YOLO26s checkpoint when it is present
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>` overrides the detector checkpoint
@@ -76,6 +77,12 @@ Current validation entry point:
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline`
+
+Live alley startup:
+
+- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1` stops stale live receiver/pipeline Python processes, starts the receiver, then runs the full `YOLO26s -> SAM2` live pipeline in the same terminal
+- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1 -LaneOnly` runs only receiver plus lane-lock solving
+- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1 -NoSam2` runs receiver plus YOLO shot detection/tracking without SAM2
 
 Use the repo-local `.venv` for standalone work. The normal runtime path should not depend on the older experiment repo.
 
@@ -150,7 +157,8 @@ Lane-lock implementation note:
 - strict shot result payloads are in:
   - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
 - the live pipeline can now auto-detect shot windows and run `YOLO -> SAM2` inside completed windows when configured with `--yolo-checkpoint` and optional `--run-sam2`
-- `shot_result` messages require lane-space trajectory data from a successful lane lock; missing lane lock is reported as a failed result, not guessed
+- `shot_result` messages require lane-space trajectory data from a user-confirmed lane lock; missing or invalidated lane confirmation is reported as a failed result, not guessed
+- automatic shot windows carry the confirmed `laneLockRequestId`, and shot tracking projects through that exact lane result
 - Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
 - no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver

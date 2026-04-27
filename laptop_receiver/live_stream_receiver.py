@@ -10,6 +10,28 @@ import struct
 from typing import Any
 
 from laptop_receiver.laptop_result_types import validate_laptop_result_envelope
+from laptop_receiver.session_state import (
+    LANE_CANDIDATE_RECEIVED,
+    LANE_CONFIRMED,
+    LANE_FAILED,
+    LANE_REJECTED,
+    LANE_REQUEST_QUEUED,
+    REPLAY_HAS_RESULTS,
+    SHOT_ARMED,
+    SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
+    SHOT_OPEN,
+    SHOT_RESULT_FAILED,
+    SHOT_RESULT_READY,
+    SHOT_WINDOW_COMPLETE,
+    TRANSPORT_CONNECTING,
+    TRANSPORT_ENDED,
+    TRANSPORT_STREAMING,
+    mark_lane,
+    mark_replay,
+    mark_shot,
+    mark_transport,
+    write_session_state,
+)
 
 
 DISCOVERY_SCHEMA_VERSION = "quest_bowling_laptop_discovery_v1"
@@ -126,6 +148,7 @@ class LiveStreamSession:
     media_samples_path: Path
     metadata_stream_path: Path
     lane_lock_requests_path: Path
+    lane_lock_confirms_path: Path
     shot_boundaries_path: Path
     outbound_results_path: Path
     codec_config_path: Path
@@ -136,6 +159,7 @@ class LiveStreamSession:
     media_samples_file: Any = None
     metadata_stream_file: Any = None
     lane_lock_requests_file: Any = None
+    lane_lock_confirms_file: Any = None
     shot_boundaries_file: Any = None
     outbound_results_file: Any = None
     session_started_payload: dict[str, Any] | None = None
@@ -155,6 +179,7 @@ class LiveStreamSession:
         self.media_samples_file = self.media_samples_path.open("w", encoding="utf-8", newline="\n")
         self.metadata_stream_file = self.metadata_stream_path.open("a", encoding="utf-8", newline="\n")
         self.lane_lock_requests_file = self.lane_lock_requests_path.open("a", encoding="utf-8", newline="\n")
+        self.lane_lock_confirms_file = self.lane_lock_confirms_path.open("a", encoding="utf-8", newline="\n")
         self.shot_boundaries_file = self.shot_boundaries_path.open("a", encoding="utf-8", newline="\n")
         self.outbound_results_file = self.outbound_results_path.open("a", encoding="utf-8", newline="\n")
 
@@ -164,6 +189,7 @@ class LiveStreamSession:
             "media_samples_file",
             "metadata_stream_file",
             "lane_lock_requests_file",
+            "lane_lock_confirms_file",
             "shot_boundaries_file",
             "outbound_results_file",
         ):
@@ -194,11 +220,16 @@ class LiveStreamSession:
     def write_session_start(self, payload: dict[str, Any]) -> None:
         self.session_started_payload = payload
         self.session_start_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self._mark_transport(
+            TRANSPORT_CONNECTING,
+            mediaSessionStartSeen=True,
+        )
         self.persist_receipt()
 
     def write_session_end(self, payload: dict[str, Any]) -> None:
         self.session_ended_payload = payload
         self.session_end_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        self._mark_transport(TRANSPORT_ENDED, sessionEndSeen=True)
         self.persist_receipt()
 
     def append_sample(self, pts_us: int, flags: int, encoded_bytes: bytes) -> None:
@@ -228,6 +259,8 @@ class LiveStreamSession:
         if self.first_pts_us is None:
             self.first_pts_us = int(pts_us)
         self.last_pts_us = int(pts_us)
+        if self.sample_count == 1 or is_keyframe or self.sample_count % 30 == 0:
+            self._mark_transport(TRANSPORT_STREAMING)
         self.persist_receipt()
 
     def write_codec_config(self, codec_config_bytes: bytes) -> None:
@@ -239,6 +272,11 @@ class LiveStreamSession:
         self.codec_config_path.write_bytes(codec_config_bytes)
         self.codec_config_seen = True
         self.codec_config_bytes = int(len(codec_config_bytes))
+        self._mark_transport(
+            TRANSPORT_CONNECTING,
+            codecConfigSeen=True,
+            codecConfigBytes=self.codec_config_bytes,
+        )
         self.persist_receipt()
 
     def append_metadata_message(self, payload: dict[str, Any]) -> None:
@@ -248,6 +286,20 @@ class LiveStreamSession:
         self.metadata_stream_file.write(json.dumps(payload) + "\n")
         self.metadata_stream_file.flush()
         self.metadata_message_count += 1
+        kind = str(payload.get("kind") or "")
+        if kind == "session_start":
+            self._mark_transport(TRANSPORT_CONNECTING, metadataSessionStartSeen=True)
+        elif kind == "frame_metadata":
+            frame_metadata = payload.get("frame_metadata")
+            if isinstance(frame_metadata, dict):
+                frame_seq = frame_metadata.get("frameSeq")
+                pts_us = frame_metadata.get("ptsUs")
+                if self.metadata_message_count == 1 or self.metadata_message_count % 30 == 0:
+                    self._mark_transport(
+                        TRANSPORT_STREAMING,
+                        lastFrameSeq=frame_seq,
+                        lastFramePtsUs=pts_us,
+                    )
         self.persist_receipt()
 
     def append_lane_lock_request(self, payload: dict[str, Any]) -> None:
@@ -256,6 +308,65 @@ class LiveStreamSession:
 
         self.lane_lock_requests_file.write(json.dumps(payload) + "\n")
         self.lane_lock_requests_file.flush()
+        request = payload.get("lane_lock_request")
+        request_id = str(request.get("requestId") or "") if isinstance(request, dict) else ""
+        mark_lane(
+            self.root_dir,
+            LANE_REQUEST_QUEUED,
+            activeRequestId=request_id,
+            lastFailureReason="",
+        )
+
+    def append_lane_lock_confirm(self, payload: dict[str, Any]) -> None:
+        if self.lane_lock_confirms_file is None:
+            raise RuntimeError("Lane-lock confirm file is not open.")
+
+        self.lane_lock_confirms_file.write(json.dumps(payload) + "\n")
+        self.lane_lock_confirms_file.flush()
+        request_id = str(payload.get("requestId") or payload.get("request_id") or "")
+        accepted = bool(payload.get("accepted"))
+        reason = str(payload.get("reason") or "")
+        if accepted:
+            mark_lane(
+                self.root_dir,
+                LANE_CONFIRMED,
+                confirmedRequestId=request_id,
+                activeRequestId="",
+                lastFailureReason="",
+            )
+            mark_shot(
+                self.root_dir,
+                SHOT_ARMED,
+                activeLaneLockRequestId=request_id,
+                candidateStartFrameSeq=None,
+                openWindowId="",
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason="lane_confirmed",
+            )
+        else:
+            mark_lane(
+                self.root_dir,
+                LANE_REJECTED,
+                activeRequestId="",
+                candidateRequestId="",
+                confirmedRequestId="",
+                candidateResultPath="",
+                confirmedResultPath="",
+                lastFailureReason=reason,
+            )
+            mark_shot(
+                self.root_dir,
+                SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
+                activeLaneLockRequestId="",
+                candidateStartFrameSeq=None,
+                openWindowId="",
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason=reason,
+                lastReason=reason,
+            )
 
     def append_shot_boundary(self, payload: dict[str, Any]) -> None:
         if self.shot_boundaries_file is None:
@@ -263,6 +374,29 @@ class LiveStreamSession:
 
         self.shot_boundaries_file.write(json.dumps(payload) + "\n")
         self.shot_boundaries_file.flush()
+        boundary_type = str(payload.get("boundary_type") or "")
+        frame_seq = payload.get("frame_seq")
+        lane_lock_request_id = str(payload.get("laneLockRequestId") or payload.get("lane_lock_request_id") or "")
+        reason = str(payload.get("reason") or "")
+        if boundary_type == "shot_start":
+            mark_shot(
+                self.root_dir,
+                SHOT_OPEN,
+                activeLaneLockRequestId=lane_lock_request_id,
+                openWindowId=f"shot_{frame_seq}",
+                openFrameSeqStart=frame_seq,
+                openFrameSeqEnd=None,
+                lastReason=reason,
+            )
+        elif boundary_type == "shot_end":
+            mark_shot(
+                self.root_dir,
+                SHOT_WINDOW_COMPLETE,
+                activeLaneLockRequestId=lane_lock_request_id,
+                openWindowId="",
+                openFrameSeqEnd=frame_seq,
+                lastReason=reason,
+            )
 
     def append_outbound_result(self, payload: dict[str, Any]) -> None:
         if self.outbound_results_file is None:
@@ -271,7 +405,91 @@ class LiveStreamSession:
         self.outbound_results_file.write(json.dumps(payload) + "\n")
         self.outbound_results_file.flush()
         self.outbound_result_count += 1
+        self._mark_result_state(payload)
         self.persist_receipt()
+
+    def _mark_transport(self, state: str, **fields: Any) -> None:
+        transport_fields = {
+            "sampleCount": self.sample_count,
+            "keyframeCount": self.keyframe_count,
+            "metadataMessageCount": self.metadata_message_count,
+            "outboundResultCount": self.outbound_result_count,
+            "firstPtsUs": self.first_pts_us,
+            "lastPtsUs": self.last_pts_us,
+            "codecConfigSeen": self.codec_config_seen,
+            "codecConfigBytes": self.codec_config_bytes,
+        }
+        transport_fields.update(fields)
+        mark_transport(
+            self.root_dir,
+            state,
+            session_id=self.session_id,
+            stream_id=self.shot_id,
+            **transport_fields,
+        )
+
+    def _mark_result_state(self, payload: dict[str, Any]) -> None:
+        kind = str(payload.get("kind") or "")
+        if kind == "lane_lock_result":
+            result = payload.get("lane_lock_result")
+            if not isinstance(result, dict):
+                return
+            request_id = str(result.get("requestId") or "")
+            success = bool(result.get("success"))
+            if success:
+                mark_lane(
+                    self.root_dir,
+                    LANE_CANDIDATE_RECEIVED,
+                    candidateRequestId=request_id,
+                    activeRequestId="",
+                    lastFailureReason="",
+                )
+            else:
+                mark_lane(
+                    self.root_dir,
+                    LANE_FAILED,
+                    activeRequestId="",
+                    candidateRequestId=request_id,
+                    lastFailureReason=str(result.get("failureReason") or ""),
+                )
+            return
+
+        if kind == "shot_result":
+            result = payload.get("shot_result")
+            if not isinstance(result, dict):
+                return
+            window_id = str(result.get("windowId") or "")
+            lane_lock_request_id = str(result.get("laneLockRequestId") or "")
+            success = bool(result.get("success"))
+            if success:
+                mark_shot(
+                    self.root_dir,
+                    SHOT_RESULT_READY,
+                    latestWindowId=window_id,
+                    activeLaneLockRequestId=lane_lock_request_id,
+                    openWindowId="",
+                    lastFailureReason="",
+                    lastReason="shot_result_ready",
+                )
+                replay_state = mark_replay(
+                    self.root_dir,
+                    REPLAY_HAS_RESULTS,
+                    latestWindowId=window_id,
+                )
+                replay = replay_state.get("replay", {})
+                replay["successfulShotCount"] = int(replay.get("successfulShotCount") or 0) + 1
+                replay_state["replay"] = replay
+                write_session_state(self.root_dir, replay_state)
+            else:
+                mark_shot(
+                    self.root_dir,
+                    SHOT_RESULT_FAILED,
+                    latestWindowId=window_id,
+                    activeLaneLockRequestId=lane_lock_request_id,
+                    openWindowId="",
+                    lastFailureReason=str(result.get("failureReason") or ""),
+                    lastReason="shot_result_failed",
+                )
 
 
 @dataclass
@@ -294,6 +512,7 @@ class LiveStreamRegistry:
             media_samples_path=root_dir / "media_samples.jsonl",
             metadata_stream_path=root_dir / "metadata_stream.jsonl",
             lane_lock_requests_path=root_dir / "lane_lock_requests.jsonl",
+            lane_lock_confirms_path=root_dir / "lane_lock_confirms.jsonl",
             shot_boundaries_path=root_dir / "shot_boundaries.jsonl",
             outbound_results_path=root_dir / "outbound_results.jsonl",
             codec_config_path=root_dir / "codec_config.h264",
@@ -302,6 +521,12 @@ class LiveStreamRegistry:
             stream_receipt_path=root_dir / "stream_receipt.json",
         )
         session.open()
+        mark_transport(
+            root_dir,
+            TRANSPORT_CONNECTING,
+            session_id=session_id,
+            stream_id=shot_id,
+        )
         session.persist_receipt()
         self.sessions[key] = session
         return session
@@ -475,6 +700,8 @@ async def _handle_metadata_connection(
             kind = str(payload.get("kind") or "")
             if kind == "lane_lock_request":
                 session.append_lane_lock_request(payload)
+            elif kind == "lane_lock_confirm":
+                session.append_lane_lock_confirm(payload)
             elif kind == "shot_boundary":
                 session.append_shot_boundary(payload)
     finally:

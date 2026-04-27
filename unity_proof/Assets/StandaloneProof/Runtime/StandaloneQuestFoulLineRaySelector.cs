@@ -1,7 +1,46 @@
+using System;
 using UnityEngine;
 
 namespace QuestBowlingStandalone.QuestApp
 {
+    public enum StandaloneFoulLineSelectionStep
+    {
+        Left,
+        Right,
+    }
+
+    public enum StandaloneFoulLineSelectionEventKind
+    {
+        Started,
+        PointAccepted,
+        PointRejected,
+        Completed,
+        Cancelled,
+    }
+
+    public readonly struct StandaloneFoulLineSelectionEvent
+    {
+        public StandaloneFoulLineSelectionEvent(
+            StandaloneFoulLineSelectionEventKind kind,
+            StandaloneFoulLineSelectionStep step,
+            string note,
+            Vector2 pointNorm,
+            float realtimeSeconds)
+        {
+            Kind = kind;
+            Step = step;
+            Note = note ?? string.Empty;
+            PointNorm = pointNorm;
+            RealtimeSeconds = realtimeSeconds;
+        }
+
+        public StandaloneFoulLineSelectionEventKind Kind { get; }
+        public StandaloneFoulLineSelectionStep Step { get; }
+        public string Note { get; }
+        public Vector2 PointNorm { get; }
+        public float RealtimeSeconds { get; }
+    }
+
     public sealed class StandaloneQuestFoulLineRaySelector : MonoBehaviour
     {
         [Header("Shared Selection Input")]
@@ -27,8 +66,7 @@ namespace QuestBowlingStandalone.QuestApp
         private float _ignoreSelectionsUntilRealtime;
 
         public string LastStatus { get; private set; } = string.Empty;
-        public bool IsSelectionActive => _selectionActive;
-        public bool HasPendingLeftPoint => _hasPendingLeftPoint;
+        public event Action<StandaloneFoulLineSelectionEvent> SelectionEvent;
 
         private void OnEnable()
         {
@@ -57,6 +95,11 @@ namespace QuestBowlingStandalone.QuestApp
             _selectionActive = true;
             _ignoreSelectionsUntilRealtime = Time.realtimeSinceStartup + Mathf.Max(0.0f, armInputDebounceSeconds);
             SetStatus("select_left_foul_line_point");
+            EmitSelectionEvent(
+                StandaloneFoulLineSelectionEventKind.Started,
+                StandaloneFoulLineSelectionStep.Left,
+                "select_left_foul_line_point",
+                Vector2.zero);
         }
 
         public void CancelFoulLineSelection()
@@ -64,6 +107,11 @@ namespace QuestBowlingStandalone.QuestApp
             _selectionActive = false;
             ClearPendingSelection();
             SetStatus("foul_line_selection_cancelled");
+            EmitSelectionEvent(
+                StandaloneFoulLineSelectionEventKind.Cancelled,
+                StandaloneFoulLineSelectionStep.Left,
+                "foul_line_selection_cancelled",
+                Vector2.zero);
         }
 
         private void Subscribe()
@@ -99,9 +147,27 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            var selectingRightPoint = _hasPendingLeftPoint;
             if (!TryMapSelectionToImagePoint(selection, out var pointNorm, out var note))
             {
-                SetStatus(note);
+                var step = selectingRightPoint
+                    ? StandaloneFoulLineSelectionStep.Right
+                    : StandaloneFoulLineSelectionStep.Left;
+                if (selectingRightPoint)
+                {
+                    SetStatus($"right_foul_line_selection_failed:{note}");
+                }
+                else
+                {
+                    ClearPendingSelection();
+                    SetStatus($"left_foul_line_selection_failed:{note}");
+                }
+
+                EmitSelectionEvent(
+                    StandaloneFoulLineSelectionEventKind.PointRejected,
+                    step,
+                    note,
+                    Vector2.zero);
                 return;
             }
 
@@ -111,6 +177,11 @@ namespace QuestBowlingStandalone.QuestApp
                 _hasPendingLeftPoint = true;
                 laneLockCapture?.ClearFoulLineSelection();
                 SetStatus("left_foul_line_point_selected");
+                EmitSelectionEvent(
+                    StandaloneFoulLineSelectionEventKind.PointAccepted,
+                    StandaloneFoulLineSelectionStep.Left,
+                    "left_foul_line_point_selected",
+                    pointNorm);
                 return;
             }
 
@@ -118,6 +189,11 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 ClearPendingSelection();
                 SetStatus("lane_lock_capture_missing");
+                EmitSelectionEvent(
+                    StandaloneFoulLineSelectionEventKind.PointRejected,
+                    StandaloneFoulLineSelectionStep.Right,
+                    "lane_lock_capture_missing",
+                    Vector2.zero);
                 return;
             }
 
@@ -127,10 +203,20 @@ namespace QuestBowlingStandalone.QuestApp
                 _selectionActive = false;
                 ClearPendingSelection();
                 SetStatus("foul_line_selection_ready");
+                EmitSelectionEvent(
+                    StandaloneFoulLineSelectionEventKind.Completed,
+                    StandaloneFoulLineSelectionStep.Right,
+                    "foul_line_selection_ready",
+                    pointNorm);
                 return;
             }
 
-            SetStatus(note);
+            SetStatus($"right_foul_line_selection_failed:{note}");
+            EmitSelectionEvent(
+                StandaloneFoulLineSelectionEventKind.PointRejected,
+                StandaloneFoulLineSelectionStep.Right,
+                note,
+                Vector2.zero);
         }
 
         private bool TryMapSelectionToImagePoint(
@@ -262,6 +348,20 @@ namespace QuestBowlingStandalone.QuestApp
         {
             LastStatus = status ?? string.Empty;
             DebugLog(LastStatus);
+        }
+
+        private void EmitSelectionEvent(
+            StandaloneFoulLineSelectionEventKind kind,
+            StandaloneFoulLineSelectionStep step,
+            string note,
+            Vector2 pointNorm)
+        {
+            SelectionEvent?.Invoke(new StandaloneFoulLineSelectionEvent(
+                kind,
+                step,
+                note,
+                pointNorm,
+                Time.realtimeSinceStartup));
         }
 
         private static bool IsNormalizedPoint(Vector2 point)

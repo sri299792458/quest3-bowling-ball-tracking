@@ -38,12 +38,24 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Serializable]
+        private sealed class LaneLockConfirmEnvelope
+        {
+            public string kind = "lane_lock_confirm";
+            public string session_id;
+            public string shot_id;
+            public string requestId;
+            public bool accepted;
+            public string reason;
+        }
+
+        [Serializable]
         private sealed class ShotBoundaryEnvelope
         {
             public string kind = "shot_boundary";
             public string session_id;
             public string shot_id;
             public string boundary_type;
+            public string laneLockRequestId;
             public long camera_timestamp_us;
             public long pts_us;
             public ulong frame_seq;
@@ -234,6 +246,55 @@ namespace QuestBowlingStandalone.QuestApp
             }
         }
 
+        public bool TrySendLaneLockConfirm(
+            string sessionId,
+            string shotId,
+            string requestId,
+            bool accepted,
+            string reason,
+            out string note)
+        {
+            note = "metadata_sender_failed";
+            if (!enabledForAutoRun)
+            {
+                note = "metadata_sender_disabled";
+                return false;
+            }
+
+            if (_writer == null)
+            {
+                note = "metadata_stream_not_connected";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(requestId))
+            {
+                note = "lane_lock_confirm_request_id_missing";
+                return false;
+            }
+
+            try
+            {
+                var payload = new LaneLockConfirmEnvelope
+                {
+                    session_id = sessionId ?? _activeSessionId ?? string.Empty,
+                    shot_id = shotId ?? _activeShotId ?? string.Empty,
+                    requestId = requestId.Trim(),
+                    accepted = accepted,
+                    reason = string.IsNullOrWhiteSpace(reason) ? "user_confirm" : reason,
+                };
+                WriteJsonLine(payload);
+                note = "lane_lock_confirm_sent";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                note = ex.GetType().Name + ": " + ex.Message;
+                AbortSession();
+                return false;
+            }
+        }
+
         public bool TrySendShotBoundary(
             string sessionId,
             string shotId,
@@ -264,6 +325,7 @@ namespace QuestBowlingStandalone.QuestApp
                     session_id = sessionId ?? _activeSessionId ?? string.Empty,
                     shot_id = shotId ?? _activeShotId ?? string.Empty,
                     boundary_type = string.IsNullOrWhiteSpace(boundaryType) ? "unknown" : boundaryType,
+                    laneLockRequestId = string.Empty,
                     frame_seq = frameSeq,
                     camera_timestamp_us = cameraTimestampUs,
                     pts_us = ptsUs,

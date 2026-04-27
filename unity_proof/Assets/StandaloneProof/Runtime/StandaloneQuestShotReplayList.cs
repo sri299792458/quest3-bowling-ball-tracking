@@ -258,7 +258,13 @@ namespace QuestBowlingStandalone.QuestApp
             button.interactable = true;
             button.onClick.RemoveAllListeners();
             var capturedIndex = record.DisplayIndex - 1;
-            button.onClick.AddListener(() => SelectShot(capturedIndex));
+            button.onClick.AddListener(() =>
+            {
+                if (StandaloneQuestCommandGate.TryAccept("shot_replay_select"))
+                {
+                    SelectShot(capturedIndex);
+                }
+            });
 
             var label = button.GetComponentInChildren<Text>(true);
             if (label != null)
@@ -321,7 +327,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return "No Replay";
             }
 
-            if (failureReason.StartsWith("lane_lock_result_missing"))
+            if (failureReason.StartsWith("lane_lock_result_missing") || failureReason.StartsWith("lane_lock_confirm_missing"))
             {
                 return "Lock Lane First";
             }

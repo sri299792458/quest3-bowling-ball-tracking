@@ -30,6 +30,7 @@ namespace QuestBowlingStandalone.QuestApp
     {
         [Header("Ray Source")]
         [SerializeField] private Transform rayTransform;
+        [SerializeField] private OVRHand handPinchSource;
         [SerializeField] private float maxRayDistanceMeters = 30.0f;
 
         [Header("Selection Input")]
@@ -47,14 +48,13 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private bool verboseLogging;
 
         private OVRHand _cachedHand;
-        private OVRHand[] _cachedHands = Array.Empty<OVRHand>();
         private bool _wasHandPinching;
-        private float _nextHandCacheRefreshRealtime;
         private string _lastInputSource = string.Empty;
 
         public event Action<StandaloneQuestRaySelection> SelectionPerformed;
 
         public Transform RayTransform => rayTransform;
+        public OVRHand HandPinchSource => handPinchSource;
         public float MaxRayDistanceMeters => Mathf.Max(0.1f, maxRayDistanceMeters);
 
         private void Awake()
@@ -82,6 +82,12 @@ namespace QuestBowlingStandalone.QuestApp
         public void SetRayTransform(Transform value)
         {
             rayTransform = value;
+            CacheHandFromRayTransform();
+        }
+
+        public void SetHandPinchSource(OVRHand value)
+        {
+            handPinchSource = value;
             CacheHandFromRayTransform();
         }
 
@@ -214,37 +220,7 @@ namespace QuestBowlingStandalone.QuestApp
                 hand = _cachedHand;
             }
 
-            if (IsHandPinching(hand))
-            {
-                return true;
-            }
-
-            foreach (var cachedHand in GetCachedHands())
-            {
-                if (cachedHand == hand)
-                {
-                    continue;
-                }
-
-                if (IsHandPinching(cachedHand))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private OVRHand[] GetCachedHands()
-        {
-            if (Time.realtimeSinceStartup < _nextHandCacheRefreshRealtime)
-            {
-                return _cachedHands;
-            }
-
-            _nextHandCacheRefreshRealtime = Time.realtimeSinceStartup + 1.0f;
-            _cachedHands = FindObjectsByType<OVRHand>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-            return _cachedHands;
+            return IsHandPinching(hand);
         }
 
         private static bool IsHandPinching(OVRHand hand)
@@ -256,7 +232,9 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void CacheHandFromRayTransform()
         {
-            _cachedHand = rayTransform != null ? rayTransform.GetComponentInParent<OVRHand>() : null;
+            _cachedHand = handPinchSource != null
+                ? handPinchSource
+                : (rayTransform != null ? rayTransform.GetComponentInParent<OVRHand>() : null);
         }
 
         private string BuildSelectionSource()

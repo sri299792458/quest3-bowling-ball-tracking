@@ -171,6 +171,7 @@ The foul-line points are required. They are normalized image coordinates for the
 - `frame_seq`
 - `camera_timestamp_us`
 - `pts_us`
+- `laneLockRequestId`
 - `reason`
 
 `boundary_type` must be one of:
@@ -178,13 +179,16 @@ The foul-line points are required. They are normalized image coordinates for the
 - `shot_start`
 - `shot_end`
 
-The laptop pairs one `shot_start` with the next valid `shot_end` from the same `session_id` and `shot_id`. Nested starts, unmatched ends, and end frames earlier than their start frames are invalid.
+The laptop pairs one `shot_start` with the next valid `shot_end` from the same `session_id`, `shot_id`, and `laneLockRequestId`. Nested starts, unmatched ends, lane-lock mismatches, and end frames earlier than their start frames are invalid.
 
 `lane_lock_confirm` should include:
 
 - `requestId`
 - `accepted`
 - optional `reason`
+
+`accepted=true` promotes that lane candidate to the confirmed session lane and arms shot detection.
+`accepted=false` rejects that candidate or invalidates the current confirmed lane, then returns shot detection to `DisabledUntilLaneConfirmed`.
 
 ## Result Channel
 
@@ -234,7 +238,7 @@ The envelope `shot_id` must match `shot_result.shotId`.
 - `trackingSummary`
 - `trajectory`
 
-`trajectory` is an ordered list of `lane_space_ball_point` entries. Each point contains the source frame identity, image point, projected world point, lane coordinates, on-lane flag, and projection confidence. A successful replayable shot result requires a successful lane lock; if no lane lock is available, the laptop may send a failed `shot_result` with an empty trajectory and `failureReason = lane_lock_result_missing`.
+`trajectory` is an ordered list of `lane_space_ball_point` entries. Each point contains the source frame identity, image point, projected world point, lane coordinates, on-lane flag, and projection confidence. A successful replayable shot result requires a shot window with `laneLockRequestId` and a matching lane-lock result; if that trace is missing, the laptop must send a failed `shot_result` with an empty trajectory instead of projecting through another lane.
 
 The local result publish endpoint is laptop-local producer input for analysis stages. Producers send the same strict result envelope to `127.0.0.1:8770`; the live receiver validates it, persists it, then forwards it to connected Quest result clients.
 
@@ -247,11 +251,13 @@ The laptop receiver should create one directory per live stream session and pers
 - `media_samples.jsonl`
 - `metadata_stream.jsonl`
 - `lane_lock_requests.jsonl`
+- `lane_lock_confirms.jsonl`
 - `shot_boundaries.jsonl`
 - `outbound_results.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
+- `session_state.json`
 
 This live directory is not yet the final standalone artifact.
 

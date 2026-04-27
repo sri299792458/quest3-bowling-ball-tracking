@@ -20,6 +20,7 @@ namespace QuestBowlingStandalone.Editor
         private const string PassthroughObjectName = "[BuildingBlock] Passthrough";
         private const string LockLaneCanvasObjectName = "LockLaneCanvas";
         private const string LockLaneButtonObjectName = "LockLaneButton";
+        private const string RetryLaneButtonObjectName = "RetryLaneButton";
         private const string ReplayShotListObjectName = "ReplayShotList";
 
         [MenuItem("Tools/Standalone Proof/Create Or Update Proof Scene")]
@@ -31,24 +32,25 @@ namespace QuestBowlingStandalone.Editor
             var cameraRig = FindOrCreateCameraRig();
             var trackingSpace = FindTrackingSpace(cameraRig.transform);
             var headAnchor = FindHeadAnchor(cameraRig.transform);
-            var leftHandAnchor = FindHandAnchor(cameraRig.transform, "LeftHandAnchor");
             var rightHandAnchor = FindHandAnchor(cameraRig.transform, "RightHandAnchor");
             var eventCamera = FindEventCamera(headAnchor, cameraRig.transform);
             var cameraAccess = FindOrCreateCameraAccess();
             var proofRig = FindOrCreateProofRig();
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(proofRig);
             var passthroughLayer = FindOrCreatePassthroughLayer();
-            var leftHand = FindOrCreateHand(OVRHand.Hand.HandLeft, leftHandAnchor);
+            DestroyObjectIfPresent("StandaloneProofLeftHand");
+            DestroyObjectIfPresent("StandaloneLeftRayHelper");
             var rightHand = FindOrCreateHand(OVRHand.Hand.HandRight, rightHandAnchor);
-            var leftRayHelper = FindOrCreateRayHelper("Left", leftHand != null ? leftHand.transform : null);
             var rightRayHelper = FindOrCreateRayHelper("Right", rightHand != null ? rightHand.transform : null);
             var eventSystemObject = FindOrCreateEventSystem();
             var lockLaneCanvas = FindOrCreateLockLaneCanvas(headAnchor);
             DestroyObjectIfPresent("ReplayShotButton");
-            var lockLaneButton = FindOrCreateLockLaneButton(lockLaneCanvas.transform);
+            var lockLaneButton = FindOrCreateLaneActionButton(LockLaneButtonObjectName, lockLaneCanvas.transform);
+            var retryLaneButton = FindOrCreateLaneActionButton(RetryLaneButtonObjectName, lockLaneCanvas.transform);
             var replayShotList = FindOrCreateReplayShotList(lockLaneCanvas.transform);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneCanvas);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneButton);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(retryLaneButton);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(replayShotList);
 
             var sessionContext = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext>(proofRig);
@@ -63,7 +65,8 @@ namespace QuestBowlingStandalone.Editor
             var shotReplayRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer>(proofRig);
             var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
             var foulLineRaySelector = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector>(proofRig);
-            var coordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
+            var renderCoordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
+            var laneLockStateCoordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator>(proofRig);
             var sessionController = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController>(proofRig);
             var eventSystem = GetOrAddComponent<EventSystem>(eventSystemObject);
             var inputModule = GetOrAddComponent<OVRInputModule>(eventSystemObject);
@@ -78,19 +81,41 @@ namespace QuestBowlingStandalone.Editor
             ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
             ConfigureFloorPlaneSource(floorPlaneSource, trackingSpace != null ? trackingSpace : cameraRig.transform);
             ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
-            ConfigureHandRayHelper(leftHand, leftRayHelper);
-            ConfigureHandRayHelper(rightHand, rightRayHelper);
-            ConfigureRayInteractor(rayInteractor, sharedRayTransform);
+            ConfigureHandRayHelper(rightHand, rightRayHelper, enabled: true);
+            ConfigureRayInteractor(rayInteractor, sharedRayTransform, rightHand);
             ConfigureFoulLineRaySelector(foulLineRaySelector, rayInteractor, laneLockCapture, proofCapture, floorPlaneSource);
+            ConfigureLaneLockStateCoordinator(
+                laneLockStateCoordinator,
+                laneLockCapture,
+                foulLineRaySelector,
+                liveResultReceiver,
+                liveMetadataSender,
+                proofCapture,
+                laneLockResultRenderer);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
-            ConfigureLockLaneButton(lockLaneButton, laneLockCapture, foulLineRaySelector);
+            ConfigureLaneActionButton(
+                lockLaneButton,
+                laneLockStateCoordinator,
+                QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary,
+                new Vector2(-300.0f, 0.0f),
+                new Vector2(330.0f, 120.0f),
+                "Lock Lane",
+                new Color(0.09f, 0.13f, 0.19f, 0.94f));
+            ConfigureLaneActionButton(
+                retryLaneButton,
+                laneLockStateCoordinator,
+                QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Secondary,
+                new Vector2(-20.0f, 0.0f),
+                new Vector2(210.0f, 120.0f),
+                "Retry Lane",
+                new Color(0.18f, 0.11f, 0.10f, 0.94f));
             ConfigureReplayShotList(replayShotList, liveResultReceiver, shotReplayRenderer);
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
             ConfigureLaneLockResultRenderer(laneLockResultRenderer, liveResultReceiver);
             ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
-            ConfigureCoordinator(coordinator, frameSource, proofCapture);
+            ConfigureCoordinator(renderCoordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver, laptopDiscovery);
 
             EditorSceneManager.MarkSceneDirty(scene);
@@ -239,9 +264,9 @@ namespace QuestBowlingStandalone.Editor
             return canvasObject;
         }
 
-        private static GameObject FindOrCreateLockLaneButton(Transform canvasTransform)
+        private static GameObject FindOrCreateLaneActionButton(string objectName, Transform canvasTransform)
         {
-            var existing = GameObject.Find(LockLaneButtonObjectName);
+            var existing = GameObject.Find(objectName);
             if (existing != null && existing.GetComponent<RectTransform>() != null)
             {
                 return existing;
@@ -253,16 +278,17 @@ namespace QuestBowlingStandalone.Editor
             }
 
             var button = new GameObject(
-                LockLaneButtonObjectName,
+                objectName,
                 typeof(RectTransform),
                 typeof(CanvasRenderer),
                 typeof(Image),
-                typeof(Button));
-            button.name = LockLaneButtonObjectName;
-            Undo.RegisterCreatedObjectUndo(button, "Create Lock Lane Button");
+                typeof(Button),
+                typeof(CanvasGroup));
+            button.name = objectName;
+            Undo.RegisterCreatedObjectUndo(button, $"Create {objectName}");
             if (canvasTransform != null)
             {
-                Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Lock Lane Button");
+                Undo.SetTransformParent(button.transform, canvasTransform, false, $"Parent {objectName}");
             }
 
             button.layer = 5;
@@ -529,16 +555,16 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(hand);
         }
 
-        private static void ConfigureHandRayHelper(OVRHand hand, OVRRayHelper rayHelper)
+        private static void ConfigureHandRayHelper(OVRHand hand, OVRRayHelper rayHelper, bool enabled)
         {
             if (hand == null || rayHelper == null)
             {
                 return;
             }
 
-            hand.RayHelper = rayHelper;
+            hand.RayHelper = enabled ? rayHelper : null;
             rayHelper.DefaultLength = 2.0f;
-            rayHelper.gameObject.SetActive(true);
+            rayHelper.gameObject.SetActive(enabled);
             EditorUtility.SetDirty(hand);
             EditorUtility.SetDirty(rayHelper);
         }
@@ -821,8 +847,6 @@ namespace QuestBowlingStandalone.Editor
         {
             var serializedObject = new SerializedObject(floorPlaneSource);
             serializedObject.FindProperty("floorReference").objectReferenceValue = floorReference;
-            serializedObject.FindProperty("fallbackPlanePointWorld").vector3Value = Vector3.zero;
-            serializedObject.FindProperty("fallbackPlaneNormalWorld").vector3Value = Vector3.up;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(floorPlaneSource);
@@ -850,15 +874,17 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureRayInteractor(
             QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
-            Transform rayTransform)
+            Transform rayTransform,
+            OVRHand handPinchSource)
         {
             var serializedObject = new SerializedObject(rayInteractor);
             serializedObject.FindProperty("rayTransform").objectReferenceValue = rayTransform;
+            serializedObject.FindProperty("handPinchSource").objectReferenceValue = handPinchSource;
             serializedObject.FindProperty("maxRayDistanceMeters").floatValue = 30.0f;
             serializedObject.FindProperty("selectWithHandPinch").boolValue = true;
             serializedObject.FindProperty("selectWithControllerTrigger").boolValue = true;
-            serializedObject.FindProperty("selectWithUiClickButton").boolValue = true;
-            serializedObject.FindProperty("selectWithAnyTouchController").boolValue = true;
+            serializedObject.FindProperty("selectWithUiClickButton").boolValue = false;
+            serializedObject.FindProperty("selectWithAnyTouchController").boolValue = false;
             serializedObject.FindProperty("controller").intValue = (int)OVRInput.Controller.RTouch;
             serializedObject.FindProperty("selectButton").intValue = (int)OVRInput.Button.PrimaryIndexTrigger;
             serializedObject.FindProperty("uiClickButton").intValue = (int)OVRInput.Button.One;
@@ -888,6 +914,42 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(foulLineRaySelector);
+        }
+
+        private static void ConfigureLaneLockStateCoordinator(
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer)
+        {
+            var serializedObject = new SerializedObject(laneLockStateCoordinator);
+            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
+            serializedObject.FindProperty("foulLineSelector").objectReferenceValue = foulLineRaySelector;
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("laneLockResultRenderer").objectReferenceValue = laneLockResultRenderer;
+            serializedObject.FindProperty("idleText").stringValue = "Lock Lane";
+            serializedObject.FindProperty("selectLeftText").stringValue = "Select Left Edge";
+            serializedObject.FindProperty("selectRightText").stringValue = "Select Right Edge";
+            serializedObject.FindProperty("selectionReadyText").stringValue = "Lock Lane";
+            serializedObject.FindProperty("requestQueuedText").stringValue = "Capturing...";
+            serializedObject.FindProperty("awaitingResultText").stringValue = "Solving...";
+            serializedObject.FindProperty("acceptLaneText").stringValue = "Accept Lane";
+            serializedObject.FindProperty("lockedText").stringValue = "Lane Locked";
+            serializedObject.FindProperty("failedText").stringValue = "Try Again";
+            serializedObject.FindProperty("retryLaneText").stringValue = "Retry Lane";
+            serializedObject.FindProperty("relockLaneText").stringValue = "Relock Lane";
+            serializedObject.FindProperty("resultTimeoutText").stringValue = "No Result";
+            serializedObject.FindProperty("autoSubmitAfterFoulLineSelection").boolValue = true;
+            serializedObject.FindProperty("laneResultTimeoutSeconds").floatValue = 30.0f;
+            serializedObject.FindProperty("selectionErrorDisplaySeconds").floatValue = 1.5f;
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(laneLockStateCoordinator);
         }
 
         private static void ConfigureLockLaneCanvas(GameObject lockLaneCanvas, Camera eventCamera)
@@ -927,35 +989,41 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(raycaster);
         }
 
-        private static void ConfigureLockLaneButton(
-            GameObject lockLaneButton,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector)
+        private static void ConfigureLaneActionButton(
+            GameObject actionButton,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind actionKind,
+            Vector2 anchoredPosition,
+            Vector2 size,
+            string initialText,
+            Color normalColor)
         {
-            if (lockLaneButton == null)
+            if (actionButton == null)
             {
                 return;
             }
 
-            var rectTransform = lockLaneButton.GetComponent<RectTransform>();
-            var image = lockLaneButton.GetComponent<Image>();
-            var button = lockLaneButton.GetComponent<Button>();
-            var laneLockButton = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockButton>(lockLaneButton);
+            var rectTransform = actionButton.GetComponent<RectTransform>();
+            var image = actionButton.GetComponent<Image>();
+            var button = actionButton.GetComponent<Button>();
+            var canvasGroup = GetOrAddComponent<CanvasGroup>(actionButton);
+            var laneLockButton = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockButton>(actionButton);
+            var startsVisible = actionKind == QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary;
 
-            lockLaneButton.layer = 5;
+            actionButton.layer = 5;
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = new Vector2(-260.0f, 0.0f);
+            rectTransform.anchoredPosition = anchoredPosition;
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(390.0f, 120.0f);
+            rectTransform.sizeDelta = size;
 
-            image.color = new Color(0.09f, 0.13f, 0.19f, 0.94f);
+            image.color = normalColor;
             image.raycastTarget = true;
 
             var colors = button.colors;
-            colors.normalColor = new Color(0.09f, 0.13f, 0.19f, 0.94f);
+            colors.normalColor = normalColor;
             colors.highlightedColor = new Color(0.19f, 0.30f, 0.46f, 0.98f);
             colors.pressedColor = new Color(0.28f, 0.42f, 0.62f, 1.0f);
             colors.disabledColor = new Color(0.16f, 0.16f, 0.16f, 0.70f);
@@ -963,14 +1031,17 @@ namespace QuestBowlingStandalone.Editor
             button.transition = Selectable.Transition.ColorTint;
             button.targetGraphic = image;
             button.colors = colors;
+            canvasGroup.alpha = startsVisible ? 1.0f : 0.0f;
+            canvasGroup.interactable = startsVisible;
+            canvasGroup.blocksRaycasts = startsVisible;
 
-            var labelTransform = lockLaneButton.transform.Find("Label");
+            var labelTransform = actionButton.transform.Find("Label");
             Text label;
             if (labelTransform == null)
             {
                 var labelObject = new GameObject("Label");
-                Undo.RegisterCreatedObjectUndo(labelObject, "Create Lock Lane Label");
-                Undo.SetTransformParent(labelObject.transform, lockLaneButton.transform, false, "Parent Lock Lane Label");
+                Undo.RegisterCreatedObjectUndo(labelObject, $"Create {actionButton.name} Label");
+                Undo.SetTransformParent(labelObject.transform, actionButton.transform, false, $"Parent {actionButton.name} Label");
                 labelObject.layer = 5;
                 Undo.AddComponent<RectTransform>(labelObject);
                 Undo.AddComponent<CanvasRenderer>(labelObject);
@@ -993,7 +1064,7 @@ namespace QuestBowlingStandalone.Editor
                 labelRect.offsetMin = Vector2.zero;
                 labelRect.offsetMax = Vector2.zero;
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.text = "Lock Lane";
+                label.text = initialText;
                 label.alignment = TextAnchor.MiddleCenter;
                 label.resizeTextForBestFit = true;
                 label.resizeTextMinSize = 24;
@@ -1004,20 +1075,20 @@ namespace QuestBowlingStandalone.Editor
             }
 
             var serializedObject = new SerializedObject(laneLockButton);
-            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
-            serializedObject.FindProperty("foulLineSelector").objectReferenceValue = foulLineRaySelector;
+            serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
+            serializedObject.FindProperty("actionKind").enumValueIndex = (int)actionKind;
             serializedObject.FindProperty("label").objectReferenceValue = label;
-            serializedObject.FindProperty("idleText").stringValue = "Lock Lane";
-            serializedObject.FindProperty("selectLeftText").stringValue = "Select Left Edge";
-            serializedObject.FindProperty("selectRightText").stringValue = "Select Right Edge";
-            serializedObject.FindProperty("activeText").stringValue = "Locking...";
-            serializedObject.FindProperty("statusHoldSeconds").floatValue = 2.0f;
+            serializedObject.FindProperty("canvasGroup").objectReferenceValue = canvasGroup;
+            serializedObject.FindProperty("coordinatorMissingText").stringValue = "Lane UI Missing";
+            serializedObject.FindProperty("visibleAlpha").floatValue = 1.0f;
+            serializedObject.FindProperty("hiddenAlpha").floatValue = 0.0f;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(laneLockButton);
+            EditorUtility.SetDirty(canvasGroup);
             EditorUtility.SetDirty(image);
             EditorUtility.SetDirty(button);
-            EditorUtility.SetDirty(lockLaneButton);
+            EditorUtility.SetDirty(actionButton);
         }
 
         private static void ConfigureReplayShotList(

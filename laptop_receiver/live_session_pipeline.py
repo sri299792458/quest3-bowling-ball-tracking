@@ -12,6 +12,21 @@ from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetector
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
+from laptop_receiver.session_state import (
+    LANE_CANDIDATE_RECEIVED,
+    LANE_FAILED,
+    LANE_SOLVING,
+    SHOT_ANALYZING,
+    SHOT_ARMED,
+    SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
+    SHOT_OPEN,
+    SHOT_RESULT_FAILED,
+    SHOT_RESULT_READY,
+    SHOT_START_CANDIDATE,
+    SHOT_WINDOW_COMPLETE,
+    mark_lane,
+    mark_shot,
+)
 
 
 PIPELINE_STATE_SCHEMA_VERSION = "live_session_pipeline_state"
@@ -174,12 +189,23 @@ class LiveSessionPipeline:
             summary.auto_shot_boundary_frames_scanned += int(detector_result.scanned_frames)
             summary.auto_shot_boundary_yolo_frames += int(detector_result.yolo_frames)
             summary.auto_shot_boundary_events_emitted += int(detector_result.events_emitted)
+            self._mark_shot_from_detector_result(session_dir, detector_result)
 
         shot_boundaries = load_shot_boundaries(session_dir)
         summary.shot_boundary_events_seen += len(shot_boundaries.events)
         summary.completed_shot_windows_seen += len(shot_boundaries.completed_windows)
         if shot_boundaries.open_start is not None:
             summary.open_shot_windows_seen += 1
+            mark_shot(
+                session_dir,
+                SHOT_OPEN,
+                openWindowId=f"shot_{shot_boundaries.open_start.frame_seq}",
+                activeLaneLockRequestId=shot_boundaries.open_start.lane_lock_request_id,
+                openFrameSeqStart=shot_boundaries.open_start.frame_seq,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason=shot_boundaries.open_start.reason,
+            )
         for error in shot_boundaries.errors:
             summary.errors.append(f"{session_dir}: {error}")
 
@@ -194,6 +220,17 @@ class LiveSessionPipeline:
                     summary.completed_shot_windows_skipped += 1
                     continue
 
+                mark_shot(
+                    session_dir,
+                    SHOT_WINDOW_COMPLETE,
+                    latestWindowId=window.window_id,
+                    activeLaneLockRequestId=window.lane_lock_request_id,
+                    openWindowId="",
+                    openFrameSeqStart=window.frame_seq_start,
+                    openFrameSeqEnd=window.frame_seq_end,
+                    completedWindowCount=len(shot_boundaries.completed_windows),
+                    lastReason=window.end.reason,
+                )
                 self._process_shot_window(session_dir, window, processed_windows)
                 summary.completed_shot_windows_processed += 1
                 self._save_session_state(session_dir, state)
@@ -204,12 +241,19 @@ class LiveSessionPipeline:
         request_id: str,
         processed_requests: dict[str, Any],
     ) -> None:
+        mark_lane(
+            session_dir,
+            LANE_SOLVING,
+            activeRequestId=request_id,
+            lastFailureReason="",
+        )
         stage_output = solve_lane_lock_stage_for_live_session(session_dir, request_id=request_id)
+        lane_result = stage_output.solve_output.result
 
         published = False
         if self.config.publish_result_host:
             envelope = build_lane_lock_result_envelope(
-                result=stage_output.solve_output.result,
+                result=lane_result,
                 shot_id=stage_output.shot_id,
             )
             publish_laptop_result(
@@ -225,9 +269,27 @@ class LiveSessionPipeline:
             "published": bool(published),
             "resultPath": str(stage_output.result_path),
             "previewPath": str(stage_output.preview_path),
-            "confidence": float(stage_output.solve_output.result.confidence),
-            "success": bool(stage_output.solve_output.result.success),
+            "confidence": float(lane_result.confidence),
+            "success": bool(lane_result.success),
         }
+        if lane_result.success:
+            mark_lane(
+                session_dir,
+                LANE_CANDIDATE_RECEIVED,
+                activeRequestId="",
+                candidateRequestId=request_id,
+                candidateResultPath=str(stage_output.result_path),
+                lastFailureReason="",
+            )
+        else:
+            mark_lane(
+                session_dir,
+                LANE_FAILED,
+                activeRequestId="",
+                candidateRequestId=request_id,
+                candidateResultPath=str(stage_output.result_path),
+                lastFailureReason=str(lane_result.failure_reason),
+            )
 
     def _process_shot_window(
         self,
@@ -238,6 +300,17 @@ class LiveSessionPipeline:
         if self.config.shot_tracking_config is None:
             raise RuntimeError("Shot tracking config is required to process shot windows.")
 
+        mark_shot(
+            session_dir,
+            SHOT_ANALYZING,
+            latestWindowId=window.window_id,
+            activeLaneLockRequestId=window.lane_lock_request_id,
+            openWindowId="",
+            openFrameSeqStart=window.frame_seq_start,
+            openFrameSeqEnd=window.frame_seq_end,
+            lastFailureReason="",
+            lastReason="shot_tracking_started",
+        )
         stage_output = run_live_shot_tracking_stage(
             session_dir,
             window=window,
@@ -265,6 +338,78 @@ class LiveSessionPipeline:
             "sam2Success": bool(sam2_result.success) if sam2_result is not None else None,
             "success": bool(stage_output.result_document.get("success")),
         }
+        mark_shot(
+            session_dir,
+            SHOT_RESULT_READY if stage_output.shot_result.success else SHOT_RESULT_FAILED,
+            latestWindowId=window.window_id,
+            activeLaneLockRequestId=stage_output.shot_result.lane_lock_request_id,
+            openWindowId="",
+            openFrameSeqStart=window.frame_seq_start,
+            openFrameSeqEnd=window.frame_seq_end,
+            processedWindowCount=len(processed_windows),
+            latestResultPath=str(stage_output.result_path),
+            lastFailureReason=str(stage_output.shot_result.failure_reason),
+            lastReason="shot_result_ready" if stage_output.shot_result.success else "shot_result_failed",
+        )
+
+    def _mark_shot_from_detector_result(self, session_dir: Path, detector_result: Any) -> None:
+        lane_lock_request_id = str(getattr(detector_result, "confirmed_lane_lock_request_id", "") or "")
+        detector_mode = str(getattr(detector_result, "detector_mode", "") or "")
+        reason = str(getattr(detector_result, "reason", "") or "")
+
+        if reason == "lane_lock_confirm_missing":
+            mark_shot(
+                session_dir,
+                SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
+                activeLaneLockRequestId="",
+                candidateStartFrameSeq=None,
+                openWindowId="",
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason=reason,
+            )
+            return
+
+        if detector_mode == "pending":
+            mark_shot(
+                session_dir,
+                SHOT_START_CANDIDATE,
+                activeLaneLockRequestId=lane_lock_request_id,
+                candidateStartFrameSeq=getattr(detector_result, "pending_frame_seq", None),
+                openWindowId="",
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason=reason,
+            )
+            return
+
+        if detector_mode == "tracking":
+            mark_shot(
+                session_dir,
+                SHOT_OPEN,
+                activeLaneLockRequestId=lane_lock_request_id,
+                candidateStartFrameSeq=None,
+                openWindowId=str(getattr(detector_result, "active_window_id", "") or ""),
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason=reason,
+            )
+            return
+
+        mark_shot(
+            session_dir,
+            SHOT_ARMED,
+            activeLaneLockRequestId=lane_lock_request_id,
+            candidateStartFrameSeq=None,
+            openWindowId="",
+            openFrameSeqStart=None,
+            openFrameSeqEnd=None,
+            lastFailureReason="",
+            lastReason=reason,
+        )
 
     def _state_dir(self, session_dir: Path) -> Path:
         return session_dir / "analysis_live_pipeline"

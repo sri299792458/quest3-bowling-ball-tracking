@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult
-from laptop_receiver.live_lane_lock_results import load_latest_successful_lane_lock
+from laptop_receiver.live_lane_lock_results import load_confirmed_lane_lock
 from laptop_receiver.live_shot_boundaries import (
     SHOT_BOUNDARY_END,
     SHOT_BOUNDARY_START,
@@ -71,6 +71,10 @@ class LiveShotBoundaryDetectorResult:
     start_events_emitted: int
     end_events_emitted: int
     latest_scanned_frame_seq: int
+    detector_mode: str
+    confirmed_lane_lock_request_id: str
+    pending_frame_seq: int | None
+    active_window_id: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -84,6 +88,10 @@ class LiveShotBoundaryDetectorResult:
             "startEventsEmitted": self.start_events_emitted,
             "endEventsEmitted": self.end_events_emitted,
             "latestScannedFrameSeq": self.latest_scanned_frame_seq,
+            "detectorMode": self.detector_mode,
+            "confirmedLaneLockRequestId": self.confirmed_lane_lock_request_id,
+            "pendingFrameSeq": self.pending_frame_seq,
+            "activeWindowId": self.active_window_id,
         }
 
 
@@ -133,14 +141,20 @@ class LiveShotBoundaryDetector:
         state = self._load_state(root)
         state_path = self._state_path(root)
 
-        lane_lock = load_latest_successful_lane_lock(root)
+        lane_lock = load_confirmed_lane_lock(root)
         if lane_lock is None:
+            state["mode"] = "idle"
+            state["pendingCandidate"] = None
+            state["activeShot"] = None
+            state["lastReason"] = "lane_lock_confirm_missing"
+            self._save_state(root, state)
             return self._result(
                 root,
                 state_path,
                 state,
                 status="waiting",
-                reason="lane_lock_result_missing",
+                reason="lane_lock_confirm_missing",
+                confirmed_lane_lock_request_id="",
             )
 
         shot_boundaries = load_shot_boundaries(root)
@@ -154,7 +168,14 @@ class LiveShotBoundaryDetector:
         artifact = load_local_clip_artifact(root)
         if not artifact.frame_metadata:
             self._save_state(root, state)
-            return self._result(root, state_path, state, status="waiting", reason="frame_metadata_missing")
+            return self._result(
+                root,
+                state_path,
+                state,
+                status="waiting",
+                reason="frame_metadata_missing",
+                confirmed_lane_lock_request_id=lane_lock.request_id,
+            )
 
         session_id, stream_shot_id = self._session_identity(artifact)
         intrinsics = CameraIntrinsics.from_session_metadata(artifact.session_metadata)
@@ -227,6 +248,10 @@ class LiveShotBoundaryDetector:
             start_events_emitted=int(start_events_emitted),
             end_events_emitted=int(end_events_emitted),
             latest_scanned_frame_seq=_int(state.get("lastScannedFrameSeq"), -1),
+            detector_mode=str(state.get("mode") or "idle"),
+            confirmed_lane_lock_request_id=str(lane_lock.request_id),
+            pending_frame_seq=self._pending_frame_seq(state),
+            active_window_id=self._active_window_id(state),
         )
 
     def _advance_state_for_frame(
@@ -271,6 +296,7 @@ class LiveShotBoundaryDetector:
                         pending=pending,
                         session_id=session_id,
                         shot_id=shot_id,
+                        lane_lock_request_id=lane_lock.request_id,
                     )
                     active_shot["confirmingDetection"] = candidate.to_dict()
                     active_shot["lastDetection"] = candidate.to_dict()
@@ -335,6 +361,7 @@ class LiveShotBoundaryDetector:
                 boundary_type=SHOT_BOUNDARY_END,
                 session_id=str(active_shot.get("sessionId") or session_id),
                 shot_id=str(active_shot.get("shotId") or shot_id),
+                lane_lock_request_id=str(active_shot.get("laneLockRequestId") or lane_lock.request_id),
                 metadata=frame_metadata,
                 frame_seq=frame_seq,
                 reason=end_reason,
@@ -527,6 +554,7 @@ class LiveShotBoundaryDetector:
         pending: Mapping[str, Any],
         session_id: str,
         shot_id: str,
+        lane_lock_request_id: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         fps = self._fps_for_artifact(artifact)
         pre_roll_frames = int(round(float(self.config.pre_roll_seconds) * fps))
@@ -544,6 +572,7 @@ class LiveShotBoundaryDetector:
             boundary_type=SHOT_BOUNDARY_START,
             session_id=session_id,
             shot_id=shot_id,
+            lane_lock_request_id=lane_lock_request_id,
             metadata=start_metadata,
             frame_seq=start_frame_seq,
             reason="auto_yolo_release_corridor_confirmed",
@@ -551,6 +580,7 @@ class LiveShotBoundaryDetector:
         active_shot = {
             "sessionId": session_id,
             "shotId": shot_id,
+            "laneLockRequestId": lane_lock_request_id,
             "startFrameSeq": int(start_frame_seq),
             "startPtsUs": _int(start_metadata.get("ptsUs")),
             "startCameraTimestampUs": _int(start_metadata.get("cameraTimestampUs")),
@@ -572,6 +602,7 @@ class LiveShotBoundaryDetector:
         boundary_type: str,
         session_id: str,
         shot_id: str,
+        lane_lock_request_id: str,
         metadata: Mapping[str, Any],
         frame_seq: int,
         reason: str,
@@ -580,6 +611,7 @@ class LiveShotBoundaryDetector:
             "kind": "shot_boundary",
             "session_id": str(session_id),
             "shot_id": str(shot_id),
+            "laneLockRequestId": str(lane_lock_request_id),
             "boundary_type": str(boundary_type),
             "frame_seq": int(frame_seq),
             "camera_timestamp_us": _int(metadata.get("cameraTimestampUs")),
@@ -615,6 +647,7 @@ class LiveShotBoundaryDetector:
                 state["activeShot"] = {
                     "sessionId": open_start.session_id,
                     "shotId": open_start.shot_id,
+                    "laneLockRequestId": open_start.lane_lock_request_id,
                     "startFrameSeq": int(open_start.frame_seq),
                     "startPtsUs": int(open_start.pts_us),
                     "startCameraTimestampUs": int(open_start.camera_timestamp_us),
@@ -688,6 +721,7 @@ class LiveShotBoundaryDetector:
         *,
         status: str,
         reason: str,
+        confirmed_lane_lock_request_id: str = "",
     ) -> LiveShotBoundaryDetectorResult:
         return LiveShotBoundaryDetectorResult(
             session_dir=root,
@@ -700,7 +734,24 @@ class LiveShotBoundaryDetector:
             start_events_emitted=0,
             end_events_emitted=0,
             latest_scanned_frame_seq=_int(state.get("lastScannedFrameSeq"), -1),
+            detector_mode=str(state.get("mode") or "idle"),
+            confirmed_lane_lock_request_id=confirmed_lane_lock_request_id,
+            pending_frame_seq=self._pending_frame_seq(state),
+            active_window_id=self._active_window_id(state),
         )
+
+    def _pending_frame_seq(self, state: Mapping[str, Any]) -> int | None:
+        pending = state.get("pendingCandidate")
+        if not isinstance(pending, Mapping):
+            return None
+        return _int(pending.get("frameSeq"), -1)
+
+    def _active_window_id(self, state: Mapping[str, Any]) -> str:
+        active_shot = state.get("activeShot")
+        if not isinstance(active_shot, Mapping):
+            return ""
+        start_frame_seq = _int(active_shot.get("startFrameSeq"), -1)
+        return f"shot_{start_frame_seq}" if start_frame_seq >= 0 else ""
 
     def _session_identity(self, artifact: LocalClipArtifact) -> tuple[str, str]:
         session_id = str(

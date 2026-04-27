@@ -43,6 +43,7 @@ class ShotBoundaryEvent:
     envelope_index: int
     session_id: str
     shot_id: str
+    lane_lock_request_id: str
     boundary_type: str
     frame_seq: int
     camera_timestamp_us: int
@@ -79,6 +80,7 @@ class ShotBoundaryEvent:
             envelope_index=int(envelope_index),
             session_id=session_id,
             shot_id=shot_id,
+            lane_lock_request_id=_str(envelope.get("laneLockRequestId") or envelope.get("lane_lock_request_id")).strip(),
             boundary_type=boundary_type,
             frame_seq=frame_seq,
             camera_timestamp_us=camera_timestamp_us,
@@ -91,6 +93,7 @@ class ShotBoundaryEvent:
             "envelopeIndex": self.envelope_index,
             "sessionId": self.session_id,
             "shotId": self.shot_id,
+            "laneLockRequestId": self.lane_lock_request_id,
             "boundaryType": self.boundary_type,
             "frameSeq": self.frame_seq,
             "cameraTimestampUs": self.camera_timestamp_us,
@@ -104,6 +107,7 @@ class CompletedShotWindow:
     window_id: str
     session_id: str
     shot_id: str
+    lane_lock_request_id: str
     start: ShotBoundaryEvent
     end: ShotBoundaryEvent
 
@@ -120,6 +124,7 @@ class CompletedShotWindow:
             "windowId": self.window_id,
             "sessionId": self.session_id,
             "shotId": self.shot_id,
+            "laneLockRequestId": self.lane_lock_request_id,
             "frameSeqStart": self.frame_seq_start,
             "frameSeqEnd": self.frame_seq_end,
             "start": self.start.to_dict(),
@@ -163,6 +168,14 @@ def build_completed_shot_windows(events: list[ShotBoundaryEvent]) -> ShotBoundar
             open_start = None
             continue
 
+        if event.lane_lock_request_id != open_start.lane_lock_request_id:
+            errors.append(
+                "shot_end laneLockRequestId does not match open shot_start "
+                f"at frame {open_start.frame_seq}."
+            )
+            open_start = None
+            continue
+
         if event.frame_seq < open_start.frame_seq:
             errors.append(
                 f"shot_end frame {event.frame_seq} is before shot_start frame {open_start.frame_seq}."
@@ -176,6 +189,7 @@ def build_completed_shot_windows(events: list[ShotBoundaryEvent]) -> ShotBoundar
                 window_id=window_id,
                 session_id=open_start.session_id,
                 shot_id=open_start.shot_id,
+                lane_lock_request_id=open_start.lane_lock_request_id,
                 start=open_start,
                 end=event,
             )

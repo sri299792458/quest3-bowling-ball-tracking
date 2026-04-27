@@ -119,6 +119,14 @@ Live stream receiver usage:
 .\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver
 ```
 
+Normal live alley startup should use the repo-level launcher instead:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1
+```
+
+That command stops stale live receiver/pipeline Python processes, starts the receiver, waits for health on `127.0.0.1:8768`, then runs the live pipeline in the same terminal. Use `-LaneOnly` for lane-lock-only testing or `-NoSam2` to keep YOLO shot processing enabled without SAM2.
+
 By default it listens on:
 
 - Quest laptop discovery UDP: `0.0.0.0:8765`
@@ -141,18 +149,22 @@ What it persists per live stream:
 - `media_samples.jsonl`
 - `metadata_stream.jsonl`
 - `lane_lock_requests.jsonl`
+- `lane_lock_confirms.jsonl`
 - `shot_boundaries.jsonl`
 - `outbound_results.jsonl`
 - `session_start.json`
 - `session_end.json`
 - `stream_receipt.json`
+- `session_state.json`
 
 Shot-boundary note:
 
 - `shot_boundaries.jsonl` is strict: `boundary_type` must be `shot_start` or `shot_end`
-- when `--yolo-checkpoint` is configured, the live pipeline creates shot boundaries automatically after a successful lane lock
+- when `--yolo-checkpoint` is configured, the live pipeline creates shot boundaries automatically after a user-confirmed lane lock
+- a rejected/relocked lane confirmation disables shot detection again until a new lane candidate is accepted
 - automatic `shot_start` requires a confident YOLO ball projected into the lane-lock release corridor plus short downlane confirmation
 - automatic `shot_end` uses terminal downlane region, sustained YOLO/projection loss with grace, or max shot duration
+- each automatic shot boundary records the confirmed `laneLockRequestId`; shot projection uses that exact lane result
 - the live pipeline reports completed shot windows, open shot windows, and malformed boundary errors in its polling summary
 
 Current live transport note:
@@ -209,4 +221,4 @@ Current honest note:
 - the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
 - there is no automatic lane identity selection or view-center fallback in the solver
 - shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
-- a replayable `shot_result` requires a successful lane lock; without one the laptop emits a failed shot result instead of inventing lane-space trajectory data
+- a replayable `shot_result` requires a user-confirmed lane lock; without one, or after a relock invalidates one, the laptop emits a failed shot result instead of inventing lane-space trajectory data

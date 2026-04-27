@@ -8,7 +8,7 @@ from typing import Any
 
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult, SourceFrameRange
-from laptop_receiver.live_lane_lock_results import load_latest_successful_lane_lock
+from laptop_receiver.live_lane_lock_results import load_lane_lock_result_for_request
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
 
@@ -145,11 +145,13 @@ def _build_shot_result(
     trajectory = []
     failure_reason = ""
 
-    lane_lock = load_latest_successful_lane_lock(artifact.root_dir)
+    lane_lock = load_lane_lock_result_for_request(artifact.root_dir, window.lane_lock_request_id)
     if not yolo_result.success:
         failure_reason = str(yolo_result.failure_reason or "yolo_detection_failed")
+    elif not window.lane_lock_request_id:
+        failure_reason = "shot_boundary_lane_lock_request_missing"
     elif lane_lock is None:
-        failure_reason = "lane_lock_result_missing"
+        failure_reason = "shot_boundary_lane_lock_result_missing"
     elif sam2_result is not None and not sam2_result.success:
         failure_reason = str(sam2_result.failure_reason or "sam2_tracking_failed")
     else:

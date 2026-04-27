@@ -3,6 +3,33 @@ using UnityEngine;
 
 namespace QuestBowlingStandalone.QuestApp
 {
+    public enum StandaloneLaneLockRequestEventKind
+    {
+        Started,
+        Sent,
+        Failed,
+    }
+
+    public readonly struct StandaloneLaneLockRequestEvent
+    {
+        public StandaloneLaneLockRequestEvent(
+            StandaloneLaneLockRequestEventKind kind,
+            string requestId,
+            string note,
+            float realtimeSeconds)
+        {
+            Kind = kind;
+            RequestId = requestId ?? string.Empty;
+            Note = note ?? string.Empty;
+            RealtimeSeconds = realtimeSeconds;
+        }
+
+        public StandaloneLaneLockRequestEventKind Kind { get; }
+        public string RequestId { get; }
+        public string Note { get; }
+        public float RealtimeSeconds { get; }
+    }
+
     public sealed class StandaloneQuestLaneLockCapture : MonoBehaviour
     {
         [Header("Lane Lock Stream Input")]
@@ -35,6 +62,7 @@ namespace QuestBowlingStandalone.QuestApp
         public bool IsRequestActive => _requestActive;
         public string LastCompletionNote => _lastCompletionNote ?? string.Empty;
         public bool HasFoulLineSelection => _hasFoulLineSelection;
+        public event Action<StandaloneLaneLockRequestEvent> RequestEvent;
 
         private void OnEnable()
         {
@@ -117,6 +145,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "lane_lock_request_already_active";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -124,6 +153,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "proof_capture_missing";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -131,6 +161,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "session_stream_not_active";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -138,6 +169,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "session_metadata_missing";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -145,6 +177,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "live_metadata_sender_missing";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -152,6 +185,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "floor_plane_source_missing";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -159,6 +193,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = $"floor_plane_unavailable:{floorNote}";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -166,6 +201,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 note = "foul_line_selection_missing";
                 _lastCompletionNote = note;
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, string.Empty, note);
                 return false;
             }
 
@@ -179,6 +215,7 @@ namespace QuestBowlingStandalone.QuestApp
             _lastCompletionNote = "lane_lock_request_started";
             note = $"lane_lock_request_started:{_requestId}";
             DebugLog($"Lane lock request started. requestId={_requestId}");
+            EmitRequestEvent(StandaloneLaneLockRequestEventKind.Started, _requestId, note);
             return true;
         }
 
@@ -238,18 +275,22 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (_capturedFrameCount < Mathf.Max(1, minimumFrameCount) || currentSessionMetadata == null)
             {
+                var failedRequestId = _requestId ?? string.Empty;
                 _lastCompletionNote = _capturedFrameCount <= 0
                     ? "lane_lock_request_failed_no_frames"
                     : "lane_lock_request_failed_low_frame_count";
                 DebugLog($"Lane lock request dropped. reason={_lastCompletionNote} frames={_capturedFrameCount}");
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, failedRequestId, _lastCompletionNote);
                 ResetActiveRequestState();
                 return;
             }
 
             if (!floorPlaneSource.TryGetFloorPlane(out var floorPointWorld, out var floorNormalWorld, out var floorNote))
             {
+                var failedRequestId = _requestId ?? string.Empty;
                 _lastCompletionNote = $"lane_lock_request_failed_floor_plane:{floorNote}";
                 DebugLog($"Lane lock request dropped. reason={_lastCompletionNote}");
+                EmitRequestEvent(StandaloneLaneLockRequestEventKind.Failed, failedRequestId, _lastCompletionNote);
                 ResetActiveRequestState();
                 return;
             }
@@ -284,6 +325,10 @@ namespace QuestBowlingStandalone.QuestApp
                 : $"lane_lock_request_send_failed:{note}";
             DebugLog(
                 $"Lane lock request finalized. sent={sent} requestId={request.requestId} frameRange={request.frameSeqStart}..{request.frameSeqEnd} frames={request.frameCount} note={note}");
+            EmitRequestEvent(
+                sent ? StandaloneLaneLockRequestEventKind.Sent : StandaloneLaneLockRequestEventKind.Failed,
+                request.requestId,
+                _lastCompletionNote);
             ResetActiveRequestState();
         }
 
@@ -317,6 +362,15 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             Debug.Log($"[StandaloneQuestLaneLockCapture] {message}");
+        }
+
+        private void EmitRequestEvent(StandaloneLaneLockRequestEventKind kind, string requestId, string note)
+        {
+            RequestEvent?.Invoke(new StandaloneLaneLockRequestEvent(
+                kind,
+                requestId,
+                note,
+                Time.realtimeSinceStartup));
         }
     }
 }
