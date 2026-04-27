@@ -218,7 +218,7 @@ $yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
 Current honest note:
 
 - the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
-- the live product path must send `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm` from a frame where the foul line is actually selected
+- the live product path must send `leftFoulLinePointWorld` and `rightFoulLinePointWorld` from the shared Quest ray/floor hit selector
 - there is no automatic lane identity selection or view-center fallback in the solver
 - shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
 - a replayable `shot_result` requires a user-confirmed lane lock; without one, or after a relock invalidates one, the laptop emits a failed shot result instead of inventing lane-space trajectory data

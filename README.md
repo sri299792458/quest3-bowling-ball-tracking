@@ -123,9 +123,10 @@ Lane-lock implementation note:
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - the shared ray interactor is reusable by replay controls; the foul-line selector is just the lane-lock consumer
 - that Quest-side slice rejects lane-lock requests until a foul-line selection exists, then sends one `lane_lock_request` metadata event with:
-  - `selectionFrameSeq`
-  - `leftFoulLinePointNorm`
-  - `rightFoulLinePointNorm`
+  - `leftSelectionFrameSeq`
+  - `rightSelectionFrameSeq`
+  - `leftFoulLinePointWorld`
+  - `rightFoulLinePointWorld`
   - frame range
   - capture duration
   - camera intrinsics
@@ -134,6 +135,10 @@ Lane-lock implementation note:
 - the session stream itself is now managed by:
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
+- one live session is created per Quest app run; closing and reopening the Quest app creates a fresh `session_id`
+- live runs should first disable proximity sleep with `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`
+- if Quest/app/camera/encoder truly pause/restart from zero or the tracking origin relocalizes, the lane must be locked again
+- the live pipeline processes the latest live stream by default; old streams stay on disk and are used only when selected explicitly
 - the Quest app discovers the laptop at runtime over UDP `8765`, so the scene no longer needs a hardcoded laptop IP
 - the laptop receiver persists those requests in `lane_lock_requests.jsonl` next to the streamed `H.264` session
 - the laptop receiver also owns the Quest-facing result channel:

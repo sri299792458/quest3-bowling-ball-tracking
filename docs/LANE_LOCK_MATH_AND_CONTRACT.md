@@ -1,6 +1,6 @@
 # Lane Lock Math And Data Contract
 
-Last updated: 2026-04-25
+Last updated: 2026-04-27
 
 This document defines the lane-lock contract for the standalone bowling product.
 
@@ -19,41 +19,34 @@ The session becomes lane locked only after a candidate overlay is shown and acce
 
 ## Required Quest Inputs
 
-For the selected frame:
+For the live stream:
 
-- image pixels
-- `frameSeq`
-- camera timestamp
+- image frames and per-frame metadata
 - camera intrinsics: `fx`, `fy`, `cx`, `cy`, image width, image height
-- camera pose in world: position and rotation
-- head pose in world
-- floor normal, expected to point upward
-- two normalized image selections:
-  - `leftFoulLinePointNorm`
-  - `rightFoulLinePointNorm`
+- camera pose in world per frame
+- head pose in world per frame
+- floor plane point and floor normal, expected to point upward
 
-The selected points are normalized image coordinates in `[0, 1]`.
+For lane selection:
+
+- `leftSelectionFrameSeq`
+- `rightSelectionFrameSeq`
+- `leftFoulLinePointWorld`
+- `rightFoulLinePointWorld`
+
+The selected foul-line points are physical Quest-world floor intersections. They are not image pixels. This is the source of truth for lane calibration.
 
 ## Quest Selection Path
 
 The shared Quest selector emits a world ray from the active hand/controller ray. Lane lock consumes that ray as follows:
 
 1. intersect the ray with the current floor plane
-2. project the floor hit point into the current passthrough camera frame
-3. store the resulting normalized image coordinate
+2. store that floor hit as a Quest-world point
+3. store the current frame sequence for audit/debugging
 
-The first accepted selection is the left foul-line edge. The second accepted selection is the right foul-line edge. The code does not sort those points silently; if the second point is not to the right in image space, the request is rejected and the user must select again.
+The first accepted selection is the left foul-line edge. The second accepted selection is the right foul-line edge. The code does not silently create a lane from pixels, image center, or automatic lane identity detection.
 
-World point to image pixel:
-
-```text
-P_c = inverse(cameraRotationWorld) * (P_w - cameraPositionWorld)
-u = fx * (P_c.x / P_c.z) + cx
-v = cy - fy * (P_c.y / P_c.z)
-pointNorm = [u / imageWidth, v / imageHeight]
-```
-
-The selection is rejected if the ray misses the floor, the projected point is behind the camera, or the normalized point falls outside `[0, 1]`.
+The selection is rejected if the ray misses the floor, points behind the user, or the two selected world points are effectively the same point.
 
 ## Coordinate Frames
 
@@ -68,67 +61,32 @@ Camera frame:
 - `y` up
 - `z` forward
 
-For pixel `(u, v)`:
-
-```text
-d_c_raw = [(u - cx) / fx, -(v - cy) / fy, 1]
-d_c = normalize(d_c_raw)
-```
-
 World frame:
 
-```text
-o_w = cameraPositionWorld
-d_w = cameraRotationWorld * d_c
-```
-
-So each selected pixel defines a world ray:
-
-```text
-P(t) = o_w + t * d_w
-```
+Quest world is the common coordinate frame for both selected points and future camera poses. The lane lock remains valid only while that world frame remains continuous.
 
 ## Two-Point Foul-Line Solve
 
-The selected left and right foul-line pixels give two world rays:
+The selected foul-line endpoints are already in Quest world:
 
 ```text
-d_left
-d_right
+P_left
+P_right
 ```
 
-The lane plane is assumed perpendicular to the upward floor normal `n_w`, but its exact offset can be solved from known lane width.
-
-Let the unknown plane offset from the camera along `n_w` be `alpha`:
+Project both points onto the current floor plane to remove tiny ray/floor numerical error:
 
 ```text
-n_w dot (X - o_w) = alpha
+P_projected = P - dot(P - floorPoint, n_w) * n_w
 ```
 
-For each ray:
+The selected width is:
 
 ```text
-t_left  = alpha / dot(n_w, d_left)
-t_right = alpha / dot(n_w, d_right)
-
-P_left  = o_w + t_left  * d_left
-P_right = o_w + t_right * d_right
+selectedWidth = |P_right - P_left projected onto floor|
 ```
 
-Choose `alpha` so the two intersections are exactly the regulation lane width apart:
-
-```text
-|P_right - P_left| = laneWidthMeters
-```
-
-This gives:
-
-```text
-scale = |d_right / dot(n_w, d_right) - d_left / dot(n_w, d_left)|
-alpha = -laneWidthMeters / scale
-```
-
-The negative sign assumes the floor normal points upward and the lane is below the camera. The solution is rejected if either intersection is behind the camera.
+The solve is rejected if the selected points are nearly coincident. The difference between `selectedWidth` and regulation `laneWidthMeters` becomes the selection agreement score; the solver does not invent a lane from image geometry to hide a bad selection.
 
 ## Lane Frame
 
@@ -178,9 +136,10 @@ C3 = C0 + laneLengthMeters * s_w
   "frameSeqEnd": 124,
   "frameCount": 25,
   "captureDurationSeconds": 0.8,
-  "selectionFrameSeq": 100,
-  "leftFoulLinePointNorm": { "x": 0.40, "y": 0.66 },
-  "rightFoulLinePointNorm": { "x": 0.72, "y": 0.63 },
+  "leftSelectionFrameSeq": 100,
+  "rightSelectionFrameSeq": 114,
+  "leftFoulLinePointWorld": { "x": -0.52, "y": 0.0, "z": 0.0 },
+  "rightFoulLinePointWorld": { "x": 0.52, "y": 0.0, "z": 0.0 },
   "laneWidthMeters": 1.0541,
   "laneLengthMeters": 18.288,
   "fx": 900.0,
@@ -195,7 +154,7 @@ C3 = C0 + laneLengthMeters * s_w
 }
 ```
 
-The request is invalid without `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
+The request is invalid without `leftSelectionFrameSeq`, `rightSelectionFrameSeq`, `leftFoulLinePointWorld`, and `rightFoulLinePointWorld`.
 
 ## Lane Lock Result
 

@@ -55,9 +55,10 @@ namespace QuestBowlingStandalone.QuestApp
         private ulong _frameSeqEnd;
         private string _lastCompletionNote;
         private bool _hasFoulLineSelection;
-        private Vector2 _leftFoulLinePointNorm;
-        private Vector2 _rightFoulLinePointNorm;
-        private ulong _selectionFrameSeq;
+        private Vector3 _leftFoulLinePointWorld;
+        private Vector3 _rightFoulLinePointWorld;
+        private ulong _leftSelectionFrameSeq;
+        private ulong _rightSelectionFrameSeq;
 
         public bool IsRequestActive => _requestActive;
         public string LastCompletionNote => _lastCompletionNote ?? string.Empty;
@@ -97,32 +98,37 @@ namespace QuestBowlingStandalone.QuestApp
             }
         }
 
-        public bool TrySetFoulLineSelection(Vector2 leftFoulLinePointNorm, Vector2 rightFoulLinePointNorm, out string note)
+        public bool TrySetFoulLineSelection(
+            Vector3 leftFoulLinePointWorld,
+            ulong leftSelectionFrameSeq,
+            Vector3 rightFoulLinePointWorld,
+            ulong rightSelectionFrameSeq,
+            out string note)
         {
             note = "foul_line_selection_failed";
 
-            if (!IsNormalizedPoint(leftFoulLinePointNorm) || !IsNormalizedPoint(rightFoulLinePointNorm))
+            if (!IsFinite(leftFoulLinePointWorld) || !IsFinite(rightFoulLinePointWorld))
             {
-                note = "foul_line_selection_out_of_range";
+                note = "foul_line_selection_not_finite";
                 return false;
             }
 
-            if (leftFoulLinePointNorm.x >= rightFoulLinePointNorm.x)
-            {
-                note = "foul_line_selection_order_invalid";
-                return false;
-            }
-
-            var frameMetadata = proofCapture != null ? proofCapture.LastCommittedFrameMetadata : null;
-            if (frameMetadata == null)
+            if (leftSelectionFrameSeq <= 0UL || rightSelectionFrameSeq <= 0UL)
             {
                 note = "foul_line_selection_frame_missing";
                 return false;
             }
 
-            _leftFoulLinePointNorm = leftFoulLinePointNorm;
-            _rightFoulLinePointNorm = rightFoulLinePointNorm;
-            _selectionFrameSeq = frameMetadata.frameSeq;
+            if ((rightFoulLinePointWorld - leftFoulLinePointWorld).sqrMagnitude <= 0.0001f)
+            {
+                note = "foul_line_selection_points_too_close";
+                return false;
+            }
+
+            _leftFoulLinePointWorld = leftFoulLinePointWorld;
+            _rightFoulLinePointWorld = rightFoulLinePointWorld;
+            _leftSelectionFrameSeq = leftSelectionFrameSeq;
+            _rightSelectionFrameSeq = rightSelectionFrameSeq;
             _hasFoulLineSelection = true;
             _lastCompletionNote = "foul_line_selection_ready";
             note = "foul_line_selection_ready";
@@ -132,9 +138,10 @@ namespace QuestBowlingStandalone.QuestApp
         public void ClearFoulLineSelection()
         {
             _hasFoulLineSelection = false;
-            _leftFoulLinePointNorm = Vector2.zero;
-            _rightFoulLinePointNorm = Vector2.zero;
-            _selectionFrameSeq = 0UL;
+            _leftFoulLinePointWorld = Vector3.zero;
+            _rightFoulLinePointWorld = Vector3.zero;
+            _leftSelectionFrameSeq = 0UL;
+            _rightSelectionFrameSeq = 0UL;
         }
 
         public bool TryBeginLaneLockRequest(out string note)
@@ -209,8 +216,8 @@ namespace QuestBowlingStandalone.QuestApp
             _requestActive = true;
             _requestId = Guid.NewGuid().ToString("N");
             _requestStartedRealtime = Time.realtimeSinceStartup;
-            _frameSeqStart = _selectionFrameSeq;
-            _frameSeqEnd = _selectionFrameSeq;
+            _frameSeqStart = Math.Min(_leftSelectionFrameSeq, _rightSelectionFrameSeq);
+            _frameSeqEnd = Math.Max(_leftSelectionFrameSeq, _rightSelectionFrameSeq);
             _capturedFrameCount = 1;
             _lastCompletionNote = "lane_lock_request_started";
             note = $"lane_lock_request_started:{_requestId}";
@@ -303,9 +310,10 @@ namespace QuestBowlingStandalone.QuestApp
                 frameSeqEnd = _frameSeqEnd,
                 frameCount = _capturedFrameCount,
                 captureDurationSeconds = captureDurationSeconds,
-                selectionFrameSeq = _selectionFrameSeq,
-                leftFoulLinePointNorm = _leftFoulLinePointNorm,
-                rightFoulLinePointNorm = _rightFoulLinePointNorm,
+                leftSelectionFrameSeq = _leftSelectionFrameSeq,
+                rightSelectionFrameSeq = _rightSelectionFrameSeq,
+                leftFoulLinePointWorld = _leftFoulLinePointWorld,
+                rightFoulLinePointWorld = _rightFoulLinePointWorld,
                 laneWidthMeters = laneWidthMeters,
                 laneLengthMeters = laneLengthMeters,
                 fx = currentSessionMetadata.fx,
@@ -342,16 +350,14 @@ namespace QuestBowlingStandalone.QuestApp
             _frameSeqEnd = 0UL;
         }
 
-        private static bool IsNormalizedPoint(Vector2 point)
+        private static bool IsFinite(Vector3 point)
         {
-            return !float.IsNaN(point.x)
-                && !float.IsNaN(point.y)
-                && !float.IsInfinity(point.x)
-                && !float.IsInfinity(point.y)
-                && point.x >= 0.0f
-                && point.x <= 1.0f
-                && point.y >= 0.0f
-                && point.y <= 1.0f;
+            return IsFinite(point.x) && IsFinite(point.y) && IsFinite(point.z);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private void DebugLog(string message)

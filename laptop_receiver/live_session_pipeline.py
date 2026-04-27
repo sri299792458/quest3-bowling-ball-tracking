@@ -6,7 +6,12 @@ from pathlib import Path
 import time
 from typing import Any
 
-from laptop_receiver.laptop_result_types import build_lane_lock_result_envelope, build_shot_result_envelope, publish_laptop_result
+from laptop_receiver.laptop_result_types import (
+    LaptopResultPublishError,
+    build_lane_lock_result_envelope,
+    build_shot_result_envelope,
+    publish_laptop_result,
+)
 from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
 from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetector, LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
@@ -30,6 +35,7 @@ from laptop_receiver.session_state import (
 
 
 PIPELINE_STATE_SCHEMA_VERSION = "live_session_pipeline_state"
+PUBLISH_SKIPPED_ORPHANED_STREAM = "skipped_orphaned_stream"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -118,7 +124,7 @@ class LiveSessionPipeline:
         if not incoming_root.exists():
             return []
 
-        return sorted(
+        session_dirs = sorted(
             [
                 path.resolve()
                 for path in incoming_root.iterdir()
@@ -126,6 +132,7 @@ class LiveSessionPipeline:
             ],
             key=lambda path: path.stat().st_mtime,
         )
+        return session_dirs[-1:] if session_dirs else []
 
     def process_once(self) -> PipelineProcessSummary:
         summary = PipelineProcessSummary()
@@ -159,9 +166,12 @@ class LiveSessionPipeline:
             time.sleep(max(float(self.config.poll_interval_seconds), 0.05))
 
     def _process_session_dir(self, session_dir: Path, summary: PipelineProcessSummary) -> None:
+        state = self._load_session_state(session_dir)
+        if bool(state.get("orphanedLiveStream")):
+            return
+
         envelopes = _load_jsonl(session_dir / "lane_lock_requests.jsonl")
         if envelopes:
-            state = self._load_session_state(session_dir)
             processed_requests = state.setdefault("processedLaneLockRequests", {})
 
             for envelope in envelopes:
@@ -180,9 +190,14 @@ class LiveSessionPipeline:
                     summary.lane_lock_requests_skipped += 1
                     continue
 
-                self._process_lane_lock_request(session_dir, request_id, processed_requests)
+                publish_status = self._process_lane_lock_request(session_dir, request_id, processed_requests)
                 summary.lane_lock_requests_processed += 1
+                if publish_status == PUBLISH_SKIPPED_ORPHANED_STREAM:
+                    state["orphanedLiveStream"] = True
+                    state["orphanedUnixMs"] = _now_unix_ms()
                 self._save_session_state(session_dir, state)
+                if bool(state.get("orphanedLiveStream")):
+                    return
 
         if self._shot_boundary_detector is not None:
             detector_result = self._shot_boundary_detector.process_session_dir(session_dir)
@@ -231,16 +246,21 @@ class LiveSessionPipeline:
                     completedWindowCount=len(shot_boundaries.completed_windows),
                     lastReason=window.end.reason,
                 )
-                self._process_shot_window(session_dir, window, processed_windows)
+                publish_status = self._process_shot_window(session_dir, window, processed_windows)
                 summary.completed_shot_windows_processed += 1
+                if publish_status == PUBLISH_SKIPPED_ORPHANED_STREAM:
+                    state["orphanedLiveStream"] = True
+                    state["orphanedUnixMs"] = _now_unix_ms()
                 self._save_session_state(session_dir, state)
+                if bool(state.get("orphanedLiveStream")):
+                    return
 
     def _process_lane_lock_request(
         self,
         session_dir: Path,
         request_id: str,
         processed_requests: dict[str, Any],
-    ) -> None:
+    ) -> str:
         mark_lane(
             session_dir,
             LANE_SOLVING,
@@ -251,22 +271,21 @@ class LiveSessionPipeline:
         lane_result = stage_output.solve_output.result
 
         published = False
+        publish_status = "not_configured"
+        publish_error = ""
         if self.config.publish_result_host:
             envelope = build_lane_lock_result_envelope(
                 result=lane_result,
                 shot_id=stage_output.shot_id,
             )
-            publish_laptop_result(
-                envelope,
-                host=str(self.config.publish_result_host),
-                port=int(self.config.publish_result_port),
-            )
-            published = True
+            published, publish_status, publish_error = self._publish_laptop_result(envelope)
 
         processed_requests[request_id] = {
             "status": "processed",
             "processedUnixMs": _now_unix_ms(),
             "published": bool(published),
+            "publishStatus": publish_status,
+            "publishError": publish_error,
             "resultPath": str(stage_output.result_path),
             "previewPath": str(stage_output.preview_path),
             "confidence": float(lane_result.confidence),
@@ -290,13 +309,14 @@ class LiveSessionPipeline:
                 candidateResultPath=str(stage_output.result_path),
                 lastFailureReason=str(lane_result.failure_reason),
             )
+        return publish_status
 
     def _process_shot_window(
         self,
         session_dir: Path,
         window: Any,
         processed_windows: dict[str, Any],
-    ) -> None:
+    ) -> str:
         if self.config.shot_tracking_config is None:
             raise RuntimeError("Shot tracking config is required to process shot windows.")
 
@@ -318,19 +338,18 @@ class LiveSessionPipeline:
         )
         sam2_result = stage_output.sam2_result
         published = False
+        publish_status = "not_configured"
+        publish_error = ""
         if self.config.publish_result_host:
             envelope = build_shot_result_envelope(result=stage_output.shot_result)
-            publish_laptop_result(
-                envelope,
-                host=str(self.config.publish_result_host),
-                port=int(self.config.publish_result_port),
-            )
-            published = True
+            published, publish_status, publish_error = self._publish_laptop_result(envelope)
 
         processed_windows[window.window_id] = {
             "status": "processed",
             "processedUnixMs": _now_unix_ms(),
             "published": bool(published),
+            "publishStatus": publish_status,
+            "publishError": publish_error,
             "resultPath": str(stage_output.result_path),
             "shotResultSuccess": bool(stage_output.shot_result.success),
             "shotResultFailureReason": str(stage_output.shot_result.failure_reason),
@@ -351,13 +370,27 @@ class LiveSessionPipeline:
             lastFailureReason=str(stage_output.shot_result.failure_reason),
             lastReason="shot_result_ready" if stage_output.shot_result.success else "shot_result_failed",
         )
+        return publish_status
+
+    def _publish_laptop_result(self, envelope: dict[str, Any]) -> tuple[bool, str, str]:
+        try:
+            publish_laptop_result(
+                envelope,
+                host=str(self.config.publish_result_host),
+                port=int(self.config.publish_result_port),
+            )
+        except LaptopResultPublishError as exc:
+            if exc.error_code == "unknown_active_stream":
+                return False, PUBLISH_SKIPPED_ORPHANED_STREAM, str(exc)
+            raise
+        return True, "published", ""
 
     def _mark_shot_from_detector_result(self, session_dir: Path, detector_result: Any) -> None:
         lane_lock_request_id = str(getattr(detector_result, "confirmed_lane_lock_request_id", "") or "")
         detector_mode = str(getattr(detector_result, "detector_mode", "") or "")
         reason = str(getattr(detector_result, "reason", "") or "")
 
-        if reason == "lane_lock_confirm_missing":
+        if reason == "lane_lock_confirm_missing" and not lane_lock_request_id:
             mark_shot(
                 session_dir,
                 SHOT_DISABLED_UNTIL_LANE_CONFIRMED,

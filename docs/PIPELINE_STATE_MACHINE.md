@@ -155,6 +155,20 @@ Current transition triggers:
 - local analysis publishes result envelopes to `127.0.0.1:8770`
 - result hub appends to `outbound_results.jsonl` and broadcasts to Quest clients
 
+Live session identity invariant:
+
+- there is one live session per Quest app run
+- closing/killing/reopening the Quest app creates a new `session_id`
+- live runs should first disable proximity sleep with `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`
+- after that preflight, briefly removing the headset should not pause the app
+- `session_id` identifies the current Quest calibration/session epoch
+- `shot_id` stays `session-stream` for the continuous live feed
+- `frameSeq` must be monotonic inside one `(session_id, shot_id)` stream and must not reset on brief pause/resume
+- if the app pauses anyway, is killed, the camera/encoder is rebuilt from zero, or Quest relocalizes the tracking origin, lane lock must be treated as invalid and the user must relock
+- media and metadata `session_start` messages for the same `(session_id, shot_id)` must land in the same directory
+- old stream artifacts stay on disk for debugging; they are not reused after a true app/session restart
+- the live pipeline processes only the latest live stream by default; older streams require an explicit `--session-dir`
+
 Current problems:
 
 - session readiness is inferred from files, not an explicit session state

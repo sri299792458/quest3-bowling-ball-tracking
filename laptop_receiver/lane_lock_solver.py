@@ -7,8 +7,6 @@ import cv2
 import numpy as np
 
 from laptop_receiver.lane_geometry import (
-    camera_ray_to_world_ray,
-    image_point_to_camera_ray,
     normalize_vector,
     rotate_vector,
     vector3_to_numpy,
@@ -32,9 +30,11 @@ from laptop_receiver.lane_lock_types import (
 
 @dataclass(frozen=True)
 class FoulLineLaneLockGeometry:
-    selection_frame_seq: int
-    left_foul_line_point_px: Vector2
-    right_foul_line_point_px: Vector2
+    anchor_frame_seq: int
+    left_selection_frame_seq: int
+    right_selection_frame_seq: int
+    left_foul_line_point_px: Vector2 | None
+    right_foul_line_point_px: Vector2 | None
     left_foul_line_world: Vector3
     right_foul_line_world: Vector3
     lane_origin_world: Vector3
@@ -48,9 +48,15 @@ class FoulLineLaneLockGeometry:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "selectionFrameSeq": self.selection_frame_seq,
-            "leftFoulLinePointPx": self.left_foul_line_point_px.to_dict(),
-            "rightFoulLinePointPx": self.right_foul_line_point_px.to_dict(),
+            "anchorFrameSeq": self.anchor_frame_seq,
+            "leftSelectionFrameSeq": self.left_selection_frame_seq,
+            "rightSelectionFrameSeq": self.right_selection_frame_seq,
+            "leftFoulLinePointPx": self.left_foul_line_point_px.to_dict()
+            if self.left_foul_line_point_px is not None
+            else None,
+            "rightFoulLinePointPx": self.right_foul_line_point_px.to_dict()
+            if self.right_foul_line_point_px is not None
+            else None,
             "leftFoulLineWorld": self.left_foul_line_world.to_dict(),
             "rightFoulLineWorld": self.right_foul_line_world.to_dict(),
             "laneOriginWorld": self.lane_origin_world.to_dict(),
@@ -84,15 +90,6 @@ class LaneLockSolveOutput:
         }
 
 
-def _normalized_point_to_pixel(point_norm: Vector2, width: int, height: int, field_name: str) -> Vector2:
-    if not (0.0 <= float(point_norm.x) <= 1.0 and 0.0 <= float(point_norm.y) <= 1.0):
-        raise RuntimeError(f"{field_name} must be normalized into [0, 1].")
-    return Vector2(
-        x=float(point_norm.x) * float(max(int(width) - 1, 1)),
-        y=float(point_norm.y) * float(max(int(height) - 1, 1)),
-    )
-
-
 def _vector3_from_numpy(values: np.ndarray) -> Vector3:
     return Vector3(x=float(values[0]), y=float(values[1]), z=float(values[2]))
 
@@ -118,6 +115,13 @@ def _project_direction_onto_plane(direction_world: np.ndarray, plane_normal_worl
     normal = normalize_vector(np.asarray(plane_normal_world, dtype=np.float64))
     projected = direction - float(np.dot(direction, normal)) * normal
     return normalize_vector(projected)
+
+
+def _project_point_onto_plane(point_world: np.ndarray, plane_point_world: np.ndarray, plane_normal_world: np.ndarray) -> np.ndarray:
+    point = np.asarray(point_world, dtype=np.float64)
+    plane_point = np.asarray(plane_point_world, dtype=np.float64)
+    normal = normalize_vector(np.asarray(plane_normal_world, dtype=np.float64))
+    return point - float(np.dot(point - plane_point, normal)) * normal
 
 
 def _quaternion_from_rotation_matrix(rotation_matrix: np.ndarray) -> Quaternion:
@@ -166,66 +170,47 @@ def _build_lane_rotation(right_axis_world: np.ndarray, floor_normal_world: np.nd
 def _solve_foul_line_geometry(
     request: LaneLockRequest,
     intrinsics: CameraIntrinsics,
-    selection_frame: FrameCameraState,
+    anchor_frame: FrameCameraState,
 ) -> FoulLineLaneLockGeometry:
     if float(request.lane_width_meters) <= 0.0 or float(request.lane_length_meters) <= 0.0:
         raise RuntimeError("Lane dimensions must be positive.")
-    if float(request.left_foul_line_point_norm.x) >= float(request.right_foul_line_point_norm.x):
-        raise RuntimeError("leftFoulLinePointNorm must be left of rightFoulLinePointNorm in image space.")
-
-    width = int(selection_frame.width or intrinsics.width or request.image_width)
-    height = int(selection_frame.height or intrinsics.height or request.image_height)
-    left_px = _normalized_point_to_pixel(request.left_foul_line_point_norm, width, height, "leftFoulLinePointNorm")
-    right_px = _normalized_point_to_pixel(request.right_foul_line_point_norm, width, height, "rightFoulLinePointNorm")
 
     floor_normal = normalize_vector(vector3_to_numpy(request.floor_plane_normal_world))
-    left_camera_ray = image_point_to_camera_ray(left_px, intrinsics)
-    right_camera_ray = image_point_to_camera_ray(right_px, intrinsics)
-    ray_origin, left_world_ray = camera_ray_to_world_ray(left_camera_ray, selection_frame.camera_pose_world)
-    _, right_world_ray = camera_ray_to_world_ray(right_camera_ray, selection_frame.camera_pose_world)
-
-    left_denom = float(np.dot(floor_normal, left_world_ray))
-    right_denom = float(np.dot(floor_normal, right_world_ray))
-    if abs(left_denom) <= 1e-8 or abs(right_denom) <= 1e-8:
-        raise RuntimeError("One selected foul-line ray is nearly parallel to the floor plane.")
-
-    scale_vector = (right_world_ray / right_denom) - (left_world_ray / left_denom)
-    scale_norm = float(np.linalg.norm(scale_vector))
-    if scale_norm <= 1e-8:
-        raise RuntimeError("Selected foul-line rays do not form a stable lane-width solve.")
-
-    lane_width = float(request.lane_width_meters)
-    viable_alphas: list[float] = []
-    for alpha in (lane_width / scale_norm, -lane_width / scale_norm):
-        left_t = float(alpha / left_denom)
-        right_t = float(alpha / right_denom)
-        if left_t > 0.0 and right_t > 0.0 and alpha < 0.0:
-            viable_alphas.append(float(alpha))
-
-    if not viable_alphas:
-        raise RuntimeError("Foul-line width solve did not produce a lane plane below the camera.")
-
-    alpha = sorted(viable_alphas, key=abs)[0]
-    left_world = ray_origin + (alpha / left_denom) * left_world_ray
-    right_world = ray_origin + (alpha / right_denom) * right_world_ray
-    inferred_plane_point_world = ray_origin + alpha * floor_normal
+    floor_point = vector3_to_numpy(request.floor_plane_point_world)
+    left_world = _project_point_onto_plane(
+        vector3_to_numpy(request.left_foul_line_point_world),
+        floor_point,
+        floor_normal,
+    )
+    right_world = _project_point_onto_plane(
+        vector3_to_numpy(request.right_foul_line_point_world),
+        floor_point,
+        floor_normal,
+    )
 
     selected_width = right_world - left_world
     selected_width_on_plane = selected_width - float(np.dot(selected_width, floor_normal)) * floor_normal
+    selected_width_meters = float(np.linalg.norm(selected_width_on_plane))
+    if selected_width_meters <= 1e-6:
+        raise RuntimeError("Selected foul-line world points are too close together.")
     right_axis = normalize_vector(selected_width_on_plane)
 
-    camera_forward = _project_direction_onto_plane(_rotation_forward_world(selection_frame, "camera"), floor_normal)
-    head_forward = _project_direction_onto_plane(_rotation_forward_world(selection_frame, "head"), floor_normal)
+    camera_forward = _project_direction_onto_plane(_rotation_forward_world(anchor_frame, "camera"), floor_normal)
+    head_forward = _project_direction_onto_plane(_rotation_forward_world(anchor_frame, "head"), floor_normal)
     forward_axis = normalize_vector(np.cross(right_axis, floor_normal))
     if float(np.dot(forward_axis, head_forward)) < 0.0 and float(np.dot(forward_axis, camera_forward)) < 0.0:
         forward_axis = -forward_axis
     right_axis = normalize_vector(np.cross(floor_normal, forward_axis))
 
     lane_origin = 0.5 * (left_world + right_world)
-    lane_width_residual = abs(float(np.linalg.norm(right_world - left_world)) - lane_width)
+    lane_width_residual = abs(selected_width_meters - float(request.lane_width_meters))
+    left_px = world_point_to_image_point(left_world, intrinsics, anchor_frame.camera_pose_world)
+    right_px = world_point_to_image_point(right_world, intrinsics, anchor_frame.camera_pose_world)
 
     return FoulLineLaneLockGeometry(
-        selection_frame_seq=int(selection_frame.frame_seq),
+        anchor_frame_seq=int(anchor_frame.frame_seq),
+        left_selection_frame_seq=int(request.left_selection_frame_seq),
+        right_selection_frame_seq=int(request.right_selection_frame_seq),
         left_foul_line_point_px=left_px,
         right_foul_line_point_px=right_px,
         left_foul_line_world=_vector3_from_numpy(left_world),
@@ -234,7 +219,7 @@ def _solve_foul_line_geometry(
         right_axis_world=_vector3_from_numpy(right_axis),
         forward_axis_world=_vector3_from_numpy(forward_axis),
         floor_normal_world=_vector3_from_numpy(floor_normal),
-        inferred_plane_point_world=_vector3_from_numpy(inferred_plane_point_world),
+        inferred_plane_point_world=_vector3_from_numpy(floor_point),
         lane_width_residual_meters=lane_width_residual,
         camera_forward_alignment=float(np.dot(forward_axis, camera_forward)),
         head_forward_alignment=float(np.dot(forward_axis, head_forward)),
@@ -386,7 +371,7 @@ def _compute_reprojection_metrics(
     )
 
 
-def solve_lane_lock_from_image(
+def solve_lane_lock_from_world_points(
     request: LaneLockRequest,
     intrinsics: CameraIntrinsics,
     frame_states: Sequence[FrameCameraState],
@@ -395,7 +380,7 @@ def solve_lane_lock_from_image(
     if not frame_states:
         raise RuntimeError("Lane lock requires frame metadata.")
 
-    selection_frame = _select_frame_state(frame_states, int(request.selection_frame_seq))
+    selection_frame = _select_frame_state(frame_states, int(request.anchor_frame_seq))
     geometry = _solve_foul_line_geometry(request, intrinsics, selection_frame)
     support_segments = list(support_segments_by_frame.get(int(selection_frame.frame_seq), []))
     left_polyline, right_polyline, foul_line_polyline = _project_lane_polylines(

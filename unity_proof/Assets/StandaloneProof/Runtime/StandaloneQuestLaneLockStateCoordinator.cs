@@ -677,7 +677,7 @@ namespace QuestBowlingStandalone.QuestApp
                 || note.StartsWith("ray_parallel_to_floor", StringComparison.Ordinal)
                 || note.StartsWith("selection_frame_metadata_missing", StringComparison.Ordinal)
                 || note.StartsWith("floor_plane_unavailable:", StringComparison.Ordinal)
-                || note.StartsWith("foul_line_selection_order_invalid", StringComparison.Ordinal);
+                || note.StartsWith("foul_line_selection_points_too_close", StringComparison.Ordinal);
         }
 
         private static string NormalizeSelectionFailureNote(string note)
@@ -723,19 +723,13 @@ namespace QuestBowlingStandalone.QuestApp
                 return "Select Foul Line";
             }
 
-            if (note.StartsWith("floor_hit_outside_camera_image", StringComparison.Ordinal))
-            {
-                return "Aim In View";
-            }
-
             if (note.StartsWith("floor_hit_too_far", StringComparison.Ordinal))
             {
                 return "Aim Closer";
             }
 
             if (note.StartsWith("ray_parallel_to_floor", StringComparison.Ordinal)
-                || note.StartsWith("floor_hit_behind_ray", StringComparison.Ordinal)
-                || note.StartsWith("floor_hit_not_visible_to_camera", StringComparison.Ordinal))
+                || note.StartsWith("floor_hit_behind_ray", StringComparison.Ordinal))
             {
                 return "Aim At Floor";
             }
@@ -785,9 +779,9 @@ namespace QuestBowlingStandalone.QuestApp
                 return "No Lane";
             }
 
-            if (note.StartsWith("foul_line_selection_order_invalid", StringComparison.Ordinal))
+            if (note.StartsWith("foul_line_selection_points_too_close", StringComparison.Ordinal))
             {
-                return "Right Edge Again";
+                return "Wider Points";
             }
 
             return failedText;

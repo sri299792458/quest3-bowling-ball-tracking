@@ -11,7 +11,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Transform visualizationRoot;
 
         [Header("Lane Shape")]
-        [SerializeField] private bool renderVisibleDownlaneOnly = true;
+        [SerializeField] private bool renderVisibleDownlaneOnly = false;
         [SerializeField] private bool renderSurface = true;
         [SerializeField] private bool clearOnFailedLaneResult = true;
         [SerializeField] private float verticalOffsetMeters = 0.025f;

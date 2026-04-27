@@ -157,6 +157,9 @@ class LiveShotBoundaryDetector:
                 confirmed_lane_lock_request_id="",
             )
 
+        if state.get("lastReason") == "lane_lock_confirm_missing":
+            state["lastReason"] = "lane_lock_confirmed_waiting_for_ball"
+
         shot_boundaries = load_shot_boundaries(root)
         if shot_boundaries.errors:
             raise RuntimeError(
@@ -275,10 +278,15 @@ class LiveShotBoundaryDetector:
             if frame_seq < _int(state.get("cooldownUntilFrameSeq"), -1):
                 state["lastReason"] = "shot_cooldown"
                 return []
-            if candidate is not None and self._is_release_candidate(candidate, lane_lock):
+            if candidate is None:
+                state["lastReason"] = "no_yolo_candidate"
+                return []
+            if self._is_release_candidate(candidate, lane_lock):
                 state["mode"] = "pending"
                 state["pendingCandidate"] = candidate.to_dict()
                 state["lastReason"] = "pending_release_candidate"
+            else:
+                state["lastReason"] = "yolo_candidate_not_release"
             return []
 
         if mode == "pending":

@@ -180,9 +180,10 @@ class LaneLockRequest:
     frame_seq_end: int
     frame_count: int
     capture_duration_seconds: float
-    selection_frame_seq: int
-    left_foul_line_point_norm: Vector2
-    right_foul_line_point_norm: Vector2
+    left_selection_frame_seq: int
+    right_selection_frame_seq: int
+    left_foul_line_point_world: Vector3
+    right_foul_line_point_world: Vector3
     lane_width_meters: float
     lane_length_meters: float
     fx: float
@@ -200,12 +201,12 @@ class LaneLockRequest:
         schema_version = _str(payload.get("schemaVersion"))
         if schema_version != "lane_lock_request":
             raise ValueError(f"Unsupported lane-lock request schemaVersion {schema_version!r}.")
-        if "leftFoulLinePointNorm" not in payload or "rightFoulLinePointNorm" not in payload:
+        if "leftFoulLinePointWorld" not in payload or "rightFoulLinePointWorld" not in payload:
             raise ValueError(
-                "lane_lock_request requires leftFoulLinePointNorm and rightFoulLinePointNorm."
+                "lane_lock_request requires leftFoulLinePointWorld and rightFoulLinePointWorld."
             )
-        if "selectionFrameSeq" not in payload:
-            raise ValueError("lane_lock_request requires selectionFrameSeq.")
+        if "leftSelectionFrameSeq" not in payload or "rightSelectionFrameSeq" not in payload:
+            raise ValueError("lane_lock_request requires leftSelectionFrameSeq and rightSelectionFrameSeq.")
 
         return cls(
             schema_version=schema_version,
@@ -215,9 +216,10 @@ class LaneLockRequest:
             frame_seq_end=_int(payload.get("frameSeqEnd")),
             frame_count=_int(payload.get("frameCount")),
             capture_duration_seconds=_float(payload.get("captureDurationSeconds")),
-            selection_frame_seq=_int(payload.get("selectionFrameSeq")),
-            left_foul_line_point_norm=Vector2.from_mapping(payload.get("leftFoulLinePointNorm")),
-            right_foul_line_point_norm=Vector2.from_mapping(payload.get("rightFoulLinePointNorm")),
+            left_selection_frame_seq=_int(payload.get("leftSelectionFrameSeq")),
+            right_selection_frame_seq=_int(payload.get("rightSelectionFrameSeq")),
+            left_foul_line_point_world=Vector3.from_mapping(payload.get("leftFoulLinePointWorld")),
+            right_foul_line_point_world=Vector3.from_mapping(payload.get("rightFoulLinePointWorld")),
             lane_width_meters=_float(payload.get("laneWidthMeters")),
             lane_length_meters=_float(payload.get("laneLengthMeters")),
             fx=_float(payload.get("fx")),
@@ -240,9 +242,10 @@ class LaneLockRequest:
             "frameSeqEnd": self.frame_seq_end,
             "frameCount": self.frame_count,
             "captureDurationSeconds": self.capture_duration_seconds,
-            "selectionFrameSeq": self.selection_frame_seq,
-            "leftFoulLinePointNorm": self.left_foul_line_point_norm.to_dict(),
-            "rightFoulLinePointNorm": self.right_foul_line_point_norm.to_dict(),
+            "leftSelectionFrameSeq": self.left_selection_frame_seq,
+            "rightSelectionFrameSeq": self.right_selection_frame_seq,
+            "leftFoulLinePointWorld": self.left_foul_line_point_world.to_dict(),
+            "rightFoulLinePointWorld": self.right_foul_line_point_world.to_dict(),
             "laneWidthMeters": self.lane_width_meters,
             "laneLengthMeters": self.lane_length_meters,
             "fx": self.fx,
@@ -255,6 +258,10 @@ class LaneLockRequest:
             "floorPlaneNormalWorld": self.floor_plane_normal_world.to_dict(),
             "cameraSide": self.camera_side,
         }
+
+    @property
+    def anchor_frame_seq(self) -> int:
+        return int(self.right_selection_frame_seq or self.left_selection_frame_seq)
 
     def to_camera_intrinsics(self) -> CameraIntrinsics:
         width = int(self.image_width)

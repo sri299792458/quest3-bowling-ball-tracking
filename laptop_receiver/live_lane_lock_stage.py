@@ -30,6 +30,8 @@ def draw_lane_fit_preview(image_bgr: Any, solve_output: Any) -> None:
         (geometry.left_foul_line_point_px, "L", (80, 255, 80)),
         (geometry.right_foul_line_point_px, "R", (255, 180, 80)),
     ):
+        if point is None:
+            continue
         center = (int(round(point.x)), int(round(point.y)))
         cv2.circle(image_bgr, center, 7, color, -1, cv2.LINE_AA)
         cv2.putText(
@@ -67,7 +69,7 @@ def solve_lane_lock_stage_for_live_session(
 
     from laptop_receiver.lane_line_support import extract_lane_support_segments
     from laptop_receiver.lane_lock_live_session import load_live_session_lane_lock_request
-    from laptop_receiver.lane_lock_solver import solve_lane_lock_from_image
+    from laptop_receiver.lane_lock_solver import solve_lane_lock_from_world_points
 
     live_request = load_live_session_lane_lock_request(session_dir, request_id=request_id)
     request = live_request.request
@@ -75,7 +77,7 @@ def solve_lane_lock_stage_for_live_session(
     artifact = live_request.artifact
     intrinsics = request.to_camera_intrinsics()
 
-    requested_anchor_frame_seq = int(request.selection_frame_seq)
+    requested_anchor_frame_seq = int(request.anchor_frame_seq)
     anchor_frame_seq = None
     anchor_frame_image = None
     anchor_frame_index = None
@@ -108,7 +110,7 @@ def solve_lane_lock_stage_for_live_session(
             f"{request.frame_seq_start}..{request.frame_seq_end} from {artifact.video_path}"
         )
 
-    solve_output = solve_lane_lock_from_image(
+    solve_output = solve_lane_lock_from_world_points(
         request=request,
         intrinsics=intrinsics,
         frame_states=frame_states,

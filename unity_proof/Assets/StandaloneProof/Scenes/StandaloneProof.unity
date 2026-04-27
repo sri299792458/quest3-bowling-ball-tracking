@@ -1276,7 +1276,6 @@ MonoBehaviour:
   proofCapture: {fileID: 1545997001}
   floorPlaneSource: {fileID: 1545997009}
   maxFloorHitDistanceMeters: 25
-  minimumCameraDepthMeters: 0.05
   armInputDebounceSeconds: 0.2
   clearPendingPointOnDisable: 1
   verboseLogging: 1
@@ -1317,7 +1316,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer
   liveResultReceiver: {fileID: 1545997011}
   visualizationRoot: {fileID: 0}
-  renderVisibleDownlaneOnly: 1
+  renderVisibleDownlaneOnly: 0
   renderSurface: 1
   clearOnFailedLaneResult: 1
   verticalOffsetMeters: 0.025

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,8 @@ from typing import Any
 
 SESSION_STATE_SCHEMA_VERSION = "quest_bowling_session_state_v1"
 SESSION_STATE_FILENAME = "session_state.json"
+STATE_FILE_RETRY_COUNT = 8
+STATE_FILE_RETRY_DELAY_SECONDS = 0.025
 
 TRANSPORT_OFFLINE = "Offline"
 TRANSPORT_DISCOVERING_LAPTOP = "DiscoveringLaptop"
@@ -123,7 +126,15 @@ def load_session_state(session_dir: Path | str) -> dict[str, Any]:
     if not path.exists():
         return default_session_state(session_dir)
 
-    state = json.loads(path.read_text(encoding="utf-8"))
+    for attempt in range(STATE_FILE_RETRY_COUNT):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            break
+        except PermissionError:
+            if attempt + 1 >= STATE_FILE_RETRY_COUNT:
+                raise
+            _sleep_for_state_file_retry(attempt)
+
     if state.get("schemaVersion") != SESSION_STATE_SCHEMA_VERSION:
         raise RuntimeError(f"Unsupported session_state schemaVersion {state.get('schemaVersion')!r}.")
     _ensure_sections(state)
@@ -135,9 +146,16 @@ def write_session_state(session_dir: Path | str, state: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     state["updatedUnixMs"] = now_unix_ms()
     _ensure_sections(state)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     tmp_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
+    for attempt in range(STATE_FILE_RETRY_COUNT):
+        try:
+            tmp_path.replace(path)
+            return path
+        except PermissionError:
+            if attempt + 1 >= STATE_FILE_RETRY_COUNT:
+                raise
+            _sleep_for_state_file_retry(attempt)
     return path
 
 
@@ -211,6 +229,10 @@ def mark_replay(session_dir: Path | str, state: str, **fields: Any) -> dict[str,
         replay={"state": state, **fields},
         diagnostics={"lastEvent": f"replay:{state}"},
     )
+
+
+def _sleep_for_state_file_retry(attempt: int) -> None:
+    time.sleep(STATE_FILE_RETRY_DELAY_SECONDS * float(attempt + 1))
 
 
 def _ensure_sections(state: dict[str, Any]) -> None:

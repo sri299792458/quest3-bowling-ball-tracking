@@ -804,7 +804,7 @@ namespace QuestBowlingStandalone.Editor
             var serializedObject = new SerializedObject(laneLockResultRenderer);
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("visualizationRoot").objectReferenceValue = null;
-            serializedObject.FindProperty("renderVisibleDownlaneOnly").boolValue = true;
+            serializedObject.FindProperty("renderVisibleDownlaneOnly").boolValue = false;
             serializedObject.FindProperty("renderSurface").boolValue = true;
             serializedObject.FindProperty("clearOnFailedLaneResult").boolValue = true;
             serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.025f;
@@ -908,7 +908,6 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
             serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
             serializedObject.FindProperty("maxFloorHitDistanceMeters").floatValue = 25.0f;
-            serializedObject.FindProperty("minimumCameraDepthMeters").floatValue = 0.05f;
             serializedObject.FindProperty("armInputDebounceSeconds").floatValue = 0.2f;
             serializedObject.FindProperty("clearPendingPointOnDisable").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;

@@ -26,6 +26,12 @@ SUPPORTED_RESULT_KINDS = {
 }
 
 
+class LaptopResultPublishError(RuntimeError):
+    def __init__(self, message: str, error_code: str = "") -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
 def _str(value: Any, default: str = "") -> str:
     if value is None:
         return default
@@ -168,4 +174,7 @@ def publish_laptop_result(
             raise RuntimeError("Result publish endpoint closed without an acknowledgement.")
         response = json.loads(response_line)
         if not bool(response.get("ok")):
-            raise RuntimeError(str(response.get("error") or "result_publish_failed"))
+            raise LaptopResultPublishError(
+                str(response.get("error") or "result_publish_failed"),
+                str(response.get("errorCode") or ""),
+            )

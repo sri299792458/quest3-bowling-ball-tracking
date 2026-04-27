@@ -148,9 +148,10 @@ Expected message kinds for the first slice:
 - `frameSeqEnd`
 - `frameCount`
 - `captureDurationSeconds`
-- `selectionFrameSeq`
-- `leftFoulLinePointNorm`
-- `rightFoulLinePointNorm`
+- `leftSelectionFrameSeq`
+- `rightSelectionFrameSeq`
+- `leftFoulLinePointWorld`
+- `rightFoulLinePointWorld`
 - `laneWidthMeters`
 - `laneLengthMeters`
 - `fx`
@@ -163,7 +164,7 @@ Expected message kinds for the first slice:
 - `floorPlaneNormalWorld`
 - `cameraSide`
 
-The foul-line points are required. They are normalized image coordinates for the user-selected left and right lane edges at the foul line. The receiver must reject a lane-lock request that does not include them.
+The foul-line points are required. They are Quest-world floor intersections for the user-selected left and right lane edges at the foul line.
 
 `shot_boundary` should include:
 

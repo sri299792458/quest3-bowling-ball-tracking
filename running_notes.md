@@ -21,11 +21,10 @@ The goal is to avoid drifting into disconnected experiments.
 - The user-selected contract is:
   - left lane edge at the foul line
   - right lane edge at the foul line
-  - `selectionFrameSeq` for the frame where those two points were selected
-- The solver converts those two selected pixels into world rays using camera intrinsics and camera pose, infers the lane plane offset from known lane width, and builds the lane basis from the selected foul-line segment.
+  - `leftFoulLinePointWorld` and `rightFoulLinePointWorld` from the Quest ray/floor hit selector
+- The solver builds the lane basis directly from the two selected world points and the floor normal. Camera intrinsics are used for preview reprojection and downstream ball tracking, not as the manual calibration source of truth.
 - The old automatic lane identity path, view-center aim fallback, and image-template lane search are no longer part of the active workflow.
 - The old desktop click harness was removed because those points were not physical foul-line endpoints.
-- The live request is invalid unless it contains `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
 - Old annotation/result artifact folders were deleted so they cannot be mistaken for valid foul-line analysis.
 - The live session now has a laptop-to-Quest result channel:
   - Quest connects to `tcp://<laptop>:8769`
@@ -34,7 +33,7 @@ The goal is to avoid drifting into disconnected experiments.
 - Shared Quest ray selection is now started:
   - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs)
   - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs)
-  - lane lock consumes the common world-ray selection stream, intersects it with the floor, projects that floor hit into the current camera frame, then calls `TrySetFoulLineSelection`
+  - lane lock consumes the common world-ray selection stream, intersects it with the floor, and sends those physical world points to the laptop
 - Laptop lane lock is now a reusable live-session stage:
   - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py)
   - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
@@ -245,7 +244,7 @@ The goal is to avoid drifting into disconnected experiments.
 
 1. Keep `unity_proof` as the primary Quest-side testbed and avoid falling back to the old bowling app project for proof runs.
 2. Build and deploy the Unity proof scene so the shared ray selector can be verified on-device.
-3. Verify that a real live session writes `lane_lock_requests.jsonl` with `selectionFrameSeq`, `leftFoulLinePointNorm`, and `rightFoulLinePointNorm`.
+3. Verify that a real live session writes `lane_lock_requests.jsonl` with `leftFoulLinePointWorld` and `rightFoulLinePointWorld`.
 4. Run `run_lane_lock_on_live_session.py` on that landed session, publish the result through `--publish-result-host 127.0.0.1`, and confirm Quest receives it.
 5. Run `run_live_session_pipeline.py` beside `live_stream_receiver.py` and confirm the lane-lock result is processed and returned automatically.
 6. Exercise the new `shot_result` payload and Quest replay renderer on a real live shot window after lane lock is solved.

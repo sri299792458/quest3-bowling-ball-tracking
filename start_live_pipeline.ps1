@@ -37,6 +37,31 @@ function Stop-ExistingLiveProcess {
         }
 }
 
+function Stop-LivePortOwners {
+    $ownerIds = @()
+    $ownerIds += Get-NetTCPConnection -LocalPort 8766,8767,8768,8769,8770 -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess
+    $ownerIds += Get-NetUDPEndpoint -LocalPort 8765 -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess
+
+    foreach ($ownerId in ($ownerIds | Where-Object { $_ -and $_ -gt 0 } | Sort-Object -Unique)) {
+        $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerId" -ErrorAction SilentlyContinue
+        if ($null -eq $process) {
+            continue
+        }
+
+        $commandLine = [string]$process.CommandLine
+        if ($commandLine.Contains("laptop_receiver.live_stream_receiver") -or
+            $commandLine.Contains("laptop_receiver.run_live_session_pipeline")) {
+            Write-Host "Stopping live port owner ${ownerId}: $commandLine"
+            Stop-Process -Id $ownerId -Force
+            continue
+        }
+
+        throw "Live port is already owned by PID ${ownerId}: $commandLine"
+    }
+}
+
 function Wait-ReceiverHealth {
     param(
         [System.Diagnostics.Process]$Process,
@@ -88,6 +113,8 @@ $receiverStdout = Join-Path $logRoot "receiver_$stamp.out.log"
 $receiverStderr = Join-Path $logRoot "receiver_$stamp.err.log"
 
 Stop-ExistingLiveProcess
+Start-Sleep -Milliseconds 300
+Stop-LivePortOwners
 
 Write-Host "Starting live_stream_receiver..."
 $receiver = Start-Process `

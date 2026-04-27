@@ -66,9 +66,10 @@ namespace QuestBowlingStandalone.QuestApp
         public ulong frameSeqEnd;
         public int frameCount;
         public float captureDurationSeconds;
-        public ulong selectionFrameSeq;
-        public Vector2 leftFoulLinePointNorm;
-        public Vector2 rightFoulLinePointNorm;
+        public ulong leftSelectionFrameSeq;
+        public ulong rightSelectionFrameSeq;
+        public Vector3 leftFoulLinePointWorld;
+        public Vector3 rightFoulLinePointWorld;
         public float laneWidthMeters;
         public float laneLengthMeters;
         public float fx;

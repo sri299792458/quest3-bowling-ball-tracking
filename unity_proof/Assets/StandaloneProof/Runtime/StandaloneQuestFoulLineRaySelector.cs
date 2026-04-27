@@ -24,20 +24,23 @@ namespace QuestBowlingStandalone.QuestApp
             StandaloneFoulLineSelectionEventKind kind,
             StandaloneFoulLineSelectionStep step,
             string note,
-            Vector2 pointNorm,
+            Vector3 pointWorld,
+            ulong frameSeq,
             float realtimeSeconds)
         {
             Kind = kind;
             Step = step;
             Note = note ?? string.Empty;
-            PointNorm = pointNorm;
+            PointWorld = pointWorld;
+            FrameSeq = frameSeq;
             RealtimeSeconds = realtimeSeconds;
         }
 
         public StandaloneFoulLineSelectionEventKind Kind { get; }
         public StandaloneFoulLineSelectionStep Step { get; }
         public string Note { get; }
-        public Vector2 PointNorm { get; }
+        public Vector3 PointWorld { get; }
+        public ulong FrameSeq { get; }
         public float RealtimeSeconds { get; }
     }
 
@@ -51,9 +54,8 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
         [SerializeField] private StandaloneQuestFloorPlaneSource floorPlaneSource;
 
-        [Header("Projection")]
+        [Header("Floor Hit")]
         [SerializeField] private float maxFloorHitDistanceMeters = 25.0f;
-        [SerializeField] private float minimumCameraDepthMeters = 0.05f;
         [SerializeField] private float armInputDebounceSeconds = 0.2f;
         [SerializeField] private bool clearPendingPointOnDisable = true;
 
@@ -62,7 +64,8 @@ namespace QuestBowlingStandalone.QuestApp
 
         private bool _selectionActive;
         private bool _hasPendingLeftPoint;
-        private Vector2 _pendingLeftPointNorm;
+        private Vector3 _pendingLeftPointWorld;
+        private ulong _pendingLeftFrameSeq;
         private float _ignoreSelectionsUntilRealtime;
 
         public string LastStatus { get; private set; } = string.Empty;
@@ -85,7 +88,8 @@ namespace QuestBowlingStandalone.QuestApp
         public void ClearPendingSelection()
         {
             _hasPendingLeftPoint = false;
-            _pendingLeftPointNorm = Vector2.zero;
+            _pendingLeftPointWorld = Vector3.zero;
+            _pendingLeftFrameSeq = 0UL;
         }
 
         public void BeginFoulLineSelection()
@@ -99,7 +103,8 @@ namespace QuestBowlingStandalone.QuestApp
                 StandaloneFoulLineSelectionEventKind.Started,
                 StandaloneFoulLineSelectionStep.Left,
                 "select_left_foul_line_point",
-                Vector2.zero);
+                Vector3.zero,
+                0UL);
         }
 
         public void CancelFoulLineSelection()
@@ -111,7 +116,8 @@ namespace QuestBowlingStandalone.QuestApp
                 StandaloneFoulLineSelectionEventKind.Cancelled,
                 StandaloneFoulLineSelectionStep.Left,
                 "foul_line_selection_cancelled",
-                Vector2.zero);
+                Vector3.zero,
+                0UL);
         }
 
         private void Subscribe()
@@ -148,7 +154,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             var selectingRightPoint = _hasPendingLeftPoint;
-            if (!TryMapSelectionToImagePoint(selection, out var pointNorm, out var note))
+            if (!TryMapSelectionToWorldPoint(selection, out var pointWorld, out var frameSeq, out var note))
             {
                 var step = selectingRightPoint
                     ? StandaloneFoulLineSelectionStep.Right
@@ -167,13 +173,15 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneFoulLineSelectionEventKind.PointRejected,
                     step,
                     note,
-                    Vector2.zero);
+                    Vector3.zero,
+                    0UL);
                 return;
             }
 
             if (!_hasPendingLeftPoint)
             {
-                _pendingLeftPointNorm = pointNorm;
+                _pendingLeftPointWorld = pointWorld;
+                _pendingLeftFrameSeq = frameSeq;
                 _hasPendingLeftPoint = true;
                 laneLockCapture?.ClearFoulLineSelection();
                 SetStatus("left_foul_line_point_selected");
@@ -181,7 +189,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneFoulLineSelectionEventKind.PointAccepted,
                     StandaloneFoulLineSelectionStep.Left,
                     "left_foul_line_point_selected",
-                    pointNorm);
+                    pointWorld,
+                    frameSeq);
                 return;
             }
 
@@ -193,11 +202,17 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneFoulLineSelectionEventKind.PointRejected,
                     StandaloneFoulLineSelectionStep.Right,
                     "lane_lock_capture_missing",
-                    Vector2.zero);
+                    Vector3.zero,
+                    0UL);
                 return;
             }
 
-            var accepted = laneLockCapture.TrySetFoulLineSelection(_pendingLeftPointNorm, pointNorm, out note);
+            var accepted = laneLockCapture.TrySetFoulLineSelection(
+                _pendingLeftPointWorld,
+                _pendingLeftFrameSeq,
+                pointWorld,
+                frameSeq,
+                out note);
             if (accepted)
             {
                 _selectionActive = false;
@@ -207,7 +222,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneFoulLineSelectionEventKind.Completed,
                     StandaloneFoulLineSelectionStep.Right,
                     "foul_line_selection_ready",
-                    pointNorm);
+                    pointWorld,
+                    frameSeq);
                 return;
             }
 
@@ -216,16 +232,19 @@ namespace QuestBowlingStandalone.QuestApp
                 StandaloneFoulLineSelectionEventKind.PointRejected,
                 StandaloneFoulLineSelectionStep.Right,
                 note,
-                Vector2.zero);
+                Vector3.zero,
+                0UL);
         }
 
-        private bool TryMapSelectionToImagePoint(
+        private bool TryMapSelectionToWorldPoint(
             StandaloneQuestRaySelection selection,
-            out Vector2 pointNorm,
+            out Vector3 pointWorld,
+            out ulong frameSeq,
             out string note)
         {
-            pointNorm = Vector2.zero;
-            note = "foul_line_projection_failed";
+            pointWorld = Vector3.zero;
+            frameSeq = 0UL;
+            note = "foul_line_selection_failed";
 
             if (proofCapture == null)
             {
@@ -240,12 +259,12 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             var frameMetadata = proofCapture.LastCommittedFrameMetadata;
-            var sessionMetadata = proofCapture.CurrentSessionMetadata;
-            if (frameMetadata == null || sessionMetadata == null)
+            if (frameMetadata == null)
             {
                 note = "selection_frame_metadata_missing";
                 return false;
             }
+            frameSeq = frameMetadata.frameSeq;
 
             if (!floorPlaneSource.TryGetFloorPlane(out var planePointWorld, out var planeNormalWorld, out var floorNote))
             {
@@ -258,7 +277,9 @@ namespace QuestBowlingStandalone.QuestApp
                 return false;
             }
 
-            return TryProjectWorldPointToImage(hitWorld, frameMetadata, sessionMetadata, out pointNorm, out note);
+            pointWorld = hitWorld;
+            note = "foul_line_world_point_ready";
+            return true;
         }
 
         private bool TryIntersectFloor(
@@ -300,50 +321,6 @@ namespace QuestBowlingStandalone.QuestApp
             return true;
         }
 
-        private bool TryProjectWorldPointToImage(
-            Vector3 worldPoint,
-            StandaloneFrameMetadata frameMetadata,
-            StandaloneSessionMetadata sessionMetadata,
-            out Vector2 pointNorm,
-            out string note)
-        {
-            pointNorm = Vector2.zero;
-            note = "image_projection_failed";
-
-            var width = frameMetadata.width > 0
-                ? frameMetadata.width
-                : (sessionMetadata.actualWidth > 0 ? sessionMetadata.actualWidth : sessionMetadata.requestedWidth);
-            var height = frameMetadata.height > 0
-                ? frameMetadata.height
-                : (sessionMetadata.actualHeight > 0 ? sessionMetadata.actualHeight : sessionMetadata.requestedHeight);
-
-            if (width <= 0 || height <= 0 || sessionMetadata.fx <= 0.0f || sessionMetadata.fy <= 0.0f)
-            {
-                note = "camera_intrinsics_missing";
-                return false;
-            }
-
-            var cameraPoint = Quaternion.Inverse(frameMetadata.cameraRotation) * (worldPoint - frameMetadata.cameraPosition);
-            if (!IsFinite(cameraPoint) || cameraPoint.z <= Mathf.Max(0.001f, minimumCameraDepthMeters))
-            {
-                note = "floor_hit_not_visible_to_camera";
-                return false;
-            }
-
-            var pixelX = sessionMetadata.fx * (cameraPoint.x / cameraPoint.z) + sessionMetadata.cx;
-            var pixelY = sessionMetadata.cy - sessionMetadata.fy * (cameraPoint.y / cameraPoint.z);
-            pointNorm = new Vector2(pixelX / width, pixelY / height);
-
-            if (!IsNormalizedPoint(pointNorm))
-            {
-                note = "floor_hit_outside_camera_image";
-                return false;
-            }
-
-            note = "image_point_ready";
-            return true;
-        }
-
         private void SetStatus(string status)
         {
             LastStatus = status ?? string.Empty;
@@ -354,38 +331,16 @@ namespace QuestBowlingStandalone.QuestApp
             StandaloneFoulLineSelectionEventKind kind,
             StandaloneFoulLineSelectionStep step,
             string note,
-            Vector2 pointNorm)
+            Vector3 pointWorld,
+            ulong frameSeq)
         {
             SelectionEvent?.Invoke(new StandaloneFoulLineSelectionEvent(
                 kind,
                 step,
                 note,
-                pointNorm,
+                pointWorld,
+                frameSeq,
                 Time.realtimeSinceStartup));
-        }
-
-        private static bool IsNormalizedPoint(Vector2 point)
-        {
-            return IsFinite(point)
-                && point.x >= 0.0f
-                && point.x <= 1.0f
-                && point.y >= 0.0f
-                && point.y <= 1.0f;
-        }
-
-        private static bool IsFinite(Vector2 value)
-        {
-            return IsFinite(value.x) && IsFinite(value.y);
-        }
-
-        private static bool IsFinite(Vector3 value)
-        {
-            return IsFinite(value.x) && IsFinite(value.y) && IsFinite(value.z);
-        }
-
-        private static bool IsFinite(float value)
-        {
-            return !float.IsNaN(value) && !float.IsInfinity(value);
         }
 
         private void DebugLog(string message)

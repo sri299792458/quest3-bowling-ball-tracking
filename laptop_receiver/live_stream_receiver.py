@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import socket
 import struct
+import time
 from typing import Any
 
 from laptop_receiver.laptop_result_types import validate_laptop_result_envelope
@@ -503,7 +504,31 @@ class LiveStreamRegistry:
         if existing is not None:
             return existing
 
-        root_dir = self.incoming_root / f"live_{_sanitize_file_part(session_id)}_{_sanitize_file_part(shot_id)}"
+        return self._create_session(session_id, shot_id)
+
+    def start_metadata_session(self, session_id: str, shot_id: str) -> LiveStreamSession:
+        key = (session_id, shot_id)
+        existing = self.sessions.get(key)
+        if existing is None:
+            return self._create_session(session_id, shot_id)
+        if existing.session_ended_payload is not None:
+            existing.close()
+            return self._create_session(session_id, shot_id)
+        return existing
+
+    def start_media_session(self, session_id: str, shot_id: str) -> LiveStreamSession:
+        key = (session_id, shot_id)
+        existing = self.sessions.get(key)
+        if existing is None:
+            return self._create_session(session_id, shot_id)
+        if existing.sample_count > 0 or existing.session_ended_payload is not None:
+            existing.close()
+            return self._create_session(session_id, shot_id)
+        return existing
+
+    def _create_session(self, session_id: str, shot_id: str) -> LiveStreamSession:
+        key = (session_id, shot_id)
+        root_dir = self._next_root_dir(session_id, shot_id)
         session = LiveStreamSession(
             session_id=session_id,
             shot_id=shot_id,
@@ -530,6 +555,21 @@ class LiveStreamRegistry:
         session.persist_receipt()
         self.sessions[key] = session
         return session
+
+    def _next_root_dir(self, session_id: str, shot_id: str) -> Path:
+        base = self.incoming_root / f"live_{_sanitize_file_part(session_id)}_{_sanitize_file_part(shot_id)}"
+        if not base.exists():
+            return base
+
+        for attempt in range(1000):
+            suffix = int(time.time() * 1000) + attempt
+            candidate = self.incoming_root / (
+                f"live_{_sanitize_file_part(session_id)}_{_sanitize_file_part(shot_id)}_{suffix}"
+            )
+            if not candidate.exists():
+                return candidate
+
+        raise RuntimeError("Could not allocate a unique live stream directory.")
 
     def get_existing(self, session_id: str, shot_id: str) -> LiveStreamSession | None:
         return self.sessions.get((session_id, shot_id))
@@ -576,14 +616,26 @@ class LiveResultHub:
                     envelope = validate_laptop_result_envelope(payload)
                     session = self.registry.get_existing(envelope.session_id, envelope.shot_id)
                     if session is None:
-                        raise RuntimeError(
-                            f"Unknown active stream session_id={envelope.session_id!r} shot_id={envelope.shot_id!r}."
-                        )
+                        response = {
+                            "ok": False,
+                            "errorCode": "unknown_active_stream",
+                            "error": (
+                                f"Unknown active stream session_id={envelope.session_id!r} "
+                                f"shot_id={envelope.shot_id!r}."
+                            ),
+                        }
+                        writer.write((json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8"))
+                        await writer.drain()
+                        continue
                     session.append_outbound_result(dict(payload))
                     await self.broadcast(dict(payload))
                     response = {"ok": True, "kind": envelope.kind, "message_id": envelope.message_id}
                 except Exception as exc:
-                    response = {"ok": False, "error": exc.__class__.__name__ + ": " + str(exc)}
+                    response = {
+                        "ok": False,
+                        "errorCode": "result_publish_failed",
+                        "error": exc.__class__.__name__ + ": " + str(exc),
+                    }
                 writer.write((json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8"))
                 await writer.drain()
         finally:
@@ -640,7 +692,7 @@ async def _handle_media_connection(
                 session_payload = json.loads(payload.decode("utf-8"))
                 session_id = str(session_payload["session_id"])
                 shot_id = str(session_payload["shot_id"])
-                active_session = registry.get_or_create(session_id, shot_id)
+                active_session = registry.start_media_session(session_id, shot_id)
                 active_session.write_session_start(session_payload)
                 continue
 
@@ -695,9 +747,12 @@ async def _handle_metadata_connection(
             payload = json.loads(stripped)
             session_id = str(payload["session_id"])
             shot_id = str(payload["shot_id"])
-            session = registry.get_or_create(session_id, shot_id)
-            session.append_metadata_message(payload)
             kind = str(payload.get("kind") or "")
+            if kind == "session_start":
+                session = registry.start_metadata_session(session_id, shot_id)
+            else:
+                session = registry.get_or_create(session_id, shot_id)
+            session.append_metadata_message(payload)
             if kind == "lane_lock_request":
                 session.append_lane_lock_request(payload)
             elif kind == "lane_lock_confirm":
