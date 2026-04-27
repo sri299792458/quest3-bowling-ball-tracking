@@ -1,0 +1,51 @@
+{
+  "description": "Cross-domain split: all Alley A + majority Alley B for train, held-out Alley B for val/test",
+  "alley_a_root": "c:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\runs\\bowling_tests",
+  "alley_b_root": "c:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\runs\\raw_quest_frames",
+  "train": [
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746015082_20260328_200013",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746111182_20260328_200149",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746141751_20260328_200220",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746170845_20260328_200249",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746194998_20260328_200313",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746215720_20260328_200334",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746237913_20260328_200356",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746260373_20260328_200418",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746286330_20260328_200444",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746321786_20260328_200520",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746359363_20260328_200557",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746388860_20260328_200627",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746477953_20260328_200756",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746497373_20260328_200815",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746579456_20260328_200937",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746615478_20260328_201013",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746649952_20260328_201048",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746671790_20260328_201110",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746721646_20260328_201200",
+    "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746750785_20260328_201229",
+    "frames_10",
+    "frames_13",
+    "frames_14",
+    "frames_15",
+    "frames_16",
+    "frames_2",
+    "frames_20",
+    "frames_21",
+    "frames_4",
+    "frames_5",
+    "frames_6",
+    "frames_7",
+    "frames_8",
+    "frames_9"
+  ],
+  "val": [
+    "frames_17",
+    "frames_18",
+    "frames_19"
+  ],
+  "test": [
+    "frames_11",
+    "frames_12",
+    "frames_3"
+  ]
+}

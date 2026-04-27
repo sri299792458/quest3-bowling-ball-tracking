@@ -5,7 +5,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 
-from laptop_receiver.standalone_yolo_seed import LEGACY_DEFAULT_CHECKPOINT, analyze_artifact_with_yolo_seed
+from laptop_receiver.standalone_yolo_seed import DEFAULT_YOLO_CHECKPOINT, analyze_artifact_with_yolo_seed
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:
@@ -14,8 +14,8 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=LEGACY_DEFAULT_CHECKPOINT if LEGACY_DEFAULT_CHECKPOINT.exists() else None,
-        help="Path to the YOLO checkpoint to use. Defaults to the legacy working checkpoint if present.",
+        default=DEFAULT_YOLO_CHECKPOINT if DEFAULT_YOLO_CHECKPOINT.exists() else None,
+        help="Path to the YOLO checkpoint to use. Defaults to the YOLO26s checkpoint if present.",
     )
     parser.add_argument("--output-dir", type=Path, default=None, help="Optional explicit output directory for yolo seed artifacts")
     parser.add_argument("--imgsz", type=int, default=1280)

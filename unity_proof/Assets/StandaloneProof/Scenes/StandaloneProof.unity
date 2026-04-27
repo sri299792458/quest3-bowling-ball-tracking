@@ -1082,8 +1082,11 @@ MonoBehaviour:
   maxRayDistanceMeters: 30
   selectWithHandPinch: 1
   selectWithControllerTrigger: 1
+  selectWithUiClickButton: 1
+  selectWithAnyTouchController: 1
   controller: 2
   selectButton: 8192
+  uiClickButton: 1
   debugKeyboardSelect: 1
   debugSelectKey: 32
   verboseLogging: 1

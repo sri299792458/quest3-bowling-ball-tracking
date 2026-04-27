@@ -22,6 +22,13 @@ data/proof_artifacts/
 data/imported_artifacts/
 data/incoming_artifacts/
 data/incoming_live_streams/
+models/**/dataset/bowling_ball_oracle_yolo/
+models/**/dataset/*.zip
+models/**/weights/*.pt
+third_party/sam2/checkpoints/*.pt
+third_party/sam2/checkpoints/*.pth
+third_party/sam2/checkpoints/*.zip
+third_party/sam2/cache/
 
 # OS/editor clutter
 .DS_Store

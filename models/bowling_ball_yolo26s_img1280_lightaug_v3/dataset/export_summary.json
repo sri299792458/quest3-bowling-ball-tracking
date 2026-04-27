@@ -1,0 +1,381 @@
+{
+  "input_root": "C:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\runs\\bowling_tests",
+  "reviews_path": "C:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\runs\\combined_oracle_reviews.json",
+  "included_statuses": [
+    "accepted"
+  ],
+  "output_root": "C:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\datasets\\bowling_ball_oracle_yolo",
+  "val_ratio": 0.2,
+  "seed": 1337,
+  "split_runs_file": "C:\\Users\\student\\Quest3BowlingBallTracking\\laptop_pipeline\\datasets\\bowling_ball_combined_v2_split.json",
+  "positive_frame_step": 2,
+  "max_positive_frames_per_run": 24,
+  "negative_pre_roll_count": 4,
+  "negative_frame_step": 2,
+  "min_box_size": 10.0,
+  "run_count": 40,
+  "total_positive_images": 641,
+  "total_negative_images": 160,
+  "runs": [
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746015082_20260328_200013",
+      "split": "train",
+      "seed_frame": 54,
+      "positive_count": 10,
+      "negative_count": 4,
+      "tracked_frames": 21,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746111182_20260328_200149",
+      "split": "train",
+      "seed_frame": 54,
+      "positive_count": 17,
+      "negative_count": 4,
+      "tracked_frames": 36,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746141751_20260328_200220",
+      "split": "train",
+      "seed_frame": 47,
+      "positive_count": 17,
+      "negative_count": 4,
+      "tracked_frames": 39,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746170845_20260328_200249",
+      "split": "train",
+      "seed_frame": 53,
+      "positive_count": 19,
+      "negative_count": 4,
+      "tracked_frames": 39,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746194998_20260328_200313",
+      "split": "train",
+      "seed_frame": 48,
+      "positive_count": 10,
+      "negative_count": 4,
+      "tracked_frames": 20,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746215720_20260328_200334",
+      "split": "train",
+      "seed_frame": 53,
+      "positive_count": 8,
+      "negative_count": 4,
+      "tracked_frames": 19,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746237913_20260328_200356",
+      "split": "train",
+      "seed_frame": 24,
+      "positive_count": 20,
+      "negative_count": 4,
+      "tracked_frames": 41,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746260373_20260328_200418",
+      "split": "train",
+      "seed_frame": 48,
+      "positive_count": 14,
+      "negative_count": 4,
+      "tracked_frames": 28,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746286330_20260328_200444",
+      "split": "train",
+      "seed_frame": 46,
+      "positive_count": 9,
+      "negative_count": 4,
+      "tracked_frames": 20,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746321786_20260328_200520",
+      "split": "train",
+      "seed_frame": 42,
+      "positive_count": 20,
+      "negative_count": 4,
+      "tracked_frames": 41,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746359363_20260328_200557",
+      "split": "train",
+      "seed_frame": 34,
+      "positive_count": 17,
+      "negative_count": 4,
+      "tracked_frames": 38,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746388860_20260328_200627",
+      "split": "train",
+      "seed_frame": 27,
+      "positive_count": 21,
+      "negative_count": 4,
+      "tracked_frames": 43,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746477953_20260328_200756",
+      "split": "train",
+      "seed_frame": 29,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 35,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746497373_20260328_200815",
+      "split": "train",
+      "seed_frame": 41,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 32,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746579456_20260328_200937",
+      "split": "train",
+      "seed_frame": 43,
+      "positive_count": 13,
+      "negative_count": 4,
+      "tracked_frames": 32,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746615478_20260328_201013",
+      "split": "train",
+      "seed_frame": 41,
+      "positive_count": 13,
+      "negative_count": 4,
+      "tracked_frames": 25,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746649952_20260328_201048",
+      "split": "train",
+      "seed_frame": 42,
+      "positive_count": 21,
+      "negative_count": 4,
+      "tracked_frames": 42,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746671790_20260328_201110",
+      "split": "train",
+      "seed_frame": 45,
+      "positive_count": 15,
+      "negative_count": 4,
+      "tracked_frames": 38,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746721646_20260328_201200",
+      "split": "train",
+      "seed_frame": 40,
+      "positive_count": 22,
+      "negative_count": 4,
+      "tracked_frames": 44,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "a28ae558fcc04acea0ceb5a5dac3f199_shot_1774746750785_20260328_201229",
+      "split": "train",
+      "seed_frame": 18,
+      "positive_count": 24,
+      "negative_count": 4,
+      "tracked_frames": 65,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_10",
+      "split": "train",
+      "seed_frame": 40,
+      "positive_count": 21,
+      "negative_count": 4,
+      "tracked_frames": 44,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_11",
+      "split": "test",
+      "seed_frame": 40,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 34,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_12",
+      "split": "test",
+      "seed_frame": 36,
+      "positive_count": 22,
+      "negative_count": 4,
+      "tracked_frames": 43,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_13",
+      "split": "train",
+      "seed_frame": 44,
+      "positive_count": 17,
+      "negative_count": 4,
+      "tracked_frames": 36,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_14",
+      "split": "train",
+      "seed_frame": 39,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 32,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_15",
+      "split": "train",
+      "seed_frame": 36,
+      "positive_count": 18,
+      "negative_count": 4,
+      "tracked_frames": 40,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_16",
+      "split": "train",
+      "seed_frame": 32,
+      "positive_count": 19,
+      "negative_count": 4,
+      "tracked_frames": 38,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_17",
+      "split": "val",
+      "seed_frame": 32,
+      "positive_count": 20,
+      "negative_count": 4,
+      "tracked_frames": 42,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_18",
+      "split": "val",
+      "seed_frame": 33,
+      "positive_count": 22,
+      "negative_count": 4,
+      "tracked_frames": 48,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_19",
+      "split": "val",
+      "seed_frame": 34,
+      "positive_count": 17,
+      "negative_count": 4,
+      "tracked_frames": 40,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_2",
+      "split": "train",
+      "seed_frame": 36,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 31,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_20",
+      "split": "train",
+      "seed_frame": 48,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 32,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_21",
+      "split": "train",
+      "seed_frame": 34,
+      "positive_count": 12,
+      "negative_count": 4,
+      "tracked_frames": 28,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_3",
+      "split": "test",
+      "seed_frame": 37,
+      "positive_count": 15,
+      "negative_count": 4,
+      "tracked_frames": 31,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_4",
+      "split": "train",
+      "seed_frame": 50,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 33,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_5",
+      "split": "train",
+      "seed_frame": 42,
+      "positive_count": 14,
+      "negative_count": 4,
+      "tracked_frames": 33,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_6",
+      "split": "train",
+      "seed_frame": 44,
+      "positive_count": 15,
+      "negative_count": 4,
+      "tracked_frames": 35,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_7",
+      "split": "train",
+      "seed_frame": 55,
+      "positive_count": 16,
+      "negative_count": 4,
+      "tracked_frames": 33,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_8",
+      "split": "train",
+      "seed_frame": 48,
+      "positive_count": 6,
+      "negative_count": 4,
+      "tracked_frames": 11,
+      "review_status": "accepted"
+    },
+    {
+      "run_name": "frames_9",
+      "split": "train",
+      "seed_frame": 37,
+      "positive_count": 5,
+      "negative_count": 4,
+      "tracked_frames": 9,
+      "review_status": "accepted"
+    }
+  ]
+}

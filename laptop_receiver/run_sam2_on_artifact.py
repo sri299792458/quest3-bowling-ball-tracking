@@ -7,9 +7,9 @@ from pathlib import Path
 
 from laptop_receiver.standalone_sam2_tracking import run_sam2_on_artifact
 from laptop_receiver.standalone_warm_sam2_tracker import (
-    LEGACY_SAM2_CACHE_ROOT,
-    LEGACY_SAM2_CHECKPOINT,
-    LEGACY_SAM2_ROOT,
+    DEFAULT_SAM2_CACHE_ROOT,
+    DEFAULT_SAM2_CHECKPOINT,
+    DEFAULT_SAM2_ROOT,
     StandaloneWarmSam2Config,
 )
 
@@ -19,9 +19,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("artifact_dir", type=Path, help="Path to the standalone clip_<session>_<shot> artifact directory")
     parser.add_argument("--seed-path", type=Path, default=None, help="Optional explicit path to yolo_seed.json")
     parser.add_argument("--output-dir", type=Path, default=None, help="Optional explicit analysis output directory")
-    parser.add_argument("--sam2-root", type=Path, default=LEGACY_SAM2_ROOT)
-    parser.add_argument("--checkpoint", type=Path, default=LEGACY_SAM2_CHECKPOINT)
-    parser.add_argument("--cache-root", type=Path, default=LEGACY_SAM2_CACHE_ROOT)
+    parser.add_argument("--sam2-root", type=Path, default=DEFAULT_SAM2_ROOT)
+    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_SAM2_CHECKPOINT)
+    parser.add_argument("--cache-root", type=Path, default=DEFAULT_SAM2_CACHE_ROOT)
     parser.add_argument("--model-cfg", default="configs/sam2.1/sam2.1_hiera_t.yaml")
     parser.add_argument("--frame-limit", type=int, default=0)
     parser.add_argument("--source-frame-idx-start", type=int, default=0)

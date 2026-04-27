@@ -10,9 +10,8 @@ if TYPE_CHECKING:
     from laptop_receiver.local_clip_artifact import LocalClipArtifact
 
 
-LEGACY_DEFAULT_CHECKPOINT = Path(
-    r"C:\Users\student\Quest3BowlingBallTracking\laptop_pipeline\runs\yolo_hillclimb\20260329_165618\training_runs\e02_yolo11s_img1280_lightaug\weights\best.pt"
-)
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_YOLO_CHECKPOINT = _REPO_ROOT / "models" / "bowling_ball_yolo26s_img1280_lightaug_v3" / "weights" / "best.pt"
 
 
 @dataclass(frozen=True)

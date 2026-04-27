@@ -857,6 +857,11 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("maxRayDistanceMeters").floatValue = 30.0f;
             serializedObject.FindProperty("selectWithHandPinch").boolValue = true;
             serializedObject.FindProperty("selectWithControllerTrigger").boolValue = true;
+            serializedObject.FindProperty("selectWithUiClickButton").boolValue = true;
+            serializedObject.FindProperty("selectWithAnyTouchController").boolValue = true;
+            serializedObject.FindProperty("controller").intValue = (int)OVRInput.Controller.RTouch;
+            serializedObject.FindProperty("selectButton").intValue = (int)OVRInput.Button.PrimaryIndexTrigger;
+            serializedObject.FindProperty("uiClickButton").intValue = (int)OVRInput.Button.One;
             serializedObject.FindProperty("debugKeyboardSelect").boolValue = true;
             serializedObject.FindProperty("debugSelectKey").intValue = (int)KeyCode.Space;
             serializedObject.FindProperty("verboseLogging").boolValue = true;

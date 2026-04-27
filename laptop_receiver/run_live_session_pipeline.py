@@ -8,11 +8,11 @@ from laptop_receiver.live_session_pipeline import build_pipeline_from_paths
 from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
-
-
-DEFAULT_SAM2_ROOT = Path(r"C:\Users\student\Quest3BowlingBallTracking\third_party\sam2")
-DEFAULT_SAM2_CACHE_ROOT = Path.home() / ".sam2_cache"
-DEFAULT_SAM2_CHECKPOINT = DEFAULT_SAM2_ROOT / "checkpoints" / "sam2.1_hiera_tiny.pt"
+from laptop_receiver.standalone_warm_sam2_tracker import (
+    DEFAULT_SAM2_CACHE_ROOT,
+    DEFAULT_SAM2_CHECKPOINT,
+    DEFAULT_SAM2_ROOT,
+)
 
 
 def _build_argument_parser() -> argparse.ArgumentParser:

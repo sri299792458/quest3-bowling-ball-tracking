@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Optional
 
 
-LEGACY_PROJECT_ROOT = Path(r"C:\Users\student\Quest3BowlingBallTracking")
-LEGACY_SAM2_ROOT = LEGACY_PROJECT_ROOT / "third_party" / "sam2"
-LEGACY_SAM2_CACHE_ROOT = Path.home() / ".sam2_cache"
-LEGACY_SAM2_CHECKPOINT = LEGACY_SAM2_ROOT / "checkpoints" / "sam2.1_hiera_tiny.pt"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SAM2_ROOT = _REPO_ROOT / "third_party" / "sam2"
+DEFAULT_SAM2_CACHE_ROOT = Path.home() / ".sam2_cache"
+DEFAULT_SAM2_CHECKPOINT = DEFAULT_SAM2_ROOT / "checkpoints" / "sam2.1_hiera_tiny.pt"
 
 
 def bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int] | None:
@@ -99,9 +99,9 @@ def iter_source_frames(source_path: str, start_frame: int = 0):
 
 @dataclass
 class StandaloneWarmSam2Config:
-    sam2_root: Path = Path(os.environ.get("SAM2_REPO_ROOT", LEGACY_SAM2_ROOT))
-    cache_root: Path = Path(os.environ.get("SAM2_CACHE_ROOT", str(LEGACY_SAM2_CACHE_ROOT)))
-    checkpoint: Path = Path(os.environ.get("SAM2_CHECKPOINT_PATH", LEGACY_SAM2_CHECKPOINT))
+    sam2_root: Path = Path(os.environ.get("SAM2_REPO_ROOT", str(DEFAULT_SAM2_ROOT)))
+    cache_root: Path = Path(os.environ.get("SAM2_CACHE_ROOT", str(DEFAULT_SAM2_CACHE_ROOT)))
+    checkpoint: Path = Path(os.environ.get("SAM2_CHECKPOINT_PATH", str(DEFAULT_SAM2_CHECKPOINT)))
     model_cfg: str = "configs/sam2.1/sam2.1_hiera_t.yaml"
     object_id: int = 1
     vos_optimized: bool = True

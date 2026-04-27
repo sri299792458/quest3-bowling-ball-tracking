@@ -35,8 +35,11 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Selection Input")]
         [SerializeField] private bool selectWithHandPinch = true;
         [SerializeField] private bool selectWithControllerTrigger = true;
+        [SerializeField] private bool selectWithUiClickButton = true;
+        [SerializeField] private bool selectWithAnyTouchController = true;
         [SerializeField] private OVRInput.Controller controller = OVRInput.Controller.RTouch;
         [SerializeField] private OVRInput.Button selectButton = OVRInput.Button.PrimaryIndexTrigger;
+        [SerializeField] private OVRInput.Button uiClickButton = OVRInput.Button.One;
         [SerializeField] private bool debugKeyboardSelect = true;
         [SerializeField] private KeyCode debugSelectKey = KeyCode.Space;
 
@@ -44,7 +47,10 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private bool verboseLogging;
 
         private OVRHand _cachedHand;
+        private OVRHand[] _cachedHands = Array.Empty<OVRHand>();
         private bool _wasHandPinching;
+        private float _nextHandCacheRefreshRealtime;
+        private string _lastInputSource = string.Empty;
 
         public event Action<StandaloneQuestRaySelection> SelectionPerformed;
 
@@ -101,7 +107,7 @@ namespace QuestBowlingStandalone.QuestApp
                 rayTransform.position,
                 direction,
                 MaxRayDistanceMeters,
-                rayTransform.name,
+                BuildSelectionSource(),
                 Time.realtimeSinceStartup);
             note = "ray_ready";
             return true;
@@ -123,28 +129,83 @@ namespace QuestBowlingStandalone.QuestApp
         private bool WasSelectionPressedThisFrame()
         {
             var pressed = false;
+            _lastInputSource = string.Empty;
 
             if (selectWithHandPinch)
             {
-                var isPinching = IsHandPinching();
-                pressed |= isPinching && !_wasHandPinching;
+                var isPinching = IsAnyHandPinching();
+                if (isPinching && !_wasHandPinching)
+                {
+                    pressed = true;
+                    _lastInputSource = "hand_pinch";
+                }
+
                 _wasHandPinching = isPinching;
             }
 
             if (selectWithControllerTrigger)
             {
-                pressed |= OVRInput.GetDown(selectButton, controller);
+                pressed |= TryMarkControllerButtonPressed(selectButton, "index_trigger");
+            }
+
+            if (selectWithUiClickButton)
+            {
+                pressed |= TryMarkControllerButtonPressed(uiClickButton, "ui_click");
             }
 
             if (debugKeyboardSelect)
             {
-                pressed |= Input.GetKeyDown(debugSelectKey);
+                if (Input.GetKeyDown(debugSelectKey))
+                {
+                    pressed = true;
+                    _lastInputSource = "keyboard";
+                }
+            }
+
+            if (pressed)
+            {
+                DebugLog($"Selection input pressed: {_lastInputSource}");
             }
 
             return pressed;
         }
 
-        private bool IsHandPinching()
+        private bool TryMarkControllerButtonPressed(OVRInput.Button button, string source)
+        {
+            if (!IsControllerButtonPressed(button))
+            {
+                return false;
+            }
+
+            _lastInputSource = source;
+            return true;
+        }
+
+        private bool IsControllerButtonPressed(OVRInput.Button button)
+        {
+            if (button == OVRInput.Button.None)
+            {
+                return false;
+            }
+
+            if (OVRInput.GetDown(button, controller))
+            {
+                return true;
+            }
+
+            if (!selectWithAnyTouchController)
+            {
+                return false;
+            }
+
+            return OVRInput.GetDown(button, OVRInput.Controller.Active)
+                || OVRInput.GetDown(button, OVRInput.Controller.Touch)
+                || OVRInput.GetDown(button, OVRInput.Controller.LTouch)
+                || OVRInput.GetDown(button, OVRInput.Controller.RTouch)
+                || OVRInput.GetDown(button, OVRInput.Controller.All);
+        }
+
+        private bool IsAnyHandPinching()
         {
             var hand = _cachedHand;
             if (hand == null)
@@ -153,6 +214,41 @@ namespace QuestBowlingStandalone.QuestApp
                 hand = _cachedHand;
             }
 
+            if (IsHandPinching(hand))
+            {
+                return true;
+            }
+
+            foreach (var cachedHand in GetCachedHands())
+            {
+                if (cachedHand == hand)
+                {
+                    continue;
+                }
+
+                if (IsHandPinching(cachedHand))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private OVRHand[] GetCachedHands()
+        {
+            if (Time.realtimeSinceStartup < _nextHandCacheRefreshRealtime)
+            {
+                return _cachedHands;
+            }
+
+            _nextHandCacheRefreshRealtime = Time.realtimeSinceStartup + 1.0f;
+            _cachedHands = FindObjectsByType<OVRHand>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            return _cachedHands;
+        }
+
+        private static bool IsHandPinching(OVRHand hand)
+        {
             return hand != null
                 && hand.IsTracked
                 && hand.GetFingerIsPinching(OVRHand.HandFinger.Index);
@@ -161,6 +257,16 @@ namespace QuestBowlingStandalone.QuestApp
         private void CacheHandFromRayTransform()
         {
             _cachedHand = rayTransform != null ? rayTransform.GetComponentInParent<OVRHand>() : null;
+        }
+
+        private string BuildSelectionSource()
+        {
+            if (string.IsNullOrWhiteSpace(_lastInputSource))
+            {
+                return rayTransform.name;
+            }
+
+            return $"{rayTransform.name}:{_lastInputSource}";
         }
 
         private static bool IsFinite(Vector3 value)

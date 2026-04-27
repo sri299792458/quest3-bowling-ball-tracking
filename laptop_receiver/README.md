@@ -49,13 +49,11 @@ Validation checks currently include:
 Usage:
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r laptop_receiver/requirements-cuda.txt
+powershell -ExecutionPolicy Bypass -File .\laptop_receiver\setup_laptop_env.ps1
 .\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact C:\path\to\clip_<session>_<shot>
 ```
 
-Use the repo-local `.venv` for laptop-side validation and analysis. The old `Quest3BowlingBallTracking\laptop_pipeline\.venv` can still be useful as a reference, but this standalone repo should not depend on it for normal runs.
+Use the repo-local `.venv` for laptop-side validation and analysis. Normal standalone runs should not depend on the older experiment repo.
 
 Optional JSON output:
 
@@ -66,8 +64,16 @@ Optional JSON output:
 YOLO seed usage:
 
 ```powershell
-.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact C:\path\to\clip_<session>_<shot> --checkpoint C:\path\to\best.pt
+.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact C:\path\to\clip_<session>_<shot>
 ```
+
+The default detector is the repo-local YOLO26s checkpoint:
+
+```text
+models/bowling_ball_yolo26s_img1280_lightaug_v3/weights/best.pt
+```
+
+Pass `--checkpoint C:\path\to\best.pt` only when intentionally testing another detector.
 
 What it writes:
 
@@ -102,9 +108,10 @@ SAM2 usage:
 
 Current SAM2 environment note:
 
-- this uses the already-working laptop SAM2 environment from the old project for now
-- default `sam2_root` and checkpoint paths point at the existing vendored SAM2 repo under `C:\Users\student\Quest3BowlingBallTracking\third_party\sam2`
-- so this stage is now standalone at the artifact boundary, but not yet fully standalone at the Python-environment boundary
+- default `sam2_root` points at `third_party/sam2` in this repo
+- default checkpoint path is `third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt`
+- the checkpoint is downloaded by `laptop_receiver/setup_laptop_env.ps1` and ignored by Git
+- override with `--sam2-root`, `--checkpoint`, `SAM2_REPO_ROOT`, or `SAM2_CHECKPOINT_PATH` only when intentionally testing another SAM2 install
 
 Live stream receiver usage:
 
@@ -185,13 +192,15 @@ Process one landed session without publishing results:
 Enable automatic YOLO shot boundaries and windowed shot tracking:
 
 ```powershell
-.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt
+$yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint $yolo26s
 ```
 
 Run SAM2 after each successful windowed YOLO seed:
 
 ```powershell
-.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint C:\path\to\best.pt --run-sam2
+$yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint $yolo26s --run-sam2
 ```
 
 Current honest note:
