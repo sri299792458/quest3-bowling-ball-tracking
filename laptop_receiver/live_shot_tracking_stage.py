@@ -8,6 +8,7 @@ from typing import Any
 
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult, SourceFrameRange
+from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveCameraSam2TrackResult
 from laptop_receiver.live_lane_lock_results import load_lane_lock_result_for_request
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
@@ -21,10 +22,15 @@ class LiveShotTrackingStageConfig:
     yolo_det_conf: float = 0.05
     yolo_seed_conf: float = 0.8
     yolo_min_box_size: float = 10.0
-    run_sam2: bool = False
-    sam2_config: Any = None
-    sam2_preview: bool = True
-    sam2_frame_limit: int = 0
+    run_sam2: bool = True
+    sam2_config: LiveCameraSam2Config | None = None
+
+
+@dataclass(frozen=True)
+class LiveShotSeedResult:
+    success: bool
+    failure_reason: str
+    seed: dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -67,29 +73,6 @@ def _frame_state_for_index(frame_metadata: list[dict[str, Any]], frame_index: in
     return FrameCameraState.from_frame_metadata(frame_metadata[frame_index])
 
 
-def _trajectory_from_yolo_seed(
-    *,
-    artifact: Any,
-    window: CompletedShotWindow,
-    lane_lock: LaneLockResult,
-    seed: dict[str, Any],
-) -> list[Any]:
-    frame_index = int(seed["frame_idx"])
-    image_point_px = bottom_center_from_box(seed["box"])
-    frame_state = _frame_state_for_index(artifact.frame_metadata, frame_index)
-    return [
-        project_ball_image_point_to_lane_space(
-            session_id=window.session_id,
-            shot_id=window.shot_id,
-            image_point_px=image_point_px,
-            frame_camera_state=frame_state,
-            intrinsics=CameraIntrinsics.from_session_metadata(artifact.session_metadata),
-            lane_lock=lane_lock,
-            point_definition="yolo_bbox_bottom_contact_proxy",
-        )
-    ]
-
-
 def _trajectory_from_sam2_track(
     *,
     artifact: Any,
@@ -108,8 +91,11 @@ def _trajectory_from_sam2_track(
             if int(row.get("present") or 0) != 1:
                 continue
 
-            local_frame_idx = int(row["frame_idx"])
-            source_frame_idx = local_frame_idx + int(sam2_result.source_frame_idx_start)
+            if row.get("source_frame_idx") not in ("", None):
+                source_frame_idx = int(row["source_frame_idx"])
+            else:
+                local_frame_idx = int(row["frame_idx"])
+                source_frame_idx = local_frame_idx + int(sam2_result.source_frame_idx_start)
             frame_state = _frame_state_for_index(artifact.frame_metadata, source_frame_idx)
             image_point_px = bottom_center_from_box(
                 [
@@ -127,7 +113,7 @@ def _trajectory_from_sam2_track(
                     frame_camera_state=frame_state,
                     intrinsics=intrinsics,
                     lane_lock=lane_lock,
-                    point_definition="sam2_bbox_bottom_contact_proxy",
+                    point_definition="camera_sam2_bbox_bottom_contact_proxy",
                 )
             )
     return trajectory
@@ -140,8 +126,8 @@ def _build_shot_result(
     yolo_result: Any,
     sam2_result: Any | None,
 ) -> ShotResult:
-    tracking_source = "sam2" if sam2_result is not None else "yolo_seed"
-    tracked_frames = int(sam2_result.tracked_frames) if sam2_result is not None else (1 if yolo_result.success else 0)
+    tracking_source = "camera_sam2"
+    tracked_frames = int(sam2_result.tracked_frames) if sam2_result is not None else 0
     trajectory = []
     failure_reason = ""
 
@@ -152,24 +138,18 @@ def _build_shot_result(
         failure_reason = "shot_boundary_lane_lock_request_missing"
     elif lane_lock is None:
         failure_reason = "shot_boundary_lane_lock_result_missing"
-    elif sam2_result is not None and not sam2_result.success:
+    elif sam2_result is None:
+        failure_reason = "camera_sam2_track_missing"
+    elif not sam2_result.success:
         failure_reason = str(sam2_result.failure_reason or "sam2_tracking_failed")
     else:
         try:
-            if sam2_result is not None:
-                trajectory = _trajectory_from_sam2_track(
-                    artifact=artifact,
-                    window=window,
-                    lane_lock=lane_lock,
-                    sam2_result=sam2_result,
-                )
-            else:
-                trajectory = _trajectory_from_yolo_seed(
-                    artifact=artifact,
-                    window=window,
-                    lane_lock=lane_lock,
-                    seed=yolo_result.seed,
-                )
+            trajectory = _trajectory_from_sam2_track(
+                artifact=artifact,
+                window=window,
+                lane_lock=lane_lock,
+                sam2_result=sam2_result,
+            )
         except Exception as exc:
             failure_reason = f"lane_projection_failed:{exc}"
 
@@ -204,6 +184,37 @@ def _build_shot_result(
     )
 
 
+def _camera_sam2_result_path_candidates(session_dir: Path, window: CompletedShotWindow) -> list[Path]:
+    root = session_dir / "analysis_live_pipeline" / "camera_sam2"
+    return [
+        root / window.window_id / "camera_sam2_result.json",
+        root / f"shot_{window.frame_seq_start}_{window.frame_seq_end}" / "camera_sam2_result.json",
+        root / f"shot_{window.frame_seq_start}" / "camera_sam2_result.json",
+    ]
+
+
+def _load_camera_sam2_result_for_window(
+    session_dir: Path,
+    window: CompletedShotWindow,
+) -> LiveCameraSam2TrackResult | None:
+    for path in _camera_sam2_result_path_candidates(session_dir, window):
+        if not path.exists():
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return LiveCameraSam2TrackResult.from_dict(payload)
+    return None
+
+
+def _seed_result_from_camera_sam2(
+    sam2_result: LiveCameraSam2TrackResult | None,
+) -> LiveShotSeedResult:
+    if sam2_result is None:
+        return LiveShotSeedResult(success=False, failure_reason="camera_sam2_track_missing", seed=None)
+    if not isinstance(sam2_result.seed, dict):
+        return LiveShotSeedResult(success=False, failure_reason="camera_sam2_seed_missing", seed=None)
+    return LiveShotSeedResult(success=True, failure_reason="", seed=dict(sam2_result.seed))
+
+
 def run_live_shot_tracking_stage(
     session_dir: Path | str,
     window: CompletedShotWindow,
@@ -211,8 +222,6 @@ def run_live_shot_tracking_stage(
     output_dir: Path | None = None,
 ) -> LiveShotTrackingStageOutput:
     from laptop_receiver.local_clip_artifact import load_local_clip_artifact
-    from laptop_receiver.standalone_sam2_tracking import run_sam2_on_artifact
-    from laptop_receiver.standalone_yolo_seed import analyze_artifact_with_yolo_seed
 
     artifact = load_local_clip_artifact(session_dir)
     frame_idx_start, frame_idx_end = _frame_index_bounds_for_window(artifact.frame_metadata, window)
@@ -228,32 +237,11 @@ def run_live_shot_tracking_stage(
         encoding="utf-8",
     )
 
-    yolo_dir = resolved_output_dir / "yolo_seed"
-    yolo_result = analyze_artifact_with_yolo_seed(
-        artifact.root_dir,
-        checkpoint_path=config.yolo_checkpoint_path,
-        output_root=yolo_dir,
-        imgsz=int(config.yolo_imgsz),
-        device=str(config.yolo_device),
-        det_conf=float(config.yolo_det_conf),
-        seed_conf=float(config.yolo_seed_conf),
-        min_box_size=float(config.yolo_min_box_size),
-        frame_seq_start=int(window.frame_seq_start),
-        frame_seq_end=int(window.frame_seq_end),
-    )
+    if not bool(config.run_sam2):
+        raise RuntimeError("Live shot tracking requires camera SAM2; YOLO-only shot results are disabled.")
 
-    sam2_result = None
-    if bool(config.run_sam2) and bool(yolo_result.success):
-        sam2_result = run_sam2_on_artifact(
-            artifact.root_dir,
-            seed_path=yolo_dir / "yolo_seed.json",
-            output_dir=resolved_output_dir / "sam2_track",
-            preview=bool(config.sam2_preview),
-            frame_limit=int(config.sam2_frame_limit),
-            config=config.sam2_config,
-            source_frame_idx_start=frame_idx_start,
-            source_frame_idx_end=frame_idx_end,
-        )
+    sam2_result = _load_camera_sam2_result_for_window(artifact.root_dir, window)
+    yolo_result = _seed_result_from_camera_sam2(sam2_result)
 
     shot_result = _build_shot_result(
         artifact=artifact,
@@ -272,7 +260,7 @@ def run_live_shot_tracking_stage(
         "yolo": asdict(yolo_result),
         "sam2": asdict(sam2_result) if sam2_result is not None else None,
         "shotResult": shot_result.to_dict(),
-        "trackingSuccess": bool(yolo_result.success and (sam2_result is None or sam2_result.success)),
+        "trackingSuccess": bool(yolo_result.success and sam2_result is not None and sam2_result.success),
         "success": bool(shot_result.success),
     }
     result_path = resolved_output_dir / "shot_tracking_result.json"

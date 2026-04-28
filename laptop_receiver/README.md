@@ -7,7 +7,7 @@ Responsibilities:
 - ingest Quest media and metadata
 - reconstruct shot clips
 - decode frames
-- run `YOLO -> SAM2`
+- run YOLO seeding plus SAM2 tracking
 - compute replay and analytics payloads
 
 First target:
@@ -22,9 +22,9 @@ Current implemented slice:
 - [standalone_yolo_seed.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_yolo_seed.py) runs the causal YOLO seed sweep directly over a standalone artifact
 - [run_yolo_seed_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_yolo_seed_on_artifact.py) is the CLI entry point for that seed stage
 - [import_legacy_bowling_run.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/import_legacy_bowling_run.py) packages one old `bowling_tests` run into the standalone artifact shape
-- [standalone_warm_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_warm_sam2_tracker.py) is the standalone copy of the warm SAM2 video tracker path
-- [standalone_sam2_tracking.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_sam2_tracking.py) runs warm SAM2 against `video.mp4 + yolo_seed.json`
-- [run_sam2_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_sam2_on_artifact.py) is the CLI entry point for that SAM2 stage
+- [standalone_warm_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_warm_sam2_tracker.py) is the offline-only batch/video SAM2 tracker path
+- [standalone_sam2_tracking.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/standalone_sam2_tracking.py) runs offline batch SAM2 against `video.mp4 + yolo_seed.json`
+- [run_sam2_on_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_sam2_on_artifact.py) is the CLI entry point for that offline SAM2 stage
 - [live_stream_receiver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_stream_receiver.py) runs the first real live Quest-to-laptop receiver for `H.264` media plus metadata
 - [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py) defines strict laptop-to-Quest result envelopes
 - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py) defines strict shot result and lane-space trajectory payloads
@@ -34,8 +34,9 @@ Current implemented slice:
 - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
 - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
 - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates strict `shot_start` / `shot_end` windows from `shot_boundaries.jsonl`
-- [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py) writes automatic `shot_start` / `shot_end` events after lane lock by projecting YOLO ball detections into the locked lane frame
-- [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) runs windowed `YOLO -> SAM2` tracking for one completed live shot window
+- [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py) writes automatic `shot_start` / `shot_end` events after lane lock; YOLO finds the seed and live camera SAM2 owns tracking/end
+- [live_camera_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_camera_sam2_tracker.py) keeps the camera SAM2 predictor warm and writes the per-shot track CSV
+- [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py) builds the strict `shot_result` from the camera SAM2 track artifact
 - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py) is the live pipeline CLI entry point
 
 Validation checks currently include:
@@ -208,7 +209,7 @@ $yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
 .\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline --yolo-checkpoint $yolo26s
 ```
 
-Run SAM2 after each successful windowed YOLO seed:
+Run live camera SAM2 after each successful YOLO seed:
 
 ```powershell
 $yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
@@ -220,5 +221,5 @@ Current honest note:
 - the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
 - the live product path must send `leftFoulLinePointWorld` and `rightFoulLinePointWorld` from the shared Quest ray/floor hit selector
 - there is no automatic lane identity selection or view-center fallback in the solver
-- shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and SAM2 only runs behind `--run-sam2`
+- shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and replayable shot results require live camera SAM2 via `--run-sam2`
 - a replayable `shot_result` requires a user-confirmed lane lock; without one, or after a relock invalidates one, the laptop emits a failed shot result instead of inventing lane-space trajectory data

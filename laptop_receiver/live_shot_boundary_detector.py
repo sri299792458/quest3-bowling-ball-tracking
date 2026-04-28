@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult
 from laptop_receiver.live_lane_lock_results import load_confirmed_lane_lock
+from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveCameraSam2Tracker
 from laptop_receiver.live_shot_boundaries import (
     SHOT_BOUNDARY_END,
     SHOT_BOUNDARY_START,
@@ -44,7 +45,10 @@ class LiveShotBoundaryDetectorConfig:
     yolo_start_conf: float = 0.8
     yolo_track_conf: float = 0.25
     yolo_min_box_size: float = 10.0
-    scan_stride_frames: int = 3
+    scan_stride_frames: int = 1
+    sam2_config: LiveCameraSam2Config | None = None
+    require_sam2_tracking: bool = False
+    warm_models_on_start: bool = True
     pre_roll_seconds: float = 0.5
     post_roll_seconds: float = 0.75
     start_confirm_seconds: float = 0.8
@@ -135,6 +139,13 @@ class LiveShotBoundaryDetector:
     def __init__(self, config: LiveShotBoundaryDetectorConfig) -> None:
         self.config = config
         self._model: Any | None = None
+        self._sam2_tracker = LiveCameraSam2Tracker(config.sam2_config) if config.sam2_config is not None else None
+        if bool(config.require_sam2_tracking) and self._sam2_tracker is None:
+            raise RuntimeError("Camera SAM2 tracking is required, but no SAM2 config was provided.")
+        if bool(config.warm_models_on_start):
+            self._load_model()
+            if self._sam2_tracker is not None:
+                self._sam2_tracker.warm()
 
     def process_session_dir(self, session_dir: Path | str) -> LiveShotBoundaryDetectorResult:
         root = Path(session_dir).expanduser().resolve()
@@ -311,6 +322,11 @@ class LiveShotBoundaryDetector:
                     active_shot["lastDetectionFrameSeq"] = int(candidate.frame_seq)
                     active_shot["lastDetectionPtsUs"] = int(candidate.pts_us)
                     active_shot["lastLaneSMeters"] = float(candidate.lane_s_meters)
+                    self._start_camera_sam2_tracking(
+                        active_shot=active_shot,
+                        decoded_frame=decoded_frame,
+                        candidate=candidate,
+                    )
                     self._append_boundary_event(root, start_event)
                     state["mode"] = "tracking"
                     state["pendingCandidate"] = None
@@ -337,6 +353,21 @@ class LiveShotBoundaryDetector:
                 state["activeShot"] = None
                 state["lastReason"] = "active_shot_missing"
                 return []
+
+            if self._sam2_tracker is not None:
+                return self._advance_camera_sam2_tracking_for_frame(
+                    root=root,
+                    state=state,
+                    active_shot=active_shot,
+                    artifact=artifact,
+                    lane_lock=lane_lock,
+                    fps=fps,
+                    session_id=session_id,
+                    shot_id=shot_id,
+                    decoded_frame=decoded_frame,
+                )
+            if bool(self.config.require_sam2_tracking):
+                raise RuntimeError("Camera SAM2 tracking is required, but the tracker is not available.")
 
             if candidate is not None and self._is_track_candidate(candidate):
                 active_shot["lastDetection"] = candidate.to_dict()
@@ -388,6 +419,105 @@ class LiveShotBoundaryDetector:
         state["activeShot"] = None
         state["lastReason"] = f"unknown_detector_mode:{mode}"
         return []
+
+    def _start_camera_sam2_tracking(
+        self,
+        *,
+        active_shot: dict[str, Any],
+        decoded_frame: DecodedFrame,
+        candidate: _ProjectedCandidate,
+    ) -> None:
+        if self._sam2_tracker is None:
+            if bool(self.config.require_sam2_tracking):
+                raise RuntimeError("Camera SAM2 tracking is required, but no tracker is configured.")
+            return
+        if self._sam2_tracker.active:
+            raise RuntimeError("Camera SAM2 tracker is already active for another shot.")
+
+        metadata = decoded_frame.metadata or {}
+        seed = candidate.to_dict()
+        seed["seedMode"] = "live_yolo_release_confirming_frame"
+        self._sam2_tracker.start_from_seed(
+            frame_index=int(decoded_frame.frame_index),
+            frame_seq=self._frame_seq(metadata, decoded_frame.frame_index),
+            image_bgr=decoded_frame.image_bgr,
+            seed=seed,
+            metadata=metadata,
+        )
+        active_shot["cameraSam2"] = {
+            "status": "tracking",
+            "seedFrameIndex": int(decoded_frame.frame_index),
+            "seedFrameSeq": self._frame_seq(metadata, decoded_frame.frame_index),
+            "seedDetectorConfidence": float(candidate.detector_confidence),
+        }
+        active_shot["lastReason"] = "camera_sam2_tracking_started"
+
+    def _advance_camera_sam2_tracking_for_frame(
+        self,
+        *,
+        root: Path,
+        state: dict[str, Any],
+        active_shot: dict[str, Any],
+        artifact: LocalClipArtifact,
+        lane_lock: LaneLockResult,
+        fps: float,
+        session_id: str,
+        shot_id: str,
+        decoded_frame: DecodedFrame,
+    ) -> list[dict[str, Any]]:
+        del artifact
+        if self._sam2_tracker is None:
+            raise RuntimeError("Camera SAM2 tracker is not configured.")
+        if not self._sam2_tracker.active:
+            raise RuntimeError("Camera SAM2 tracker cannot resume an already-open shot after process restart.")
+
+        frame_metadata = decoded_frame.metadata or {}
+        frame_seq = self._frame_seq(frame_metadata, decoded_frame.frame_index)
+        self._sam2_tracker.track_frame(
+            frame_index=int(decoded_frame.frame_index),
+            frame_seq=frame_seq,
+            image_bgr=decoded_frame.image_bgr,
+            metadata=frame_metadata,
+        )
+        active_shot["lastDetectionFrameSeq"] = int(frame_seq)
+        active_shot["lastDetectionPtsUs"] = self._time_us(frame_metadata)
+        active_shot["lastReason"] = "camera_sam2_tracking"
+
+        end_reason = self._sam2_tracker.stop_reason(fps=fps)
+        if not end_reason:
+            state["lastReason"] = "camera_sam2_tracking"
+            return []
+
+        end_event = self._build_boundary_event(
+            boundary_type=SHOT_BOUNDARY_END,
+            session_id=str(active_shot.get("sessionId") or session_id),
+            shot_id=str(active_shot.get("shotId") or shot_id),
+            lane_lock_request_id=str(active_shot.get("laneLockRequestId") or lane_lock.request_id),
+            metadata=frame_metadata,
+            frame_seq=frame_seq,
+            reason=end_reason,
+        )
+        output_dir = (
+            root
+            / "analysis_live_pipeline"
+            / "camera_sam2"
+            / f"shot_{_int(active_shot.get('startFrameSeq'), frame_seq)}_{frame_seq}"
+        )
+        track_result = self._sam2_tracker.finish(
+            output_dir=output_dir,
+            stop_reason=end_reason,
+            source_frame_idx_end=int(decoded_frame.frame_index),
+        )
+        self._append_boundary_event(root, end_event)
+
+        cooldown_frames = int(round(float(self.config.shot_cooldown_seconds) * fps))
+        state["mode"] = "idle"
+        state["pendingCandidate"] = None
+        state["activeShot"] = None
+        state["cooldownUntilFrameSeq"] = int(frame_seq + max(cooldown_frames, 0))
+        state["lastReason"] = end_reason
+        state["lastCameraSam2Result"] = track_result.to_dict()
+        return [end_event]
 
     def _projected_candidate_for_frame(
         self,
@@ -675,7 +805,8 @@ class LiveShotBoundaryDetector:
             state["lastReason"] = "tracking_state_closed_by_existing_boundaries"
 
     def _should_run_yolo(self, decoded_frame: DecodedFrame, state: Mapping[str, Any]) -> bool:
-        del state
+        if self._sam2_tracker is not None and str(state.get("mode") or "idle") == "tracking":
+            return False
         stride = max(int(self.config.scan_stride_frames), 1)
         return int(decoded_frame.frame_index) % stride == 0
 

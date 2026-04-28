@@ -19,7 +19,7 @@ The detailed lane-lock design lives in [docs/LANE_LOCK_MATH_AND_CONTRACT.md](C:/
 - `1280 x 960 @ 30 FPS, H.264`
 - lightweight session lane lock
 - one continuous live session stream
-- `YOLO -> SAM2`
+- YOLO-seeded live camera SAM2 tracking
 - true lane-anchored MR replay
 
 ## Repository Layout
@@ -58,7 +58,7 @@ The clean next slice after Quest proof is now in place:
 - prove timestamp and metadata alignment before porting over more of the old laptop stack
 - run standalone causal YOLO seeding directly on a `LocalClipArtifact`
 - import one legacy `bowling_tests` run into the standalone artifact shape for real bowling-content validation
-- run warm SAM2 from the standalone `yolo_seed.json` contract
+- run offline batch SAM2 from the standalone `yolo_seed.json` contract
 - receive a live Quest `H.264` stream plus live metadata on the laptop
 - keep a live laptop-to-Quest result channel open for lane/replay payloads
 - make the landed live session decodable and loadable through the same analysis boundary as offline artifacts
@@ -71,7 +71,7 @@ Current validation entry point:
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir>` uses the repo-local YOLO26s checkpoint when it is present
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>` overrides the detector checkpoint
 - `.\.venv\Scripts\python.exe -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>`
+- `.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>` runs the offline batch SAM2 check
 - `.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
@@ -155,12 +155,14 @@ Lane-lock implementation note:
 - automatic YOLO/lane-space shot-boundary detection is in:
   - [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py)
 - lane-lock results can now be processed and forwarded to Quest through the same session channel instead of being only local files
-- shot boundaries are now generated after lane lock, then validated as `shot_start` / `shot_end` windows before the tracking stage is attached
+- shot boundaries are now generated after lane lock, with camera SAM2 ending each shot after tracking loss or the fixed live tracking window
+- live camera SAM2 tracking is in:
+  - [live_camera_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_camera_sam2_tracker.py)
 - windowed live shot tracking is in:
   - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py)
 - strict shot result payloads are in:
   - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
-- the live pipeline can now auto-detect shot windows and run `YOLO -> SAM2` inside completed windows when configured with `--yolo-checkpoint` and optional `--run-sam2`
+- the live pipeline can now auto-detect shot starts with YOLO, seed camera SAM2 immediately, and build results only from that camera SAM2 track when configured with `--yolo-checkpoint --run-sam2`
 - `shot_result` messages require lane-space trajectory data from a user-confirmed lane lock; missing or invalidated lane confirmation is reported as a failed result, not guessed
 - automatic shot windows carry the confirmed `laneLockRequestId`, and shot tracking projects through that exact lane result
 - Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)

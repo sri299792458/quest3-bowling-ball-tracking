@@ -22,6 +22,8 @@ data/proof_artifacts/
 data/imported_artifacts/
 data/incoming_artifacts/
 data/incoming_live_streams/
+data/experiments/
+experiments/live_h264_camera_sam2/
 models/**/dataset/bowling_ball_oracle_yolo/
 models/**/dataset/*.zip
 models/**/weights/*.pt

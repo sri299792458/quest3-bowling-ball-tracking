@@ -14,8 +14,8 @@ The product has one user-visible job:
 1. start a continuous Quest-to-laptop session stream
 2. let the user explicitly lock the physical lane
 3. arm shot detection only after lane lock is confirmed
-4. detect one shot window at a time
-5. run `YOLO -> SAM2`
+4. use YOLO to seed one shot at a time
+5. track that shot immediately with live camera SAM2
 6. project the ball track into the confirmed lane frame
 7. return replay results to Quest
 8. let the user pick from a growing shot replay list

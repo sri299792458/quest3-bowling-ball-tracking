@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from laptop_receiver.live_session_pipeline import build_pipeline_from_paths
+from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config
 from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
@@ -85,14 +86,14 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-sam2",
         action="store_true",
-        help="After a successful windowed YOLO seed, run SAM2 over that shot window.",
+        help="Enable live camera SAM2 tracking after the YOLO seed. This is required for shot results.",
     )
     parser.add_argument("--sam2-root", type=Path, default=DEFAULT_SAM2_ROOT)
     parser.add_argument("--sam2-checkpoint", type=Path, default=DEFAULT_SAM2_CHECKPOINT)
     parser.add_argument("--sam2-cache-root", type=Path, default=DEFAULT_SAM2_CACHE_ROOT)
     parser.add_argument("--sam2-model-cfg", default="configs/sam2.1/sam2.1_hiera_t.yaml")
-    parser.add_argument("--sam2-frame-limit", type=int, default=0)
-    parser.add_argument("--sam2-no-preview", action="store_true")
+    parser.add_argument("--sam2-track-seconds", type=float, default=5.0)
+    parser.add_argument("--sam2-lost-grace-frames", type=int, default=5)
     return parser
 
 
@@ -123,27 +124,26 @@ def main() -> int:
             if not sam2_checkpoint.exists():
                 parser.error(f"--sam2-checkpoint does not exist: {sam2_checkpoint}")
 
-            from laptop_receiver.standalone_warm_sam2_tracker import StandaloneWarmSam2Config
-
-            sam2_config = StandaloneWarmSam2Config(
+            sam2_config = LiveCameraSam2Config(
                 sam2_root=sam2_root,
                 cache_root=args.sam2_cache_root.expanduser().resolve(),
                 checkpoint=sam2_checkpoint,
                 model_cfg=str(args.sam2_model_cfg),
+                max_track_seconds=float(args.sam2_track_seconds),
+                lost_track_grace_frames=int(args.sam2_lost_grace_frames),
             )
 
-        shot_tracking_config = LiveShotTrackingStageConfig(
-            yolo_checkpoint_path=yolo_checkpoint,
-            yolo_imgsz=int(args.yolo_imgsz),
-            yolo_device=str(args.yolo_device),
-            yolo_det_conf=float(args.yolo_det_conf),
-            yolo_seed_conf=float(args.yolo_seed_conf),
-            yolo_min_box_size=float(args.yolo_min_box_size),
-            run_sam2=bool(args.run_sam2),
-            sam2_config=sam2_config,
-            sam2_preview=not bool(args.sam2_no_preview),
-            sam2_frame_limit=int(args.sam2_frame_limit),
-        )
+        if args.run_sam2:
+            shot_tracking_config = LiveShotTrackingStageConfig(
+                yolo_checkpoint_path=yolo_checkpoint,
+                yolo_imgsz=int(args.yolo_imgsz),
+                yolo_device=str(args.yolo_device),
+                yolo_det_conf=float(args.yolo_det_conf),
+                yolo_seed_conf=float(args.yolo_seed_conf),
+                yolo_min_box_size=float(args.yolo_min_box_size),
+                run_sam2=True,
+                sam2_config=sam2_config,
+            )
         shot_boundary_detector_config = LiveShotBoundaryDetectorConfig(
             yolo_checkpoint_path=yolo_checkpoint,
             yolo_imgsz=int(args.yolo_imgsz),
@@ -151,6 +151,8 @@ def main() -> int:
             yolo_det_conf=float(args.yolo_det_conf),
             yolo_start_conf=float(args.yolo_seed_conf),
             yolo_min_box_size=float(args.yolo_min_box_size),
+            sam2_config=sam2_config,
+            require_sam2_tracking=bool(args.run_sam2),
         )
 
     pipeline = build_pipeline_from_paths(
