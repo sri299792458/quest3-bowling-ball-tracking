@@ -1,6 +1,6 @@
 # Running Notes
 
-Last updated: 2026-04-25
+Last updated: 2026-04-28
 
 ## Purpose
 
@@ -17,6 +17,11 @@ The goal is to avoid drifting into disconnected experiments.
 
 ## Latest Session Update
 
+- The stale `quest_app/` scaffold has been removed. The active Quest-side implementation now has one home:
+  - [unity_proof/Assets/StandaloneProof/Runtime](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime)
+  - [unity_proof/Assets/StandaloneProof/Editor](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Editor)
+  - [unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin)
+- Reason for removal: `quest_app/` was no longer referenced by the Unity build, scripts, or laptop pipeline, and its Android plugin copy lagged the live streaming implementation in `unity_proof`.
 - Lane lock is now explicitly the manual foul-line selection workflow.
 - The user-selected contract is:
   - left lane edge at the foul line
@@ -67,22 +72,9 @@ The goal is to avoid drifting into disconnected experiments.
 - First validation dataset moved locally to `C:\Users\student\QuestBowlingStandalone\data\bowling_tests`
 - `bowling_tests` is intentionally local-only for now and excluded from Git by `.gitignore`
 - Module folders created:
-  - [quest_app](C:/Users/student/QuestBowlingStandalone/quest_app)
   - [laptop_receiver](C:/Users/student/QuestBowlingStandalone/laptop_receiver)
   - [protocol](C:/Users/student/QuestBowlingStandalone/protocol)
-- First safe standalone code port added:
-  - [QuestVideoEncoderProbe.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/QuestVideoEncoderProbe.cs)
-- First standalone Quest capture stub added:
-  - [StandaloneCaptureTypes.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/StandaloneCaptureTypes.cs)
-  - [QuestCaptureMetadataBuilder.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/QuestCaptureMetadataBuilder.cs)
-  - [StandaloneLocalClipArtifactWriter.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/StandaloneLocalClipArtifactWriter.cs)
-  - [StandaloneQuestLocalProofCapture.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/StandaloneQuestLocalProofCapture.cs)
-  - [StandaloneQuestVideoEncoderBridge.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/StandaloneQuestVideoEncoderBridge.cs)
-  - [StandaloneQuestFrameSource.cs](C:/Users/student/QuestBowlingStandalone/quest_app/Runtime/StandaloneQuestFrameSource.cs)
-- First Android encoder plugin scaffold added:
-  - [quest_app/Plugins/Android/README.md](C:/Users/student/QuestBowlingStandalone/quest_app/Plugins/Android/README.md)
-  - [StandaloneVideoEncoderPlugin.java](C:/Users/student/QuestBowlingStandalone/quest_app/Plugins/Android/src/main/java/com/questbowling/standalone/StandaloneVideoEncoderPlugin.java)
-  - [StandaloneEncoderSurfaceBridge.cpp](C:/Users/student/QuestBowlingStandalone/quest_app/Plugins/Android/src/main/cpp/StandaloneEncoderSurfaceBridge.cpp)
+- The early standalone Quest scaffold was later retired once the clean Unity proof project became the active Quest-side codebase.
 - Clean Unity proof project has already been seeded with:
   - minimal passthrough/XR package manifest in [unity_proof/Packages/manifest.json](C:/Users/student/QuestBowlingStandalone/unity_proof/Packages/manifest.json)
   - resolved package lock in [unity_proof/Packages/packages-lock.json](C:/Users/student/QuestBowlingStandalone/unity_proof/Packages/packages-lock.json)

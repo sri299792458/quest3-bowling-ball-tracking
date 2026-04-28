@@ -1,14 +1,14 @@
 # Standalone Implementation Plan
 
-Last updated: 2026-04-25
+Last updated: 2026-04-28
 
 This document turns the product goal into a concrete build layout and a small first execution slice.
 
 ## Module Layout
 
-### `quest_app/`
+### `unity_proof/`
 
-Owns everything that runs on Quest:
+Owns the active Quest-side Unity app:
 
 - passthrough camera access
 - lane-lock UX and session state
@@ -17,6 +17,12 @@ Owns everything that runs on Quest:
 - shot markers and per-frame metadata capture
 - live laptop result receiver
 - replay rendering on the locked lane
+
+The early `quest_app/` scaffold was removed after the Unity proof project became the canonical Quest-side implementation. New Quest-side work should happen under:
+
+- `unity_proof/Assets/StandaloneProof/Runtime`
+- `unity_proof/Assets/StandaloneProof/Editor`
+- `unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin`
 
 ### `laptop_receiver/`
 

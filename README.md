@@ -25,8 +25,7 @@ The detailed lane-lock design lives in [docs/LANE_LOCK_MATH_AND_CONTRACT.md](C:/
 ## Repository Layout
 
 - `docs/`: product definition and implementation notes
-- `unity_proof/`: clean Unity project for Quest-side standalone proof runs
-- `quest_app/`: Quest-side standalone product module
+- `unity_proof/`: active Unity project and Quest-side standalone implementation
 - `laptop_receiver/`: laptop-side media, tracking, and replay module
 - `protocol/`: shared schemas and message contracts
 - `third_party/sam2/`: repo-local SAM2 source; checkpoint is downloaded/ignored
