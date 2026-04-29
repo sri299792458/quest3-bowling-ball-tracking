@@ -57,14 +57,11 @@ namespace QuestBowlingStandalone.Editor
             var frameSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource>(proofRig);
             var proofCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture>(proofRig);
             var floorPlaneSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource>(proofRig);
-            var laneLockCapture = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture>(proofRig);
             var liveMetadataSender = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender>(proofRig);
             var liveResultReceiver = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver>(proofRig);
             var laptopDiscovery = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery>(proofRig);
             var laneLockResultRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer>(proofRig);
             var shotReplayRenderer = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer>(proofRig);
-            var rayInteractor = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor>(proofRig);
-            var foulLineRaySelector = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector>(proofRig);
             var renderCoordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator>(proofRig);
             var laneLockStateCoordinator = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator>(proofRig);
             var sessionController = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController>(proofRig);
@@ -80,18 +77,8 @@ namespace QuestBowlingStandalone.Editor
             ConfigureFrameSource(frameSource, cameraAccess);
             ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
             ConfigureFloorPlaneSource(floorPlaneSource, trackingSpace != null ? trackingSpace : cameraRig.transform);
-            ConfigureLaneLockCapture(laneLockCapture, proofCapture, liveMetadataSender, floorPlaneSource);
             ConfigureHandRayHelper(rightHand, rightRayHelper, enabled: true);
-            ConfigureRayInteractor(rayInteractor, sharedRayTransform, rightHand);
-            ConfigureFoulLineRaySelector(foulLineRaySelector, rayInteractor, laneLockCapture, proofCapture, floorPlaneSource);
-            ConfigureLaneLockStateCoordinator(
-                laneLockStateCoordinator,
-                laneLockCapture,
-                foulLineRaySelector,
-                liveResultReceiver,
-                liveMetadataSender,
-                proofCapture,
-                laneLockResultRenderer);
+            ConfigureLaneLockStateCoordinator(laneLockStateCoordinator, floorPlaneSource, proofCapture, liveMetadataSender, laneLockResultRenderer, headAnchor, rightHand, proofRig.transform);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
             ConfigureLaneActionButton(
                 lockLaneButton,
@@ -99,7 +86,7 @@ namespace QuestBowlingStandalone.Editor
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary,
                 new Vector2(-300.0f, 0.0f),
                 new Vector2(330.0f, 120.0f),
-                "Lock Lane",
+                "Pinch + Hold",
                 new Color(0.09f, 0.13f, 0.19f, 0.94f));
             ConfigureLaneActionButton(
                 retryLaneButton,
@@ -113,7 +100,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
-            ConfigureLaneLockResultRenderer(laneLockResultRenderer, liveResultReceiver);
+            ConfigureLaneLockResultRenderer(laneLockResultRenderer);
             ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
             ConfigureCoordinator(renderCoordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver, laptopDiscovery);
@@ -721,6 +708,10 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("cameraPosition").enumValueIndex = (int)PassthroughCameraAccess.CameraPositionType.Left;
             serializedObject.FindProperty("targetResolution").vector2IntValue = new Vector2Int(1280, 960);
             serializedObject.FindProperty("targetFps").intValue = 30;
+            serializedObject.FindProperty("videoPrepShader").objectReferenceValue = Shader.Find("QuestBowling/StandalonePassthroughVideoPrep");
+            serializedObject.FindProperty("videoPrepGain").floatValue = 1.10f;
+            serializedObject.FindProperty("videoPrepGamma").floatValue = 0.65f;
+            serializedObject.FindProperty("videoPrepSaturation").floatValue = 1.0f;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(frameSource);
@@ -799,11 +790,9 @@ namespace QuestBowlingStandalone.Editor
         }
 
         private static void ConfigureLaneLockResultRenderer(
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer)
         {
             var serializedObject = new SerializedObject(laneLockResultRenderer);
-            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("visualizationRoot").objectReferenceValue = null;
             serializedObject.FindProperty("renderVisibleDownlaneOnly").boolValue = false;
             serializedObject.FindProperty("renderSurface").boolValue = true;
@@ -853,100 +842,39 @@ namespace QuestBowlingStandalone.Editor
             EditorUtility.SetDirty(floorPlaneSource);
         }
 
-        private static void ConfigureLaneLockCapture(
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource)
-        {
-            var serializedObject = new SerializedObject(laneLockCapture);
-            serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
-            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
-            serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
-            serializedObject.FindProperty("laneWidthMeters").floatValue = 1.0541f;
-            serializedObject.FindProperty("laneLengthMeters").floatValue = 18.288f;
-            serializedObject.FindProperty("targetFrameCount").intValue = 24;
-            serializedObject.FindProperty("minimumFrameCount").intValue = 12;
-            serializedObject.FindProperty("maxCaptureDurationSeconds").floatValue = 1.0f;
-            serializedObject.FindProperty("verboseLogging").boolValue = true;
-            serializedObject.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(laneLockCapture);
-        }
-
-        private static void ConfigureRayInteractor(
-            QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
-            Transform rayTransform,
-            OVRHand handPinchSource)
-        {
-            var serializedObject = new SerializedObject(rayInteractor);
-            serializedObject.FindProperty("rayTransform").objectReferenceValue = rayTransform;
-            serializedObject.FindProperty("handPinchSource").objectReferenceValue = handPinchSource;
-            serializedObject.FindProperty("maxRayDistanceMeters").floatValue = 30.0f;
-            serializedObject.FindProperty("selectWithHandPinch").boolValue = true;
-            serializedObject.FindProperty("selectWithControllerTrigger").boolValue = true;
-            serializedObject.FindProperty("selectWithUiClickButton").boolValue = false;
-            serializedObject.FindProperty("selectWithAnyTouchController").boolValue = false;
-            serializedObject.FindProperty("controller").intValue = (int)OVRInput.Controller.RTouch;
-            serializedObject.FindProperty("selectButton").intValue = (int)OVRInput.Button.PrimaryIndexTrigger;
-            serializedObject.FindProperty("uiClickButton").intValue = (int)OVRInput.Button.One;
-            serializedObject.FindProperty("debugKeyboardSelect").boolValue = true;
-            serializedObject.FindProperty("debugSelectKey").intValue = (int)KeyCode.Space;
-            serializedObject.FindProperty("verboseLogging").boolValue = true;
-            serializedObject.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(rayInteractor);
-        }
-
-        private static void ConfigureFoulLineRaySelector(
-            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestRayInteractor rayInteractor,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource)
-        {
-            var serializedObject = new SerializedObject(foulLineRaySelector);
-            serializedObject.FindProperty("rayInteractor").objectReferenceValue = rayInteractor;
-            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
-            serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
-            serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
-            serializedObject.FindProperty("maxFloorHitDistanceMeters").floatValue = 25.0f;
-            serializedObject.FindProperty("armInputDebounceSeconds").floatValue = 0.2f;
-            serializedObject.FindProperty("clearPendingPointOnDisable").boolValue = true;
-            serializedObject.FindProperty("verboseLogging").boolValue = true;
-            serializedObject.ApplyModifiedPropertiesWithoutUndo();
-            EditorUtility.SetDirty(foulLineRaySelector);
-        }
-
         private static void ConfigureLaneLockStateCoordinator(
             QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockCapture laneLockCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestFoulLineRaySelector foulLineRaySelector,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer,
+            Transform headAnchor,
+            OVRHand rightHand,
+            Transform visualizationRoot)
         {
             var serializedObject = new SerializedObject(laneLockStateCoordinator);
-            serializedObject.FindProperty("laneLockCapture").objectReferenceValue = laneLockCapture;
-            serializedObject.FindProperty("foulLineSelector").objectReferenceValue = foulLineRaySelector;
-            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
-            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
-            serializedObject.FindProperty("laneLockResultRenderer").objectReferenceValue = laneLockResultRenderer;
-            serializedObject.FindProperty("idleText").stringValue = "Lock Lane";
-            serializedObject.FindProperty("selectLeftText").stringValue = "Select Left Edge";
-            serializedObject.FindProperty("selectRightText").stringValue = "Select Right Edge";
-            serializedObject.FindProperty("selectionReadyText").stringValue = "Lock Lane";
-            serializedObject.FindProperty("requestQueuedText").stringValue = "Capturing...";
-            serializedObject.FindProperty("awaitingResultText").stringValue = "Solving...";
-            serializedObject.FindProperty("acceptLaneText").stringValue = "Accept Lane";
-            serializedObject.FindProperty("lockedText").stringValue = "Lane Locked";
-            serializedObject.FindProperty("failedText").stringValue = "Try Again";
-            serializedObject.FindProperty("retryLaneText").stringValue = "Retry Lane";
-            serializedObject.FindProperty("relockLaneText").stringValue = "Relock Lane";
-            serializedObject.FindProperty("resultTimeoutText").stringValue = "No Result";
-            serializedObject.FindProperty("autoSubmitAfterFoulLineSelection").boolValue = true;
-            serializedObject.FindProperty("laneResultTimeoutSeconds").floatValue = 30.0f;
-            serializedObject.FindProperty("selectionErrorDisplaySeconds").floatValue = 1.5f;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("laneRenderer").objectReferenceValue = laneLockResultRenderer;
+            serializedObject.FindProperty("headTransform").objectReferenceValue = headAnchor;
+            serializedObject.FindProperty("handPinchSource").objectReferenceValue = rightHand;
+            serializedObject.FindProperty("visualizationRoot").objectReferenceValue = visualizationRoot;
+            serializedObject.FindProperty("laneWidthMeters").floatValue = 1.0541f;
+            serializedObject.FindProperty("headsSectionLengthMeters").floatValue = 4.572f;
+            serializedObject.FindProperty("laneLengthMeters").floatValue = 18.288f;
+            serializedObject.FindProperty("placementDistanceMeters").floatValue = 0.75f;
+            serializedObject.FindProperty("pinchPressThreshold").floatValue = 0.70f;
+            serializedObject.FindProperty("pinchReleaseThreshold").floatValue = 0.30f;
+            serializedObject.FindProperty("useStabilization").boolValue = true;
+            serializedObject.FindProperty("smoothingSeconds").floatValue = 0.16f;
+            serializedObject.FindProperty("positionDeadzoneMeters").floatValue = 0.012f;
+            serializedObject.FindProperty("angleDeadzoneDegrees").floatValue = 0.45f;
+            serializedObject.FindProperty("releaseAverageSeconds").floatValue = 0.35f;
+            serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.025f;
+            serializedObject.FindProperty("headsLineWidthMeters").floatValue = 0.03f;
+            serializedObject.FindProperty("headsOutlineColor").colorValue = new Color(1.0f, 0.82f, 0.16f, 1.0f);
+            serializedObject.FindProperty("headsSurfaceColor").colorValue = new Color(1.0f, 0.82f, 0.16f, 0.16f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(laneLockStateCoordinator);
@@ -1207,8 +1135,12 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("beginRetryIntervalSeconds").floatValue = 0.25f;
             serializedObject.FindProperty("enableLiveStreaming").boolValue = true;
             serializedObject.FindProperty("requireLaptopDiscovery").boolValue = true;
+            serializedObject.FindProperty("abortSessionOnApplicationPause").boolValue = false;
             serializedObject.FindProperty("liveStreamHost").stringValue = string.Empty;
             serializedObject.FindProperty("liveMediaPort").intValue = 8766;
+            serializedObject.FindProperty("mediaWatchdogIntervalSeconds").floatValue = 0.5f;
+            serializedObject.FindProperty("mediaReconnectIntervalSeconds").floatValue = 1.0f;
+            serializedObject.FindProperty("mediaNoProgressTimeoutSeconds").floatValue = 2.0f;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(sessionController);

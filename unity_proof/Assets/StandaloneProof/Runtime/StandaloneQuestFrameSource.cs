@@ -6,13 +6,23 @@ namespace QuestBowlingStandalone.QuestApp
 {
     public sealed class StandaloneQuestFrameSource : MonoBehaviour
     {
+        private const string VideoPrepShaderName = "QuestBowling/StandalonePassthroughVideoPrep";
+        private static readonly int VideoGainId = Shader.PropertyToID("_VideoGain");
+        private static readonly int VideoGammaId = Shader.PropertyToID("_VideoGamma");
+        private static readonly int VideoSaturationId = Shader.PropertyToID("_VideoSaturation");
+
         [SerializeField] private PassthroughCameraAccess cameraAccess;
         [SerializeField] private PassthroughCameraAccess.CameraPositionType cameraPosition = PassthroughCameraAccess.CameraPositionType.Left;
         [SerializeField] private Vector2Int targetResolution = new(1280, 960);
         [SerializeField] private int targetFps = 30;
+        [SerializeField] private Shader videoPrepShader;
+        [SerializeField, Range(0.25f, 4.0f)] private float videoPrepGain = 1.10f;
+        [SerializeField, Range(0.10f, 2.20f)] private float videoPrepGamma = 0.65f;
+        [SerializeField, Range(0.0f, 2.0f)] private float videoPrepSaturation = 1.0f;
         [SerializeField] private bool verboseLogging;
 
         private RenderTexture _outputTexture;
+        private Material _videoPrepMaterial;
 
         public PassthroughCameraAccess CameraAccess => cameraAccess;
         public string CameraSideName => cameraPosition.ToString();
@@ -45,6 +55,7 @@ namespace QuestBowlingStandalone.QuestApp
         private void OnDestroy()
         {
             DisposeOutputTexture();
+            DisposeVideoPrepMaterial();
         }
 
         public bool TryRenderCurrentFrame(out string note)
@@ -77,8 +88,18 @@ namespace QuestBowlingStandalone.QuestApp
 
             var resolution = GetTargetResolution();
             EnsureOutputTexture(resolution.x, resolution.y);
-            Graphics.Blit(sourceTexture, _outputTexture);
-            note = $"rendered {resolution.x}x{resolution.y}";
+            var videoPrepMaterial = GetVideoPrepMaterial();
+            if (videoPrepMaterial == null)
+            {
+                note = "video_prep_shader_missing";
+                return false;
+            }
+
+            videoPrepMaterial.SetFloat(VideoGainId, Mathf.Max(0.0f, videoPrepGain));
+            videoPrepMaterial.SetFloat(VideoGammaId, Mathf.Max(0.01f, videoPrepGamma));
+            videoPrepMaterial.SetFloat(VideoSaturationId, Mathf.Max(0.0f, videoPrepSaturation));
+            Graphics.Blit(sourceTexture, _outputTexture, videoPrepMaterial);
+            note = $"rendered {resolution.x}x{resolution.y} video_prep gain={videoPrepGain:0.###} gamma={videoPrepGamma:0.###}";
             return true;
         }
 
@@ -185,6 +206,43 @@ namespace QuestBowlingStandalone.QuestApp
 
             Destroy(_outputTexture);
             _outputTexture = null;
+        }
+
+        private Material GetVideoPrepMaterial()
+        {
+            if (_videoPrepMaterial != null)
+            {
+                return _videoPrepMaterial;
+            }
+
+            if (videoPrepShader == null)
+            {
+                videoPrepShader = Shader.Find(VideoPrepShaderName);
+            }
+
+            if (videoPrepShader == null)
+            {
+                Debug.LogError($"[StandaloneQuestFrameSource] Missing required shader '{VideoPrepShaderName}'.");
+                return null;
+            }
+
+            _videoPrepMaterial = new Material(videoPrepShader)
+            {
+                name = "StandalonePassthroughVideoPrepMaterial",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            return _videoPrepMaterial;
+        }
+
+        private void DisposeVideoPrepMaterial()
+        {
+            if (_videoPrepMaterial == null)
+            {
+                return;
+            }
+
+            Destroy(_videoPrepMaterial);
+            _videoPrepMaterial = null;
         }
 
         private static int MakeEven(int value)

@@ -73,14 +73,11 @@ Current validation entry point:
 - `.\.venv\Scripts\python.exe -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>` runs the offline batch SAM2 check
 - `.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir>`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session <live_session_dir> --publish-result-host 127.0.0.1`
 - `.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline`
 
 Live alley startup:
 
 - `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1` stops stale live receiver/pipeline Python processes, starts the receiver, then runs the full `YOLO26s -> SAM2` live pipeline in the same terminal
-- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1 -LaneOnly` runs only receiver plus lane-lock solving
 - `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1 -NoSam2` runs receiver plus YOLO shot detection/tracking without SAM2
 
 Use the repo-local `.venv` for standalone work. The normal runtime path should not depend on the older experiment repo.
@@ -96,41 +93,22 @@ Live transport note:
 - the main direction is now live Quest-to-laptop streaming
 - Quest proof capture is being extended to stream encoded `H.264` media live while Unity sends frame metadata over a separate TCP side channel
 - latest milestone: a real hotspot run now lands as a decodable live `H.264` session on the laptop, with codec config persisted and the shared loader able to open the session as a `LocalClipArtifact`
-- lane lock now follows that same media path: `Lock Lane` tags a short request window inside the continuous session stream instead of creating a separate JPG bundle
+- lane lock is solved on the Quest: pinch/hold aligns the heads-region rectangle, release previews the full lane, and confirm sends the final lane geometry to the laptop
 
 Lane-lock implementation note:
 
-- lane lock is now manual foul-line lane selection, not automatic lane choice
-- the user-selected inputs are:
-  - left lane edge at the foul line
-  - right lane edge at the foul line
-  - the exact frame sequence where those points were selected
-- typed request/result contracts are in:
+- lane lock is the Quest-side heads-region placement flow in:
+  - [StandaloneQuestLaneLockStateCoordinator.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockStateCoordinator.cs)
+  - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
+  - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
+- there is no laptop-side lane solver in the live loop and no dev injection path
+- confirming the lane sends one `lane_lock_confirm` metadata event containing the complete `lane_lock_result`
+- the laptop receiver persists that result at `analysis_lane_lock/<requestId>/lane_lock_result.json`
+- YOLO shot gating, SAM2 tracking, and replay projection use that confirmed lane result directly
+- typed result contracts are in:
   - [lane_lock_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_types.py)
 - projection and lane-coordinate helpers are in:
   - [lane_geometry.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_geometry.py)
-- the solver is in:
-  - [lane_lock_solver.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_solver.py)
-- line-support extraction is still available for validation/overlay scoring:
-  - [lane_line_support.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_line_support.py)
-- Quest-side request capture is in:
-  - [StandaloneQuestRayInteractor.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestRayInteractor.cs)
-  - [StandaloneQuestFoulLineRaySelector.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFoulLineRaySelector.cs)
-  - [StandaloneQuestLaneLockCapture.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockCapture.cs)
-  - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
-  - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
-  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
-- the shared ray interactor is reusable by replay controls; the foul-line selector is just the lane-lock consumer
-- that Quest-side slice rejects lane-lock requests until a foul-line selection exists, then sends one `lane_lock_request` metadata event with:
-  - `leftSelectionFrameSeq`
-  - `rightSelectionFrameSeq`
-  - `leftFoulLinePointWorld`
-  - `rightFoulLinePointWorld`
-  - frame range
-  - capture duration
-  - camera intrinsics
-  - floor plane
-  - regulation lane dimensions
 - the session stream itself is now managed by:
   - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
 - that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
@@ -139,17 +117,10 @@ Lane-lock implementation note:
 - if Quest/app/camera/encoder truly pause/restart from zero or the tracking origin relocalizes, the lane must be locked again
 - the live pipeline processes the latest live stream by default; old streams stay on disk and are used only when selected explicitly
 - the Quest app discovers the laptop at runtime over UDP `8765`, so the scene no longer needs a hardcoded laptop IP
-- the laptop receiver persists those requests in `lane_lock_requests.jsonl` next to the streamed `H.264` session
 - the laptop receiver also owns the Quest-facing result channel:
   - Quest listens as a client on `tcp://<laptop>:8769`
   - laptop analysis stages publish strict result envelopes to `tcp://127.0.0.1:8770`
   - forwarded results are persisted in `outbound_results.jsonl`
-- the current lane-lock runner is:
-  - [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py)
-- the reusable lane-lock stage and live pipeline are in:
-  - [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py)
-  - [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py)
-  - [run_live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_live_session_pipeline.py)
 - strict shot-boundary parsing is in:
   - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
 - automatic YOLO/lane-space shot-boundary detection is in:
@@ -167,7 +138,7 @@ Lane-lock implementation note:
 - automatic shot windows carry the confirmed `laneLockRequestId`, and shot tracking projects through that exact lane result
 - Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)
 - the old desktop click harness was removed because those clicks were not physical foul-line endpoints
-- no automatic lane identity selection, view-center fallback, or silent acceptance path remains in the lane-lock solver
+- no automatic lane identity selection, view-center guess, or silent acceptance path remains in lane locking
 
 See [docs/IMPLEMENTATION_PLAN.md](C:/Users/student/QuestBowlingStandalone/docs/IMPLEMENTATION_PLAN.md) for the active build sequence.
 See [docs/PORTING_MAP.md](C:/Users/student/QuestBowlingStandalone/docs/PORTING_MAP.md) for the exact archive files we should mine and what to avoid copying.

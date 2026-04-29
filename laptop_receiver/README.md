@@ -29,10 +29,8 @@ Current implemented slice:
 - [laptop_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/laptop_result_types.py) defines strict laptop-to-Quest result envelopes
 - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py) defines strict shot result and lane-space trajectory payloads
 - the same [local_clip_artifact.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/local_clip_artifact.py) loader now also accepts a persisted live session directory directly
-- [lane_lock_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_live_session.py) loads `lane_lock_request` events from a landed live session
-- [live_lane_lock_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_lane_lock_stage.py) contains the reusable lane-lock stage used by both CLIs and the live pipeline
-- [run_lane_lock_on_live_session.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/run_lane_lock_on_live_session.py) is the first real lane-lock entry point from a live session directory
-- [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs pending analysis stages once per request
+- Quest now sends the confirmed `lane_lock_result` directly in `lane_lock_confirm`; the live laptop loop does not solve lane lock requests
+- [live_session_pipeline.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_session_pipeline.py) polls live session directories and runs the post-lane shot analysis stages
 - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py) validates strict `shot_start` / `shot_end` windows from `shot_boundaries.jsonl`
 - [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py) writes automatic `shot_start` / `shot_end` events after lane lock; YOLO finds the seed and live camera SAM2 owns tracking/end
 - [live_camera_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_camera_sam2_tracker.py) keeps the camera SAM2 predictor warm and writes the per-shot track CSV
@@ -126,7 +124,7 @@ Normal live alley startup should use the repo-level launcher instead:
 powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1
 ```
 
-That command stops stale live receiver/pipeline Python processes, starts the receiver, waits for health on `127.0.0.1:8768`, then runs the live pipeline in the same terminal. Use `-LaneOnly` for lane-lock-only testing or `-NoSam2` to keep YOLO shot processing enabled without SAM2.
+That command stops stale live receiver/pipeline Python processes, starts the receiver, waits for health on `127.0.0.1:8768`, then runs the live pipeline in the same terminal. Use `-NoSam2` to keep YOLO shot processing enabled without SAM2.
 
 By default it listens on:
 
@@ -149,7 +147,6 @@ What it persists per live stream:
 - `codec_config.h264`
 - `media_samples.jsonl`
 - `metadata_stream.jsonl`
-- `lane_lock_requests.jsonl`
 - `lane_lock_confirms.jsonl`
 - `shot_boundaries.jsonl`
 - `outbound_results.jsonl`
@@ -162,7 +159,7 @@ Shot-boundary note:
 
 - `shot_boundaries.jsonl` is strict: `boundary_type` must be `shot_start` or `shot_end`
 - when `--yolo-checkpoint` is configured, the live pipeline creates shot boundaries automatically after a user-confirmed lane lock
-- a rejected/relocked lane confirmation disables shot detection again until a new lane candidate is accepted
+- a rejected/relocked lane confirmation disables shot detection again until a new lane is confirmed
 - automatic `shot_start` requires a confident YOLO ball projected into the lane-lock release corridor plus short downlane confirmation
 - automatic `shot_end` uses terminal downlane region, sustained YOLO/projection loss with grace, or max shot duration
 - each automatic shot boundary records the confirmed `laneLockRequestId`; shot projection uses that exact lane result
@@ -175,20 +172,8 @@ Current live transport note:
 - `pts_us` is the join key between encoded samples and frame metadata
 - this is the first real live streaming slice, not the final optimized transport
 - the receiver now persists codec config ahead of media samples so desktop decoders can open `stream.h264` directly
-- lane lock now rides on this same session stream as a metadata event, not as a separate JPG bundle
+- lane lock is solved on Quest and sent as a `lane_lock_confirm` metadata event containing the full `lane_lock_result`
 - laptop-to-Quest messages now use strict `laptop_result_envelope` JSON lines on the result channel
-
-Lane-lock solver usage on a landed live session:
-
-```powershell
-.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream>
-```
-
-Publish the lane-lock result to a connected Quest session:
-
-```powershell
-.\.venv\Scripts\python.exe -m laptop_receiver.run_lane_lock_on_live_session C:\path\to\live_<session>_<stream> --publish-result-host 127.0.0.1
-```
 
 Live session pipeline usage:
 
@@ -219,7 +204,7 @@ $yolo26s = "models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt"
 Current honest note:
 
 - the old desktop click artifacts were invalid for this contract because the selected pixels were not physical foul-line endpoints
-- the live product path must send `leftFoulLinePointWorld` and `rightFoulLinePointWorld` from the shared Quest ray/floor hit selector
-- there is no automatic lane identity selection or view-center fallback in the solver
+- the live product path receives world-space lane geometry from the Quest lane coordinator in `lane_lock_confirm`
+- there is no automatic lane identity selection or view-center guess in lane calibration
 - shot boundaries and tracking are explicit: the live pipeline only runs the YOLO-based shot path when a YOLO checkpoint is configured, and replayable shot results require live camera SAM2 via `--run-sam2`
 - a replayable `shot_result` requires a user-confirmed lane lock; without one, or after a relock invalidates one, the laptop emits a failed shot result instead of inventing lane-space trajectory data

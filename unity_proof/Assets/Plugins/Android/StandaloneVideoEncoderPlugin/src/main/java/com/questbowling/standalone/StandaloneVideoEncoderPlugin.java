@@ -49,6 +49,7 @@ public final class StandaloneVideoEncoderPlugin {
     private long writtenSampleCount;
     private String outputPath = "";
     private String lastError = "";
+    private String lastReleaseReason = "";
     private int configuredWidth;
     private int configuredHeight;
     private int configuredFps;
@@ -109,6 +110,7 @@ public final class StandaloneVideoEncoderPlugin {
                 muxerStarted = false;
                 writtenSampleCount = 0L;
                 lastError = "";
+                lastReleaseReason = "";
                 configuredWidth = width;
                 configuredHeight = height;
                 configuredFps = fps;
@@ -167,8 +169,12 @@ public final class StandaloneVideoEncoderPlugin {
     }
 
     public void abortSession() {
+        abortSession("aborted");
+    }
+
+    public void abortSession(String reason) {
         synchronized (gate) {
-            lastError = "aborted";
+            lastError = reason == null || reason.isEmpty() ? "aborted" : reason;
             releaseAllLocked();
         }
     }
@@ -262,6 +268,7 @@ public final class StandaloneVideoEncoderPlugin {
                 root.put("written_sample_count", writtenSampleCount);
                 root.put("stopping", stopping);
                 root.put("last_error", lastError);
+                root.put("last_release_reason", lastReleaseReason);
                 root.put("live_stream_connected", liveStreamConnected);
                 root.put("live_stream_host", liveStreamHost);
                 root.put("live_stream_port", liveStreamPort);
@@ -407,11 +414,15 @@ public final class StandaloneVideoEncoderPlugin {
     }
 
     private void releaseAllLocked() {
+        String releaseReason = lastError == null || lastError.isEmpty()
+                ? (stopping ? "stop_session" : "encoder_release")
+                : lastError;
+        lastReleaseReason = releaseReason;
         running = false;
         stopping = false;
         muxerStarted = false;
         trackIndex = -1;
-        closeLiveStreamLocked(true, "encoder_release");
+        closeLiveStreamLocked(true, releaseReason);
 
         if (inputSurface != null) {
             try {

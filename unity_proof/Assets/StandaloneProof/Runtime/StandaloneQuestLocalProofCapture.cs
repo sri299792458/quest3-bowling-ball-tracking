@@ -64,6 +64,46 @@ namespace QuestBowlingStandalone.QuestApp
         public StandaloneShotMetadata CurrentShotMetadata => _shotMetadata;
         public StandaloneFrameMetadata LastCommittedFrameMetadata => _lastCommittedFrameMetadata;
 
+        public bool TryApplyLaneLockResult(StandaloneLaneLockResult result, out string note)
+        {
+            note = "lane_lock_result_missing";
+            if (result == null)
+            {
+                return false;
+            }
+
+            if (!result.success)
+            {
+                note = "lane_lock_result_failed:" + (result.failureReason ?? string.Empty);
+                return false;
+            }
+
+            if (result.laneWidthMeters <= 0.0f || result.laneLengthMeters <= 0.0f)
+            {
+                note = "lane_lock_result_invalid_dimensions";
+                return false;
+            }
+
+            laneLockState = StandaloneLaneLockState.Locked;
+            laneLockConfidence = Mathf.Clamp01(result.confidence);
+            laneOriginWorld = result.laneOriginWorld;
+            laneRotationWorld = result.laneRotationWorld;
+            laneWidthMeters = result.laneWidthMeters;
+            laneLengthMeters = result.laneLengthMeters;
+            _laneLockMetadata = BuildLaneLockMetadata();
+            note = "proof_capture_lane_lock_applied";
+            return true;
+        }
+
+        public void ClearLaneLock()
+        {
+            laneLockState = StandaloneLaneLockState.Unknown;
+            laneLockConfidence = 0.0f;
+            laneOriginWorld = Vector3.zero;
+            laneRotationWorld = Quaternion.identity;
+            _laneLockMetadata = BuildLaneLockMetadata();
+        }
+
         public bool TryGetEncoderInputSurfaceRawObject(out IntPtr surfaceObject)
         {
             surfaceObject = IntPtr.Zero;
@@ -321,6 +361,11 @@ namespace QuestBowlingStandalone.QuestApp
 
         public void CancelProofClip()
         {
+            CancelProofClip("proof_clip_canceled");
+        }
+
+        public void CancelProofClip(string reason)
+        {
             if (!IsCapturing)
             {
                 return;
@@ -328,13 +373,13 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (startEncoderOnProofClip && _videoEncoderBridge != null)
             {
-                _videoEncoderBridge.AbortSession();
+                _videoEncoderBridge.AbortSession(string.IsNullOrWhiteSpace(reason) ? "proof_clip_canceled" : reason);
             }
 
             DiscardPreparedFrameMetadata();
             _artifactWriter.Dispose();
             _artifactWriter = null;
-            DebugLog("Proof clip canceled.");
+            DebugLog("Proof clip canceled: " + (string.IsNullOrWhiteSpace(reason) ? "unspecified" : reason));
         }
 
         public void ReportRenderAttempt(bool success, string note)

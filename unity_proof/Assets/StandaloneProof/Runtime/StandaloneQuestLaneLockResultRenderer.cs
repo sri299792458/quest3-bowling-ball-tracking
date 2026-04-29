@@ -7,7 +7,6 @@ namespace QuestBowlingStandalone.QuestApp
     public sealed class StandaloneQuestLaneLockResultRenderer : MonoBehaviour
     {
         [Header("Result Source")]
-        [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
         [SerializeField] private Transform visualizationRoot;
 
         [Header("Lane Shape")]
@@ -48,28 +47,12 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void Awake()
         {
-            if (liveResultReceiver == null)
-            {
-                liveResultReceiver = FindFirstObjectByType<StandaloneQuestLiveResultReceiver>();
-            }
-
             EnsureRenderObjects();
             ClearVisualization("lane_result_renderer_ready");
         }
 
-        private void OnEnable()
-        {
-            Subscribe();
-        }
-
-        private void OnDisable()
-        {
-            Unsubscribe();
-        }
-
         private void OnDestroy()
         {
-            Unsubscribe();
             DestroyIfNeeded(_surfaceMaterial);
             DestroyIfNeeded(_outlineMaterial);
             DestroyIfNeeded(_foulLineMaterial);
@@ -140,27 +123,6 @@ namespace QuestBowlingStandalone.QuestApp
             ClearLine(_centerLineRenderer);
             ClearLine(_releaseCorridorRenderer);
             SetStatus(string.IsNullOrWhiteSpace(reason) ? "lane_visualization_cleared" : reason);
-        }
-
-        private void Subscribe()
-        {
-            if (liveResultReceiver == null)
-            {
-                return;
-            }
-
-            liveResultReceiver.LaneLockResultReceived -= RenderLaneLockResult;
-            liveResultReceiver.LaneLockResultReceived += RenderLaneLockResult;
-        }
-
-        private void Unsubscribe()
-        {
-            if (liveResultReceiver == null)
-            {
-                return;
-            }
-
-            liveResultReceiver.LaneLockResultReceived -= RenderLaneLockResult;
         }
 
         private void EnsureRenderObjects()

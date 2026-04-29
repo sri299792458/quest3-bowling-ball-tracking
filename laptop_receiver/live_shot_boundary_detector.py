@@ -45,7 +45,7 @@ class LiveShotBoundaryDetectorConfig:
     yolo_start_conf: float = 0.8
     yolo_track_conf: float = 0.25
     yolo_min_box_size: float = 10.0
-    scan_stride_frames: int = 1
+    scan_stride_frames: int = 2
     sam2_config: LiveCameraSam2Config | None = None
     require_sam2_tracking: bool = False
     warm_models_on_start: bool = True
@@ -61,6 +61,8 @@ class LiveShotBoundaryDetectorConfig:
     max_shot_duration_seconds: float = 8.0
     terminal_downlane_margin_meters: float = 0.50
     shot_cooldown_seconds: float = 2.0
+    max_frames_per_poll: int = 90
+    state_save_interval_frames: int = 30
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,7 @@ class LiveShotBoundaryDetector:
             )
 
         self._sync_state_with_boundaries(state, shot_boundaries.events, shot_boundaries.open_start)
+        latest_available_frame_index: int | None = None
         latest_cursor = self._latest_frame_cursor(root)
         if latest_cursor is not None:
             latest_frame_index, latest_frame_seq = latest_cursor
@@ -200,6 +203,7 @@ class LiveShotBoundaryDetector:
                 )
             state["latestAvailableFrameIndex"] = int(latest_frame_index)
             state["latestAvailableFrameSeq"] = int(latest_frame_seq)
+            latest_available_frame_index = int(latest_frame_index)
 
         artifact = load_local_clip_artifact(root)
         if not artifact.frame_metadata:
@@ -224,7 +228,12 @@ class LiveShotBoundaryDetector:
         last_reason = "no_new_frames"
 
         start_frame_index = max(_int(state.get("lastScannedFrameIndex"), -1) + 1, 0)
+        max_frames_this_poll = max(int(self.config.max_frames_per_poll), 1)
+        save_interval = max(int(self.config.state_save_interval_frames), 1)
         for decoded_frame in artifact.iter_frames(start_frame_index=start_frame_index):
+            if latest_available_frame_index is not None and int(decoded_frame.frame_index) > latest_available_frame_index:
+                break
+
             metadata = decoded_frame.metadata or {}
             frame_seq = self._frame_seq(metadata, decoded_frame.frame_index)
             if frame_seq <= _int(state.get("lastScannedFrameSeq"), -1):
@@ -263,6 +272,17 @@ class LiveShotBoundaryDetector:
                     start_events_emitted += 1
                 elif event.get("boundary_type") == SHOT_BOUNDARY_END:
                     end_events_emitted += 1
+
+            if scanned_frames % save_interval == 0:
+                self._save_state(root, state)
+
+            if scanned_frames >= max_frames_this_poll:
+                last_reason = "scan_batch_limit"
+                state["lastReason"] = last_reason
+                break
+
+            if latest_available_frame_index is not None and int(decoded_frame.frame_index) >= latest_available_frame_index:
+                break
 
         if scanned_frames > 0:
             last_reason = str(state.get("lastReason") or last_reason)

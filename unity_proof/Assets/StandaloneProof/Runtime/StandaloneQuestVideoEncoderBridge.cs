@@ -150,10 +150,15 @@ namespace QuestBowlingStandalone.QuestApp
 
         public void AbortSession()
         {
+            AbortSession("aborted");
+        }
+
+        public void AbortSession(string reason)
+        {
 #if UNITY_ANDROID && !UNITY_EDITOR
             try
             {
-                _plugin?.Call("abortSession");
+                _plugin?.Call("abortSession", string.IsNullOrWhiteSpace(reason) ? "aborted" : reason);
             }
             catch
             {

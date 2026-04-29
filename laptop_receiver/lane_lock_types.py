@@ -115,13 +115,43 @@ class CameraIntrinsics:
 
     @classmethod
     def from_session_metadata(cls, session_metadata: Mapping[str, Any]) -> "CameraIntrinsics":
+        width = _int(session_metadata.get("actualWidth") or session_metadata.get("requestedWidth"))
+        height = _int(session_metadata.get("actualHeight") or session_metadata.get("requestedHeight"))
+        sensor_width = _int(session_metadata.get("sensorWidth"), width)
+        sensor_height = _int(session_metadata.get("sensorHeight"), height)
+        fx = _float(session_metadata.get("fx"))
+        fy = _float(session_metadata.get("fy"))
+        cx = _float(session_metadata.get("cx"))
+        cy = _float(session_metadata.get("cy"))
+
+        if width > 0 and height > 0 and sensor_width > 0 and sensor_height > 0:
+            scale_x = float(width) / float(sensor_width)
+            scale_y = float(height) / float(sensor_height)
+            max_scale = max(scale_x, scale_y)
+            if max_scale > 0.0:
+                crop_scale_x = scale_x / max_scale
+                crop_scale_y = scale_y / max_scale
+                crop_x = float(sensor_width) * (1.0 - crop_scale_x) * 0.5
+                crop_y = float(sensor_height) * (1.0 - crop_scale_y) * 0.5
+                crop_width = float(sensor_width) * crop_scale_x
+                crop_height = float(sensor_height) * crop_scale_y
+                if crop_width > 0.0 and crop_height > 0.0:
+                    x_scale = float(width) / crop_width
+                    y_scale = float(height) / crop_height
+                    fx *= x_scale
+                    fy *= y_scale
+                    cx = (cx - crop_x) * x_scale
+                    # Meta's passthrough intrinsics use a bottom-left viewport/sensor Y axis.
+                    # Our decoded OpenCV frames use top-left image coordinates.
+                    cy = float(height) - (cy - crop_y) * y_scale
+
         return cls(
-            fx=_float(session_metadata.get("fx")),
-            fy=_float(session_metadata.get("fy")),
-            cx=_float(session_metadata.get("cx")),
-            cy=_float(session_metadata.get("cy")),
-            width=_int(session_metadata.get("actualWidth") or session_metadata.get("requestedWidth")),
-            height=_int(session_metadata.get("actualHeight") or session_metadata.get("requestedHeight")),
+            fx=fx,
+            fy=fy,
+            cx=cx,
+            cy=cy,
+            width=width,
+            height=height,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -169,112 +199,6 @@ class FrameCameraState:
             "headPoseWorld": self.head_pose_world.to_dict(),
             "laneLockState": self.lane_lock_state,
         }
-
-
-@dataclass(frozen=True)
-class LaneLockRequest:
-    schema_version: str
-    session_id: str
-    request_id: str
-    frame_seq_start: int
-    frame_seq_end: int
-    frame_count: int
-    capture_duration_seconds: float
-    left_selection_frame_seq: int
-    right_selection_frame_seq: int
-    left_foul_line_point_world: Vector3
-    right_foul_line_point_world: Vector3
-    lane_width_meters: float
-    lane_length_meters: float
-    fx: float
-    fy: float
-    cx: float
-    cy: float
-    image_width: int
-    image_height: int
-    floor_plane_point_world: Vector3
-    floor_plane_normal_world: Vector3
-    camera_side: str
-
-    @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "LaneLockRequest":
-        schema_version = _str(payload.get("schemaVersion"))
-        if schema_version != "lane_lock_request":
-            raise ValueError(f"Unsupported lane-lock request schemaVersion {schema_version!r}.")
-        if "leftFoulLinePointWorld" not in payload or "rightFoulLinePointWorld" not in payload:
-            raise ValueError(
-                "lane_lock_request requires leftFoulLinePointWorld and rightFoulLinePointWorld."
-            )
-        if "leftSelectionFrameSeq" not in payload or "rightSelectionFrameSeq" not in payload:
-            raise ValueError("lane_lock_request requires leftSelectionFrameSeq and rightSelectionFrameSeq.")
-
-        return cls(
-            schema_version=schema_version,
-            session_id=_str(payload.get("sessionId")),
-            request_id=_str(payload.get("requestId")),
-            frame_seq_start=_int(payload.get("frameSeqStart")),
-            frame_seq_end=_int(payload.get("frameSeqEnd")),
-            frame_count=_int(payload.get("frameCount")),
-            capture_duration_seconds=_float(payload.get("captureDurationSeconds")),
-            left_selection_frame_seq=_int(payload.get("leftSelectionFrameSeq")),
-            right_selection_frame_seq=_int(payload.get("rightSelectionFrameSeq")),
-            left_foul_line_point_world=Vector3.from_mapping(payload.get("leftFoulLinePointWorld")),
-            right_foul_line_point_world=Vector3.from_mapping(payload.get("rightFoulLinePointWorld")),
-            lane_width_meters=_float(payload.get("laneWidthMeters")),
-            lane_length_meters=_float(payload.get("laneLengthMeters")),
-            fx=_float(payload.get("fx")),
-            fy=_float(payload.get("fy")),
-            cx=_float(payload.get("cx")),
-            cy=_float(payload.get("cy")),
-            image_width=_int(payload.get("imageWidth")),
-            image_height=_int(payload.get("imageHeight")),
-            floor_plane_point_world=Vector3.from_mapping(payload.get("floorPlanePointWorld")),
-            floor_plane_normal_world=Vector3.from_mapping(payload.get("floorPlaneNormalWorld")),
-            camera_side=_str(payload.get("cameraSide"), "Unknown"),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schemaVersion": self.schema_version,
-            "sessionId": self.session_id,
-            "requestId": self.request_id,
-            "frameSeqStart": self.frame_seq_start,
-            "frameSeqEnd": self.frame_seq_end,
-            "frameCount": self.frame_count,
-            "captureDurationSeconds": self.capture_duration_seconds,
-            "leftSelectionFrameSeq": self.left_selection_frame_seq,
-            "rightSelectionFrameSeq": self.right_selection_frame_seq,
-            "leftFoulLinePointWorld": self.left_foul_line_point_world.to_dict(),
-            "rightFoulLinePointWorld": self.right_foul_line_point_world.to_dict(),
-            "laneWidthMeters": self.lane_width_meters,
-            "laneLengthMeters": self.lane_length_meters,
-            "fx": self.fx,
-            "fy": self.fy,
-            "cx": self.cx,
-            "cy": self.cy,
-            "imageWidth": self.image_width,
-            "imageHeight": self.image_height,
-            "floorPlanePointWorld": self.floor_plane_point_world.to_dict(),
-            "floorPlaneNormalWorld": self.floor_plane_normal_world.to_dict(),
-            "cameraSide": self.camera_side,
-        }
-
-    @property
-    def anchor_frame_seq(self) -> int:
-        return int(self.right_selection_frame_seq or self.left_selection_frame_seq)
-
-    def to_camera_intrinsics(self) -> CameraIntrinsics:
-        width = int(self.image_width)
-        height = int(self.image_height)
-        return CameraIntrinsics(
-            fx=float(self.fx),
-            fy=float(self.fy),
-            cx=float(self.cx),
-            cy=float(self.cy),
-            width=width,
-            height=height,
-        )
-
 
 @dataclass(frozen=True)
 class LaneLockConfidenceBreakdown:

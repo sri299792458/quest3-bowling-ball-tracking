@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 
@@ -21,8 +22,14 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Live Transport")]
         [SerializeField] private bool enableLiveStreaming = true;
         [SerializeField] private bool requireLaptopDiscovery = true;
+        [SerializeField] private bool abortSessionOnApplicationPause = false;
         [SerializeField] private string liveStreamHost = "";
         [SerializeField] private int liveMediaPort = 8766;
+
+        [Header("Media Watchdog")]
+        [SerializeField] private float mediaWatchdogIntervalSeconds = 0.5f;
+        [SerializeField] private float mediaReconnectIntervalSeconds = 1.0f;
+        [SerializeField] private float mediaNoProgressTimeoutSeconds = 2.0f;
 
         [Header("Diagnostics")]
         [SerializeField] private bool verboseLogging = true;
@@ -30,10 +37,26 @@ namespace QuestBowlingStandalone.QuestApp
         private Coroutine _startupCoroutine;
         private bool _sessionActive;
         private bool _isQuitting;
+        private float _nextMediaWatchdogAt;
+        private float _nextMediaReconnectAt;
+        private float _lastMediaProgressAt;
+        private long _lastLiveMediaSampleCount = -1L;
 
         public bool IsSessionActive => _sessionActive && proofCapture != null && proofCapture.IsCapturing;
         public string ActiveSessionId => proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
         public string ActiveStreamId => proofCapture != null ? proofCapture.ActiveStreamId : string.Empty;
+
+        [Serializable]
+        private sealed class EncoderStatusSnapshot
+        {
+            public string status;
+            public bool live_stream_connected;
+            public long live_stream_sent_sample_count;
+            public long live_stream_queued_packet_count;
+            public long live_stream_dropped_packet_count;
+            public string live_stream_last_error;
+            public string last_error;
+        }
 
         private void OnEnable()
         {
@@ -70,7 +93,14 @@ namespace QuestBowlingStandalone.QuestApp
         {
             if (pauseStatus)
             {
-                AbortSession("application_pause");
+                if (abortSessionOnApplicationPause)
+                {
+                    AbortSession("application_pause");
+                }
+                else
+                {
+                    DebugLog("Application pause observed; keeping live session active.");
+                }
                 return;
             }
 
@@ -80,6 +110,11 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _startupCoroutine = StartCoroutine(BeginSessionWhenReady());
+        }
+
+        private void Update()
+        {
+            RunMediaWatchdog();
         }
 
         public bool TryBeginSession(out string note)
@@ -118,10 +153,12 @@ namespace QuestBowlingStandalone.QuestApp
                 DebugLog($"Begin live media stream: {(mediaStarted ? "ok" : "failed")} | {mediaNote}");
                 if (!mediaStarted)
                 {
-                    proofCapture.CancelProofClip();
+                    proofCapture.CancelProofClip("live_media_start_failed:" + mediaNote);
                     note = $"live_media_start_failed:{mediaNote}";
                     return false;
                 }
+
+                ResetMediaWatchdog();
 
                 if (liveMetadataSender != null && liveMetadataSender.EnabledForAutoRun)
                 {
@@ -135,7 +172,7 @@ namespace QuestBowlingStandalone.QuestApp
                     DebugLog($"Begin live metadata stream: {(metadataStarted ? "ok" : "failed")} | {metadataNote}");
                     if (!metadataStarted)
                     {
-                        proofCapture.CancelProofClip();
+                        proofCapture.CancelProofClip("live_metadata_start_failed:" + metadataNote);
                         note = $"live_metadata_start_failed:{metadataNote}";
                         return false;
                     }
@@ -150,7 +187,7 @@ namespace QuestBowlingStandalone.QuestApp
                     DebugLog($"Begin live result stream: {(resultStarted ? "ok" : "failed")} | {resultNote}");
                     if (!resultStarted)
                     {
-                        proofCapture.CancelProofClip();
+                        proofCapture.CancelProofClip("live_result_start_failed:" + resultNote);
                         note = $"live_result_start_failed:{resultNote}";
                         return false;
                     }
@@ -193,6 +230,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             var finalized = proofCapture.TryFinalizeSessionStream();
             _sessionActive = false;
+            ResetMediaWatchdog();
             note = finalized ? "session_finalized" : "session_finalize_failed";
             DebugLog($"Finalize session stream: {(finalized ? "ok" : "failed")}");
             return finalized;
@@ -214,7 +252,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (proofCapture != null && proofCapture.IsCapturing)
             {
-                proofCapture.CancelProofClip();
+                proofCapture.CancelProofClip(string.IsNullOrWhiteSpace(reason) ? "session_abort" : reason);
             }
 
             if (_sessionActive)
@@ -223,6 +261,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _sessionActive = false;
+            ResetMediaWatchdog();
         }
 
         public bool TrySendShotBoundary(string boundaryType, string reason, out string note)
@@ -328,6 +367,105 @@ namespace QuestBowlingStandalone.QuestApp
             liveMetadataSender?.SetEndpoint(endpoint.Host, endpoint.MetadataPort);
             liveResultReceiver?.SetEndpoint(endpoint.Host, endpoint.ResultPort);
             DebugLog("Using laptop endpoint: " + endpoint);
+        }
+
+        private void RunMediaWatchdog()
+        {
+            if (!_sessionActive || !enableLiveStreaming || proofCapture == null || !proofCapture.IsCapturing)
+            {
+                return;
+            }
+
+            var now = Time.realtimeSinceStartup;
+            if (now < _nextMediaWatchdogAt)
+            {
+                return;
+            }
+
+            _nextMediaWatchdogAt = now + Mathf.Max(0.1f, mediaWatchdogIntervalSeconds);
+            if (!TryReadEncoderStatus(out var status))
+            {
+                return;
+            }
+
+            var sampleCount = status.live_stream_sent_sample_count;
+            if (status.live_stream_connected && sampleCount != _lastLiveMediaSampleCount)
+            {
+                _lastLiveMediaSampleCount = sampleCount;
+                _lastMediaProgressAt = now;
+                return;
+            }
+
+            if (_lastMediaProgressAt <= 0.0f)
+            {
+                _lastMediaProgressAt = now;
+                return;
+            }
+
+            var noProgress = status.live_stream_connected &&
+                now - _lastMediaProgressAt >= Mathf.Max(0.5f, mediaNoProgressTimeoutSeconds);
+            var disconnected = !status.live_stream_connected;
+            if (!disconnected && !noProgress)
+            {
+                return;
+            }
+
+            if (now < _nextMediaReconnectAt)
+            {
+                return;
+            }
+
+            _nextMediaReconnectAt = now + Mathf.Max(0.25f, mediaReconnectIntervalSeconds);
+            var reason = disconnected ? "disconnected" : "no_progress";
+            var error = string.IsNullOrWhiteSpace(status.live_stream_last_error)
+                ? status.last_error
+                : status.live_stream_last_error;
+            var reconnected = proofCapture.TryStartLiveMediaStream(liveStreamHost, liveMediaPort, out var note);
+            DebugLog(
+                $"Media watchdog reconnect {reason}: {(reconnected ? "ok" : "failed")} | {note} | " +
+                $"samples={sampleCount} queued={status.live_stream_queued_packet_count} " +
+                $"dropped={status.live_stream_dropped_packet_count} error={error}");
+            if (reconnected)
+            {
+                _lastLiveMediaSampleCount = -1L;
+                _lastMediaProgressAt = now;
+            }
+        }
+
+        private bool TryReadEncoderStatus(out EncoderStatusSnapshot status)
+        {
+            status = null;
+            if (proofCapture == null)
+            {
+                return false;
+            }
+
+            var json = proofCapture.GetEncoderStatusJson();
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            try
+            {
+                status = JsonUtility.FromJson<EncoderStatusSnapshot>(json);
+            }
+            catch (Exception ex)
+            {
+                DebugLog("Failed to parse encoder status: " + ex.Message + " | " + json);
+                return false;
+            }
+
+            return status != null;
+        }
+
+        private void ResetMediaWatchdog()
+        {
+            var now = Time.realtimeSinceStartup;
+            _nextMediaWatchdogAt = now + Mathf.Max(0.1f, mediaWatchdogIntervalSeconds);
+            _nextMediaReconnectAt = 0.0f;
+            _lastMediaProgressAt = now;
+            _lastLiveMediaSampleCount = -1L;
         }
 
         private void CancelStartupCoroutine()

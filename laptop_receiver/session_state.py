@@ -36,6 +36,7 @@ LANE_FAILED = "Failed"
 LANE_RELOCK_REQUIRED = "RelockRequired"
 
 SHOT_DISABLED_UNTIL_LANE_CONFIRMED = "DisabledUntilLaneConfirmed"
+SHOT_DISABLED_UNTIL_MEDIA_FRESH = "DisabledUntilMediaFresh"
 SHOT_ARMED = "Armed"
 SHOT_START_CANDIDATE = "StartCandidate"
 SHOT_OPEN = "Open"
@@ -87,6 +88,11 @@ def default_session_state(
             "sessionEndSeen": False,
             "lastFrameSeq": None,
             "lastFramePtsUs": None,
+            "mediaConnected": False,
+            "lastMediaSampleUnixMs": None,
+            "lastMediaDisconnectUnixMs": None,
+            "lastMediaDisconnectReason": "",
+            "lastMetadataMessageUnixMs": None,
         },
         "lane": {
             "state": LANE_UNKNOWN,
@@ -224,13 +230,26 @@ def mark_transport(
     stream_id: str = "",
     **fields: Any,
 ) -> dict[str, Any]:
-    return update_session_state(
-        session_dir,
-        session_id=session_id,
-        stream_id=stream_id,
-        transport={"state": state, **fields},
-        diagnostics={"lastEvent": f"transport:{state}"},
-    )
+    with _session_state_lock(session_dir):
+        current = _load_session_state_unlocked(session_dir)
+        transport = current.setdefault("transport", {})
+        if (
+            state != TRANSPORT_ENDED
+            and (
+                bool(transport.get("sessionEndSeen"))
+                or str(transport.get("state") or "") == TRANSPORT_ENDED
+            )
+        ):
+            return current
+
+        if session_id:
+            current["sessionId"] = session_id
+        if stream_id:
+            current["streamId"] = stream_id
+        transport.update({"state": state, **fields})
+        current.setdefault("diagnostics", {})["lastEvent"] = f"transport:{state}"
+        _write_session_state_unlocked(session_dir, current)
+        return current
 
 
 def mark_lane(session_dir: Path | str, state: str, **fields: Any) -> dict[str, Any]:
@@ -303,6 +322,11 @@ def _ensure_sections(state: dict[str, Any]) -> None:
     state["transport"].setdefault("sessionEndSeen", False)
     state["transport"].setdefault("lastFrameSeq", None)
     state["transport"].setdefault("lastFramePtsUs", None)
+    state["transport"].setdefault("mediaConnected", False)
+    state["transport"].setdefault("lastMediaSampleUnixMs", None)
+    state["transport"].setdefault("lastMediaDisconnectUnixMs", None)
+    state["transport"].setdefault("lastMediaDisconnectReason", "")
+    state["transport"].setdefault("lastMetadataMessageUnixMs", None)
     state["lane"].setdefault("state", LANE_UNKNOWN)
     state["shot"].setdefault("state", SHOT_DISABLED_UNTIL_LANE_CONFIRMED)
     state["shot"].setdefault("activeLaneLockRequestId", "")

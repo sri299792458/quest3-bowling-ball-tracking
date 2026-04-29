@@ -8,52 +8,40 @@ from typing import Any
 
 from laptop_receiver.laptop_result_types import (
     LaptopResultPublishError,
-    build_lane_lock_result_envelope,
     build_shot_result_envelope,
     publish_laptop_result,
 )
-from laptop_receiver.live_lane_lock_stage import solve_lane_lock_stage_for_live_session
 from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetector, LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 from laptop_receiver.session_state import (
-    LANE_CANDIDATE_RECEIVED,
-    LANE_FAILED,
-    LANE_SOLVING,
     SHOT_ANALYZING,
     SHOT_ARMED,
+    SHOT_DISABLED_UNTIL_MEDIA_FRESH,
     SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
     SHOT_OPEN,
     SHOT_RESULT_FAILED,
     SHOT_RESULT_READY,
     SHOT_START_CANDIDATE,
     SHOT_WINDOW_COMPLETE,
-    mark_lane,
+    TRANSPORT_DEGRADED,
+    TRANSPORT_ENDED,
+    load_session_state,
     mark_shot,
+    mark_transport,
 )
 
 
 PIPELINE_STATE_SCHEMA_VERSION = "live_session_pipeline_state"
 PUBLISH_FAILED_UNKNOWN_STREAM = "failed_unknown_active_stream"
+MEDIA_FRESH_TIMEOUT_SECONDS = 2.0
 
 
 def _load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-
-    rows: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped:
-            rows.append(json.loads(stripped))
-    return rows
 
 
 def _now_unix_ms() -> int:
@@ -75,9 +63,6 @@ class LivePipelineConfig:
 @dataclass
 class PipelineProcessSummary:
     discovered_sessions: int = 0
-    lane_lock_requests_seen: int = 0
-    lane_lock_requests_processed: int = 0
-    lane_lock_requests_skipped: int = 0
     auto_shot_boundary_frames_scanned: int = 0
     auto_shot_boundary_yolo_frames: int = 0
     auto_shot_boundary_events_emitted: int = 0
@@ -91,9 +76,6 @@ class PipelineProcessSummary:
     def to_dict(self) -> dict[str, Any]:
         return {
             "discoveredSessions": self.discovered_sessions,
-            "laneLockRequestsSeen": self.lane_lock_requests_seen,
-            "laneLockRequestsProcessed": self.lane_lock_requests_processed,
-            "laneLockRequestsSkipped": self.lane_lock_requests_skipped,
             "autoShotBoundaryFramesScanned": self.auto_shot_boundary_frames_scanned,
             "autoShotBoundaryYoloFrames": self.auto_shot_boundary_yolo_frames,
             "autoShotBoundaryEventsEmitted": self.auto_shot_boundary_events_emitted,
@@ -150,8 +132,7 @@ class LiveSessionPipeline:
         while True:
             summary = self.process_once()
             did_work = (
-                summary.lane_lock_requests_processed > 0
-                or summary.auto_shot_boundary_events_emitted > 0
+                summary.auto_shot_boundary_events_emitted > 0
                 or summary.completed_shot_windows_processed > 0
                 or bool(summary.errors)
             )
@@ -166,36 +147,9 @@ class LiveSessionPipeline:
             time.sleep(max(float(self.config.poll_interval_seconds), 0.05))
 
     def _process_session_dir(self, session_dir: Path, summary: PipelineProcessSummary) -> None:
-        state = self._load_pipeline_state(session_dir)
+        media_ready = self._mark_media_freshness(session_dir)
 
-        envelopes = _load_jsonl(session_dir / "lane_lock_requests.jsonl")
-        if envelopes:
-            processed_requests = state.setdefault("processedLaneLockRequests", {})
-
-            for envelope in envelopes:
-                payload = envelope.get("lane_lock_request")
-                if not isinstance(payload, dict):
-                    summary.errors.append(f"{session_dir}: lane_lock_request envelope missing payload")
-                    continue
-
-                request_id = str(payload.get("requestId") or "")
-                if not request_id:
-                    summary.errors.append(f"{session_dir}: lane_lock_request missing requestId")
-                    continue
-
-                summary.lane_lock_requests_seen += 1
-                if request_id in processed_requests:
-                    summary.lane_lock_requests_skipped += 1
-                    continue
-
-                publish_status = self._process_lane_lock_request(session_dir, request_id, processed_requests)
-                summary.lane_lock_requests_processed += 1
-                if publish_status == PUBLISH_FAILED_UNKNOWN_STREAM:
-                    processed_requests.pop(request_id, None)
-                    summary.errors.append(f"{session_dir}: lane_lock_result publish failed: unknown active stream")
-                self._save_pipeline_state(session_dir, state)
-
-        if self._shot_boundary_detector is not None:
+        if self._shot_boundary_detector is not None and media_ready:
             detector_result = self._shot_boundary_detector.process_session_dir(session_dir)
             summary.auto_shot_boundary_frames_scanned += int(detector_result.scanned_frames)
             summary.auto_shot_boundary_yolo_frames += int(detector_result.yolo_frames)
@@ -207,16 +161,17 @@ class LiveSessionPipeline:
         summary.completed_shot_windows_seen += len(shot_boundaries.completed_windows)
         if shot_boundaries.open_start is not None:
             summary.open_shot_windows_seen += 1
-            mark_shot(
-                session_dir,
-                SHOT_OPEN,
-                openWindowId=f"shot_{shot_boundaries.open_start.frame_seq}",
-                activeLaneLockRequestId=shot_boundaries.open_start.lane_lock_request_id,
-                openFrameSeqStart=shot_boundaries.open_start.frame_seq,
-                openFrameSeqEnd=None,
-                lastFailureReason="",
-                lastReason=shot_boundaries.open_start.reason,
-            )
+            if media_ready:
+                mark_shot(
+                    session_dir,
+                    SHOT_OPEN,
+                    openWindowId=f"shot_{shot_boundaries.open_start.frame_seq}",
+                    activeLaneLockRequestId=shot_boundaries.open_start.lane_lock_request_id,
+                    openFrameSeqStart=shot_boundaries.open_start.frame_seq,
+                    openFrameSeqEnd=None,
+                    lastFailureReason="",
+                    lastReason=shot_boundaries.open_start.reason,
+                )
         for error in shot_boundaries.errors:
             summary.errors.append(f"{session_dir}: {error}")
 
@@ -248,62 +203,6 @@ class LiveSessionPipeline:
                     processed_windows.pop(window.window_id, None)
                     summary.errors.append(f"{session_dir}: shot_result publish failed: unknown active stream")
                 self._save_pipeline_state(session_dir, state)
-
-    def _process_lane_lock_request(
-        self,
-        session_dir: Path,
-        request_id: str,
-        processed_requests: dict[str, Any],
-    ) -> str:
-        mark_lane(
-            session_dir,
-            LANE_SOLVING,
-            activeRequestId=request_id,
-            lastFailureReason="",
-        )
-        stage_output = solve_lane_lock_stage_for_live_session(session_dir, request_id=request_id)
-        lane_result = stage_output.solve_output.result
-
-        published = False
-        publish_status = "not_configured"
-        publish_error = ""
-        if self.config.publish_result_host:
-            envelope = build_lane_lock_result_envelope(
-                result=lane_result,
-                shot_id=stage_output.shot_id,
-            )
-            published, publish_status, publish_error = self._publish_laptop_result(envelope)
-
-        processed_requests[request_id] = {
-            "status": "processed",
-            "processedUnixMs": _now_unix_ms(),
-            "published": bool(published),
-            "publishStatus": publish_status,
-            "publishError": publish_error,
-            "resultPath": str(stage_output.result_path),
-            "previewPath": str(stage_output.preview_path),
-            "confidence": float(lane_result.confidence),
-            "success": bool(lane_result.success),
-        }
-        if lane_result.success:
-            mark_lane(
-                session_dir,
-                LANE_CANDIDATE_RECEIVED,
-                activeRequestId="",
-                candidateRequestId=request_id,
-                candidateResultPath=str(stage_output.result_path),
-                lastFailureReason="",
-            )
-        else:
-            mark_lane(
-                session_dir,
-                LANE_FAILED,
-                activeRequestId="",
-                candidateRequestId=request_id,
-                candidateResultPath=str(stage_output.result_path),
-                lastFailureReason=str(lane_result.failure_reason),
-            )
-        return publish_status
 
     def _process_shot_window(
         self,
@@ -438,6 +337,80 @@ class LiveSessionPipeline:
             lastReason=reason,
         )
 
+    def _mark_media_freshness(self, session_dir: Path) -> bool:
+        try:
+            state = load_session_state(session_dir)
+        except Exception:
+            return True
+
+        transport = state.get("transport") or {}
+        lane = state.get("lane") or {}
+        shot = state.get("shot") or {}
+        if bool(transport.get("sessionEndSeen")) or str(transport.get("state") or "") == "Ended":
+            mark_transport(
+                session_dir,
+                TRANSPORT_ENDED,
+                sessionEndSeen=True,
+                mediaConnected=False,
+            )
+            return False
+
+        if str(lane.get("state") or "") != "Confirmed":
+            return True
+
+        media_connected = bool(transport.get("mediaConnected"))
+        last_sample_unix_ms = transport.get("lastMediaSampleUnixMs")
+        try:
+            last_sample_unix_ms = int(last_sample_unix_ms)
+        except Exception:
+            last_sample_unix_ms = 0
+
+        stale = True
+        if media_connected and last_sample_unix_ms > 0:
+            age_seconds = max(0.0, (_now_unix_ms() - last_sample_unix_ms) / 1000.0)
+            stale = age_seconds > MEDIA_FRESH_TIMEOUT_SECONDS
+
+        shot_state = str(shot.get("state") or "")
+        if stale:
+            reason = "media_stale" if media_connected else "media_disconnected"
+            mark_transport(
+                session_dir,
+                TRANSPORT_DEGRADED,
+                lastMediaDisconnectReason=reason,
+            )
+            if shot_state in {
+                SHOT_ARMED,
+                SHOT_START_CANDIDATE,
+                SHOT_OPEN,
+                SHOT_DISABLED_UNTIL_MEDIA_FRESH,
+            }:
+                mark_shot(
+                    session_dir,
+                    SHOT_DISABLED_UNTIL_MEDIA_FRESH,
+                    activeLaneLockRequestId=str(lane.get("confirmedRequestId") or ""),
+                    candidateStartFrameSeq=None,
+                    openWindowId="",
+                    openFrameSeqStart=None,
+                    openFrameSeqEnd=None,
+                    lastFailureReason=reason,
+                    lastReason=reason,
+                )
+            return False
+
+        if shot_state == SHOT_DISABLED_UNTIL_MEDIA_FRESH:
+            mark_shot(
+                session_dir,
+                SHOT_ARMED,
+                activeLaneLockRequestId=str(lane.get("confirmedRequestId") or ""),
+                candidateStartFrameSeq=None,
+                openWindowId="",
+                openFrameSeqStart=None,
+                openFrameSeqEnd=None,
+                lastFailureReason="",
+                lastReason="media_fresh",
+            )
+        return True
+
     def _state_dir(self, session_dir: Path) -> Path:
         return session_dir / "analysis_live_pipeline"
 
@@ -450,13 +423,10 @@ class LiveSessionPipeline:
             return {
                 "schemaVersion": PIPELINE_STATE_SCHEMA_VERSION,
                 "sessionDir": str(session_dir),
-                "processedLaneLockRequests": {},
                 "processedShotWindows": {},
             }
         if state.get("schemaVersion") != PIPELINE_STATE_SCHEMA_VERSION:
             raise RuntimeError(f"Unsupported pipeline state schemaVersion {state.get('schemaVersion')!r}.")
-        if not isinstance(state.get("processedLaneLockRequests"), dict):
-            raise RuntimeError("pipeline_state processedLaneLockRequests must be an object.")
         state.setdefault("processedShotWindows", {})
         if not isinstance(state.get("processedShotWindows"), dict):
             raise RuntimeError("pipeline_state processedShotWindows must be an object.")

@@ -7,19 +7,16 @@ import time
 from typing import Any, Mapping
 from uuid import uuid4
 
-from laptop_receiver.lane_lock_types import LaneLockResult
 from laptop_receiver.shot_result_types import ShotResult
 
 
 RESULT_ENVELOPE_SCHEMA_VERSION = "laptop_result_envelope"
 
-RESULT_KIND_LANE_LOCK_RESULT = "lane_lock_result"
 RESULT_KIND_SHOT_RESULT = "shot_result"
 RESULT_KIND_REPLAY_PATH = "replay_path"
 RESULT_KIND_PIPELINE_ERROR = "pipeline_error"
 
 SUPPORTED_RESULT_KINDS = {
-    RESULT_KIND_LANE_LOCK_RESULT,
     RESULT_KIND_SHOT_RESULT,
     RESULT_KIND_REPLAY_PATH,
     RESULT_KIND_PIPELINE_ERROR,
@@ -80,16 +77,7 @@ class LaptopResultEnvelope:
         if created_unix_ms <= 0:
             raise ValueError("laptop_result_envelope requires created_unix_ms.")
 
-        if kind == RESULT_KIND_LANE_LOCK_RESULT:
-            lane_lock_payload = payload.get("lane_lock_result")
-            if not isinstance(lane_lock_payload, Mapping):
-                raise ValueError("lane_lock_result envelope requires lane_lock_result payload.")
-            lane_lock_result = LaneLockResult.from_dict(lane_lock_payload)
-            if lane_lock_result.session_id != session_id:
-                raise ValueError(
-                    "lane_lock_result sessionId does not match envelope session_id."
-                )
-        elif kind == RESULT_KIND_SHOT_RESULT:
+        if kind == RESULT_KIND_SHOT_RESULT:
             shot_payload = payload.get("shot_result")
             if not isinstance(shot_payload, Mapping):
                 raise ValueError("shot_result envelope requires shot_result payload.")
@@ -108,29 +96,6 @@ class LaptopResultEnvelope:
             created_unix_ms=created_unix_ms,
             payload=payload,
         )
-
-
-def build_lane_lock_result_envelope(
-    *,
-    result: LaneLockResult,
-    shot_id: str,
-    message_id: str | None = None,
-    created_unix_ms: int | None = None,
-) -> dict[str, Any]:
-    if not shot_id:
-        raise ValueError("shot_id is required when building a lane-lock result envelope.")
-
-    envelope = {
-        "schemaVersion": RESULT_ENVELOPE_SCHEMA_VERSION,
-        "kind": RESULT_KIND_LANE_LOCK_RESULT,
-        "session_id": result.session_id,
-        "shot_id": shot_id,
-        "message_id": message_id or uuid4().hex,
-        "created_unix_ms": int(created_unix_ms or time.time() * 1000),
-        "lane_lock_result": result.to_dict(),
-    }
-    LaptopResultEnvelope.from_dict(envelope)
-    return envelope
 
 
 def build_shot_result_envelope(

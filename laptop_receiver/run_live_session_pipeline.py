@@ -83,6 +83,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yolo-det-conf", type=float, default=0.05)
     parser.add_argument("--yolo-seed-conf", type=float, default=0.8)
     parser.add_argument("--yolo-min-box-size", type=float, default=10.0)
+    parser.add_argument("--yolo-scan-stride", type=int, default=2)
     parser.add_argument(
         "--run-sam2",
         action="store_true",
@@ -151,6 +152,7 @@ def main() -> int:
             yolo_det_conf=float(args.yolo_det_conf),
             yolo_start_conf=float(args.yolo_seed_conf),
             yolo_min_box_size=float(args.yolo_min_box_size),
+            scan_stride_frames=max(int(args.yolo_scan_stride), 1),
             sam2_config=sam2_config,
             require_sam2_tracking=bool(args.run_sam2),
         )
@@ -173,9 +175,6 @@ def main() -> int:
             print(json.dumps(document, indent=2))
         else:
             print(f"sessions:      {summary.discovered_sessions}")
-            print(f"lane seen:     {summary.lane_lock_requests_seen}")
-            print(f"lane done:     {summary.lane_lock_requests_processed}")
-            print(f"lane skipped:  {summary.lane_lock_requests_skipped}")
             print(f"auto frames:   {summary.auto_shot_boundary_frames_scanned}")
             print(f"auto yolo:     {summary.auto_shot_boundary_yolo_frames}")
             print(f"auto events:   {summary.auto_shot_boundary_events_emitted}")

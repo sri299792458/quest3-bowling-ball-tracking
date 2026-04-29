@@ -24,18 +24,6 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Serializable]
-        private sealed class LaneLockResultEnvelope
-        {
-            public string schemaVersion;
-            public string kind;
-            public string session_id;
-            public string shot_id;
-            public string message_id;
-            public long created_unix_ms;
-            public StandaloneLaneLockResult lane_lock_result;
-        }
-
-        [Serializable]
         private sealed class ShotResultEnvelope
         {
             public string schemaVersion;
@@ -66,12 +54,10 @@ namespace QuestBowlingStandalone.QuestApp
         private string _activeShotId;
         private volatile string _threadStatus;
 
-        public event Action<StandaloneLaneLockResult> LaneLockResultReceived;
         public event Action<StandaloneShotResult> ShotResultReceived;
 
         public bool EnabledForAutoRun => enabledForAutoRun;
         public bool IsRunning => _readerThread != null && _readerThread.IsAlive;
-        public StandaloneLaneLockResult LastLaneLockResult { get; private set; }
         public StandaloneShotResult LastShotResult { get; private set; }
         public string LastStatus { get; private set; }
 
@@ -278,11 +264,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             var processed = false;
-            if (header.kind == "lane_lock_result")
-            {
-                processed = ProcessLaneLockResult(line);
-            }
-            else if (header.kind == "shot_result")
+            if (header.kind == "shot_result")
             {
                 processed = ProcessShotResult(line);
             }
@@ -297,41 +279,6 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 _seenMessageIds.Add(header.message_id);
             }
-        }
-
-        private bool ProcessLaneLockResult(string line)
-        {
-            LaneLockResultEnvelope envelope;
-            try
-            {
-                envelope = JsonUtility.FromJson<LaneLockResultEnvelope>(line);
-            }
-            catch (Exception ex)
-            {
-                LastStatus = ex.GetType().Name + ": invalid_lane_lock_result_json";
-                DebugLog(LastStatus);
-                return false;
-            }
-
-            if (envelope == null || envelope.lane_lock_result == null)
-            {
-                LastStatus = "lane_lock_result_missing_payload";
-                DebugLog(LastStatus);
-                return false;
-            }
-
-            if (envelope.lane_lock_result.schemaVersion != "lane_lock_result")
-            {
-                LastStatus = "unsupported_lane_lock_result_schema";
-                DebugLog(LastStatus);
-                return false;
-            }
-
-            LastLaneLockResult = envelope.lane_lock_result;
-            LastStatus = envelope.lane_lock_result.success ? "lane_lock_result_received" : "lane_lock_result_failed";
-            DebugLog($"{LastStatus} requestId={envelope.lane_lock_result.requestId} confidence={envelope.lane_lock_result.confidence:0.000}");
-            LaneLockResultReceived?.Invoke(envelope.lane_lock_result);
-            return true;
         }
 
         private bool ProcessShotResult(string line)

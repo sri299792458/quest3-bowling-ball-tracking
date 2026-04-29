@@ -29,15 +29,6 @@ namespace QuestBowlingStandalone.QuestApp
         }
 
         [Serializable]
-        private sealed class LaneLockRequestEnvelope
-        {
-            public string kind = "lane_lock_request";
-            public string session_id;
-            public string shot_id;
-            public StandaloneLaneLockRequest lane_lock_request;
-        }
-
-        [Serializable]
         private sealed class LaneLockConfirmEnvelope
         {
             public string kind = "lane_lock_confirm";
@@ -46,6 +37,7 @@ namespace QuestBowlingStandalone.QuestApp
             public string requestId;
             public bool accepted;
             public string reason;
+            public StandaloneLaneLockResult lane_lock_result;
         }
 
         [Serializable]
@@ -214,40 +206,22 @@ namespace QuestBowlingStandalone.QuestApp
             }
         }
 
-        public bool TrySendLaneLockRequest(string sessionId, string shotId, StandaloneLaneLockRequest laneLockRequest, out string note)
+        public bool TrySendLaneLockConfirm(
+            string sessionId,
+            string shotId,
+            string requestId,
+            bool accepted,
+            string reason,
+            out string note)
         {
-            note = "metadata_sender_failed";
-            if (!enabledForAutoRun)
-            {
-                note = "metadata_sender_disabled";
-                return false;
-            }
-
-            if (_writer == null)
-            {
-                note = "metadata_stream_not_connected";
-                FailActiveMetadataStream(note);
-                return false;
-            }
-
-            try
-            {
-                var payload = new LaneLockRequestEnvelope
-                {
-                    session_id = sessionId ?? _activeSessionId ?? string.Empty,
-                    shot_id = shotId ?? _activeShotId ?? string.Empty,
-                    lane_lock_request = laneLockRequest,
-                };
-                WriteJsonLine(payload);
-                note = "lane_lock_request_sent";
-                return true;
-            }
-            catch (Exception ex)
-            {
-                note = ex.GetType().Name + ": " + ex.Message;
-                FailActiveMetadataStream(note);
-                return false;
-            }
+            return TrySendLaneLockConfirm(
+                sessionId,
+                shotId,
+                requestId,
+                accepted,
+                reason,
+                null,
+                out note);
         }
 
         public bool TrySendLaneLockConfirm(
@@ -256,6 +230,7 @@ namespace QuestBowlingStandalone.QuestApp
             string requestId,
             bool accepted,
             string reason,
+            StandaloneLaneLockResult laneLockResult,
             out string note)
         {
             note = "metadata_sender_failed";
@@ -287,6 +262,7 @@ namespace QuestBowlingStandalone.QuestApp
                     requestId = requestId.Trim(),
                     accepted = accepted,
                     reason = string.IsNullOrWhiteSpace(reason) ? "user_confirm" : reason,
+                    lane_lock_result = laneLockResult,
                 };
                 WriteJsonLine(payload);
                 note = "lane_lock_confirm_sent";

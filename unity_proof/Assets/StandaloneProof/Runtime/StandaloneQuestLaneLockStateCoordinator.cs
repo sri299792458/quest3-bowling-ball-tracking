@@ -1,169 +1,660 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace QuestBowlingStandalone.QuestApp
 {
     public enum StandaloneQuestLaneLockUiState
     {
-        Unknown,
-        SelectingLeftFoulLine,
-        SelectingRightFoulLine,
-        SelectionReady,
-        RequestQueued,
-        WaitingForCandidate,
-        CandidateReceived,
-        Confirmed,
+        Idle,
+        PlacingHeads,
+        FullLanePreview,
+        Locked,
         Failed,
     }
 
     public sealed class StandaloneQuestLaneLockStateCoordinator : MonoBehaviour
     {
-        [Header("Lane Components")]
-        [SerializeField] private StandaloneQuestLaneLockCapture laneLockCapture;
-        [SerializeField] private StandaloneQuestFoulLineRaySelector foulLineSelector;
-        [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
-        [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
+        [Header("References")]
+        [SerializeField] private StandaloneQuestFloorPlaneSource floorPlaneSource;
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
-        [SerializeField] private StandaloneQuestLaneLockResultRenderer laneLockResultRenderer;
+        [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
+        [SerializeField] private StandaloneQuestLaneLockResultRenderer laneRenderer;
+        [SerializeField] private Transform headTransform;
+        [SerializeField] private OVRHand handPinchSource;
+        [SerializeField] private Transform visualizationRoot;
 
-        [Header("Primary Action Labels")]
-        [SerializeField] private string idleText = "Lock Lane";
-        [SerializeField] private string selectLeftText = "Select Left Edge";
-        [SerializeField] private string selectRightText = "Select Right Edge";
-        [SerializeField] private string selectionReadyText = "Lock Lane";
-        [SerializeField] private string requestQueuedText = "Capturing...";
-        [SerializeField] private string awaitingResultText = "Solving...";
-        [SerializeField] private string acceptLaneText = "Accept Lane";
-        [SerializeField] private string lockedText = "Lane Locked";
-        [SerializeField] private string failedText = "Try Again";
-        [SerializeField] private string retryLaneText = "Retry Lane";
-        [SerializeField] private string relockLaneText = "Relock Lane";
-        [SerializeField] private string resultTimeoutText = "No Result";
+        [Header("Lane Dimensions")]
+        [SerializeField] private float laneWidthMeters = 1.0541f;
+        [SerializeField] private float headsSectionLengthMeters = 4.572f;
+        [SerializeField] private float laneLengthMeters = 18.288f;
+        [SerializeField] private float placementDistanceMeters = 0.75f;
 
-        [Header("Flow")]
-        [SerializeField] private bool autoSubmitAfterFoulLineSelection = true;
-        [SerializeField] private float laneResultTimeoutSeconds = 30.0f;
-        [SerializeField] private float selectionErrorDisplaySeconds = 1.5f;
+        [Header("Input")]
+        [SerializeField] private float pinchPressThreshold = 0.70f;
+        [SerializeField] private float pinchReleaseThreshold = 0.30f;
+
+        [Header("Stabilization")]
+        [SerializeField] private bool useStabilization = true;
+        [SerializeField] private float smoothingSeconds = 0.16f;
+        [SerializeField] private float positionDeadzoneMeters = 0.012f;
+        [SerializeField] private float angleDeadzoneDegrees = 0.45f;
+        [SerializeField] private float releaseAverageSeconds = 0.35f;
+
+        [Header("Preview")]
+        [SerializeField] private float verticalOffsetMeters = 0.025f;
+        [SerializeField] private float headsLineWidthMeters = 0.03f;
+        [SerializeField] private Color headsOutlineColor = new Color(1.0f, 0.82f, 0.16f, 1.0f);
+        [SerializeField] private Color headsSurfaceColor = new Color(1.0f, 0.82f, 0.16f, 0.16f);
 
         [Header("Diagnostics")]
         [SerializeField] private bool verboseLogging;
 
-        private string _lastSelectionStatus = string.Empty;
-        private bool _awaitingLaneCandidate;
-        private bool _hasPendingLaneCandidate;
-        private string _pendingLaneCandidateRequestId = string.Empty;
-        private string _awaitingLaneRequestId = string.Empty;
-        private float _awaitingLaneCandidateStartedRealtime;
-        private bool _laneConfirmed;
-        private string _confirmedLaneRequestId = string.Empty;
-        private bool _hasFailure;
-        private string _failureLabel = string.Empty;
-        private float _selectionErrorVisibleUntilRealtime;
+        private readonly List<PoseSample> _samples = new List<PoseSample>();
+        private bool _wasPinching;
+        private bool _hasSmoothedPose;
+        private Vector3 _smoothedOrigin;
+        private Vector3 _smoothedForward;
+        private Vector3 _smoothedOriginVelocity;
+        private StandaloneLaneLockResult _pendingResult;
+        private GameObject _headsSurfaceObject;
+        private MeshFilter _headsSurfaceMeshFilter;
+        private MeshRenderer _headsSurfaceMeshRenderer;
+        private Mesh _headsSurfaceMesh;
+        private LineRenderer _headsOutlineRenderer;
+        private Material _headsSurfaceMaterial;
+        private Material _headsOutlineMaterial;
 
-        public StandaloneQuestLaneLockUiState LaneState { get; private set; } = StandaloneQuestLaneLockUiState.Unknown;
-        public string PrimaryActionLabel { get; private set; } = "Lock Lane";
-        public bool PrimaryActionInteractable { get; private set; } = true;
-        public string SecondaryActionLabel { get; private set; } = "Retry Lane";
-        public bool SecondaryActionVisible { get; private set; }
-        public bool SecondaryActionInteractable { get; private set; }
-        public string LastStatus { get; private set; } = string.Empty;
+        public StandaloneQuestLaneLockUiState State { get; private set; } = StandaloneQuestLaneLockUiState.Idle;
+        public string LastStatus { get; private set; } = "pinch_hold_ready";
+
+        public string PrimaryActionLabel
+        {
+            get
+            {
+                switch (State)
+                {
+                    case StandaloneQuestLaneLockUiState.PlacingHeads:
+                        return "Release To Preview";
+                    case StandaloneQuestLaneLockUiState.FullLanePreview:
+                        return "Confirm Lane";
+                    case StandaloneQuestLaneLockUiState.Locked:
+                        return "Lane Locked";
+                    case StandaloneQuestLaneLockUiState.Failed:
+                        return "Pinch Again";
+                    default:
+                        return "Pinch + Hold";
+                }
+            }
+        }
+
+        public bool PrimaryActionInteractable => State == StandaloneQuestLaneLockUiState.FullLanePreview;
+        public string SecondaryActionLabel => State == StandaloneQuestLaneLockUiState.Locked ? "Relock Lane" : "Retry";
+        public bool SecondaryActionVisible =>
+            State == StandaloneQuestLaneLockUiState.FullLanePreview ||
+            State == StandaloneQuestLaneLockUiState.Locked ||
+            State == StandaloneQuestLaneLockUiState.Failed;
+        public bool SecondaryActionInteractable => SecondaryActionVisible;
 
         private void Awake()
         {
             ResolveReferences();
-            RefreshState(force: true);
-        }
-
-        private void OnEnable()
-        {
-            SubscribeToResults();
-            SubscribeToSelector();
-            SubscribeToCapture();
-        }
-
-        private void OnDisable()
-        {
-            UnsubscribeFromResults();
-            UnsubscribeFromSelector();
-            UnsubscribeFromCapture();
+            EnsurePreviewObjects();
+            ClearHeadsPreview();
         }
 
         private void Update()
         {
-            RefreshState(force: false);
+            var pinching = IsPinching();
+
+            if ((State == StandaloneQuestLaneLockUiState.Idle || State == StandaloneQuestLaneLockUiState.Failed)
+                && pinching
+                && !_wasPinching)
+            {
+                BeginPlacement();
+            }
+
+            if (State == StandaloneQuestLaneLockUiState.PlacingHeads)
+            {
+                if (pinching)
+                {
+                    UpdatePlacementPreview();
+                }
+                else if (_wasPinching)
+                {
+                    FinishPlacement();
+                }
+            }
+
+            _wasPinching = pinching;
         }
 
         public void HandlePrimaryAction()
         {
-            RefreshState(force: true);
-
-            if (laneLockCapture == null)
+            if (State == StandaloneQuestLaneLockUiState.FullLanePreview)
             {
-                SetFailure("lane_lock_capture_missing");
-                return;
-            }
-
-            switch (LaneState)
-            {
-                case StandaloneQuestLaneLockUiState.Unknown:
-                case StandaloneQuestLaneLockUiState.Failed:
-                    BeginFoulLineSelection();
-                    return;
-
-                case StandaloneQuestLaneLockUiState.SelectionReady:
-                    BeginLaneLockRequest();
-                    return;
-
-                case StandaloneQuestLaneLockUiState.CandidateReceived:
-                    ConfirmPendingLaneCandidate();
-                    return;
-
-                default:
-                    RefreshState(force: true);
-                    return;
+                ConfirmLane();
             }
         }
 
         public void HandleSecondaryAction()
         {
-            RefreshState(force: true);
+            ResetLane("user_retry");
+        }
 
-            switch (LaneState)
+        public void ResetLane(string reason)
+        {
+            if (State == StandaloneQuestLaneLockUiState.Locked && _pendingResult != null)
             {
-                case StandaloneQuestLaneLockUiState.CandidateReceived:
-                    RejectPendingLaneCandidateAndReselect();
-                    return;
-
-                case StandaloneQuestLaneLockUiState.Confirmed:
-                    RejectConfirmedLaneAndReselect();
-                    return;
-
-                default:
-                    RefreshState(force: true);
-                    return;
+                TryPublishLaneRejection(_pendingResult.requestId, string.IsNullOrWhiteSpace(reason) ? "user_relock" : reason, out _);
             }
+
+            _pendingResult = null;
+            State = StandaloneQuestLaneLockUiState.Idle;
+            ResetStabilization();
+            ClearHeadsPreview();
+            laneRenderer?.ClearVisualization(reason);
+            ClearProofCaptureLaneLock();
+            SetStatus("pinch_hold_ready");
+        }
+
+        private void BeginPlacement()
+        {
+            _pendingResult = null;
+            State = StandaloneQuestLaneLockUiState.PlacingHeads;
+            ResetStabilization();
+            laneRenderer?.ClearVisualization("heads_placement_started");
+            UpdatePlacementPreview();
+            SetStatus("hold_pinch_to_fit_heads_release_to_preview");
+        }
+
+        private void UpdatePlacementPreview()
+        {
+            if (!TryComputePose(out var origin, out var forward, out var floorPoint, out var floorNormal, out var note))
+            {
+                Fail(note);
+                return;
+            }
+
+            StabilizePose(ref origin, ref forward);
+            RecordPoseSample(origin, forward, floorPoint, floorNormal);
+            RenderHeadsPreview(origin, forward, floorNormal);
+        }
+
+        private void FinishPlacement()
+        {
+            if (!TryGetReleasePose(out var origin, out var forward, out var floorPoint, out var floorNormal))
+            {
+                Fail("release_pose_missing");
+                return;
+            }
+
+            ClearHeadsPreview();
+            _pendingResult = BuildLaneResult(origin, forward, floorPoint, floorNormal, userConfirmed: false);
+            laneRenderer?.RenderLaneLockResult(_pendingResult);
+            State = StandaloneQuestLaneLockUiState.FullLanePreview;
+            SetStatus("full_lane_preview_confirm_or_retry");
+        }
+
+        private void ConfirmLane()
+        {
+            if (_pendingResult == null)
+            {
+                Fail("lane_preview_missing");
+                return;
+            }
+
+            _pendingResult.userConfirmed = true;
+            _pendingResult.requiresConfirmation = false;
+            _pendingResult.confidence = Mathf.Max(_pendingResult.confidence, 0.96f);
+            _pendingResult.lockState = "Locked";
+
+            if (!TryPublishConfirmedLane(_pendingResult, out var publishNote))
+            {
+                Fail(publishNote);
+                return;
+            }
+
+            if (!TryApplyLaneLockToProofCapture(_pendingResult, out var note))
+            {
+                Fail(note);
+                return;
+            }
+
+            State = StandaloneQuestLaneLockUiState.Locked;
+            laneRenderer?.RenderLaneLockResult(_pendingResult);
+            SetStatus("lane_locked");
+        }
+
+        private bool TryComputePose(
+            out Vector3 origin,
+            out Vector3 forward,
+            out Vector3 floorPoint,
+            out Vector3 floorNormal,
+            out string note)
+        {
+            origin = Vector3.zero;
+            forward = Vector3.forward;
+            floorPoint = Vector3.zero;
+            floorNormal = Vector3.up;
+            note = "pose_failed";
+
+            if (headTransform == null)
+            {
+                note = "head_transform_missing";
+                return false;
+            }
+
+            if (floorPlaneSource == null || !floorPlaneSource.TryGetFloorPlane(out floorPoint, out floorNormal, out note))
+            {
+                note = "floor_plane_unavailable:" + note;
+                return false;
+            }
+
+            floorNormal = floorNormal.sqrMagnitude > 0.0001f ? floorNormal.normalized : Vector3.up;
+            forward = Vector3.ProjectOnPlane(headTransform.forward, floorNormal);
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                forward = _hasSmoothedPose
+                    ? _smoothedForward
+                    : Vector3.ProjectOnPlane(headTransform.parent != null ? headTransform.parent.forward : Vector3.forward, floorNormal);
+            }
+
+            if (forward.sqrMagnitude < 0.0001f)
+            {
+                note = "forward_direction_unstable";
+                return false;
+            }
+
+            forward.Normalize();
+            origin = ProjectPointToPlane(
+                headTransform.position + forward * Mathf.Max(0.2f, placementDistanceMeters),
+                floorPoint,
+                floorNormal);
+            note = "pose_ready";
+            return true;
+        }
+
+        private void StabilizePose(ref Vector3 origin, ref Vector3 forward)
+        {
+            if (!useStabilization)
+            {
+                return;
+            }
+
+            if (!_hasSmoothedPose)
+            {
+                _hasSmoothedPose = true;
+                _smoothedOrigin = origin;
+                _smoothedForward = forward.normalized;
+                _smoothedOriginVelocity = Vector3.zero;
+            }
+            else
+            {
+                if (Vector3.Dot(forward, _smoothedForward) < 0.0f)
+                {
+                    forward = -forward;
+                }
+
+                var dt = Mathf.Max(0.001f, Time.deltaTime);
+                var smoothTime = Mathf.Max(0.01f, smoothingSeconds);
+                if (Vector3.Distance(origin, _smoothedOrigin) >= Mathf.Max(0.0f, positionDeadzoneMeters))
+                {
+                    _smoothedOrigin = Vector3.SmoothDamp(
+                        _smoothedOrigin,
+                        origin,
+                        ref _smoothedOriginVelocity,
+                        smoothTime,
+                        Mathf.Infinity,
+                        dt);
+                }
+                else
+                {
+                    _smoothedOriginVelocity = Vector3.zero;
+                }
+
+                if (Vector3.Angle(_smoothedForward, forward) >= Mathf.Max(0.0f, angleDeadzoneDegrees))
+                {
+                    var t = 1.0f - Mathf.Exp(-dt / smoothTime);
+                    _smoothedForward = Vector3.Slerp(_smoothedForward, forward, t).normalized;
+                }
+            }
+
+            origin = _smoothedOrigin;
+            forward = _smoothedForward;
+        }
+
+        private void RecordPoseSample(Vector3 origin, Vector3 forward, Vector3 floorPoint, Vector3 floorNormal)
+        {
+            var now = Time.realtimeSinceStartup;
+            _samples.Add(new PoseSample
+            {
+                time = now,
+                origin = origin,
+                forward = forward.normalized,
+                floorPoint = floorPoint,
+                floorNormal = floorNormal.normalized,
+            });
+
+            var cutoff = now - Mathf.Max(0.05f, releaseAverageSeconds);
+            var removeCount = 0;
+            while (removeCount < _samples.Count && _samples[removeCount].time < cutoff)
+            {
+                removeCount++;
+            }
+
+            if (removeCount > 0)
+            {
+                _samples.RemoveRange(0, removeCount);
+            }
+        }
+
+        private bool TryGetReleasePose(
+            out Vector3 origin,
+            out Vector3 forward,
+            out Vector3 floorPoint,
+            out Vector3 floorNormal)
+        {
+            origin = Vector3.zero;
+            forward = Vector3.forward;
+            floorPoint = Vector3.zero;
+            floorNormal = Vector3.up;
+
+            if (_samples.Count == 0)
+            {
+                return false;
+            }
+
+            var cutoff = Time.realtimeSinceStartup - Mathf.Max(0.05f, releaseAverageSeconds);
+            var originSum = Vector3.zero;
+            var forwardSum = Vector3.zero;
+            var floorPointSum = Vector3.zero;
+            var floorNormalSum = Vector3.zero;
+            var referenceForward = Vector3.zero;
+            var count = 0;
+
+            for (var index = 0; index < _samples.Count; index++)
+            {
+                var sample = _samples[index];
+                if (sample.time < cutoff)
+                {
+                    continue;
+                }
+
+                var sampleForward = sample.forward;
+                if (count == 0)
+                {
+                    referenceForward = sampleForward;
+                }
+                else if (Vector3.Dot(sampleForward, referenceForward) < 0.0f)
+                {
+                    sampleForward = -sampleForward;
+                }
+
+                originSum += sample.origin;
+                forwardSum += sampleForward;
+                floorPointSum += sample.floorPoint;
+                floorNormalSum += sample.floorNormal;
+                count++;
+            }
+
+            if (count <= 0)
+            {
+                return false;
+            }
+
+            origin = originSum / count;
+            forward = forwardSum.sqrMagnitude > 0.0001f ? forwardSum.normalized : referenceForward.normalized;
+            floorPoint = floorPointSum / count;
+            floorNormal = floorNormalSum.sqrMagnitude > 0.0001f ? floorNormalSum.normalized : Vector3.up;
+            origin = ProjectPointToPlane(origin, floorPoint, floorNormal);
+            forward = Vector3.ProjectOnPlane(forward, floorNormal).normalized;
+            return forward.sqrMagnitude > 0.0001f;
+        }
+
+        private StandaloneLaneLockResult BuildLaneResult(
+            Vector3 origin,
+            Vector3 forward,
+            Vector3 floorPoint,
+            Vector3 floorNormal,
+            bool userConfirmed)
+        {
+            var rotation = Quaternion.LookRotation(forward.normalized, floorNormal.normalized);
+            var requestId = "quest_lane_lock_" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            return new StandaloneLaneLockResult
+            {
+                sessionId = proofCapture != null ? proofCapture.ActiveSessionId : string.Empty,
+                requestId = requestId,
+                success = true,
+                failureReason = string.Empty,
+                confidence = userConfirmed ? 0.98f : 0.90f,
+                lockState = userConfirmed ? "Locked" : "Candidate",
+                requiresConfirmation = !userConfirmed,
+                userConfirmed = userConfirmed,
+                laneOriginWorld = origin,
+                laneRotationWorld = rotation,
+                laneWidthMeters = laneWidthMeters,
+                laneLengthMeters = laneLengthMeters,
+                floorPlanePointWorld = floorPoint,
+                floorPlaneNormalWorld = floorNormal.normalized,
+                visibleDownlaneMeters = laneLengthMeters,
+                releaseCorridor = new StandaloneReleaseCorridor
+                {
+                    sStartMeters = 0.0f,
+                    sEndMeters = Mathf.Min(headsSectionLengthMeters, laneLengthMeters),
+                    halfWidthMeters = laneWidthMeters * 0.5f,
+                },
+                confidenceBreakdown = new StandaloneLaneLockConfidenceBreakdown
+                {
+                    edgeFit = 1.0f,
+                    selectionAgreement = 1.0f,
+                    markingAgreement = 1.0f,
+                    temporalStability = 1.0f,
+                    candidateMargin = 1.0f,
+                    visibleExtent = 1.0f,
+                },
+                reprojectionMetrics = new StandaloneReprojectionMetrics
+                {
+                    meanErrorPx = 0.0f,
+                    p95ErrorPx = 0.0f,
+                    runnerUpMargin = 1.0f,
+                },
+                sourceFrameRange = new StandaloneSourceFrameRange { start = 0, end = 0 },
+            };
+        }
+
+        private void RenderHeadsPreview(Vector3 origin, Vector3 forward, Vector3 floorNormal)
+        {
+            EnsurePreviewObjects();
+            var rotation = Quaternion.LookRotation(forward.normalized, floorNormal.normalized);
+            var halfWidth = Mathf.Max(0.01f, laneWidthMeters * 0.5f);
+            var length = Mathf.Max(0.1f, headsSectionLengthMeters);
+            var lift = Mathf.Max(0.0f, verticalOffsetMeters);
+
+            var leftFoul = origin + rotation * new Vector3(-halfWidth, lift, 0.0f);
+            var rightFoul = origin + rotation * new Vector3(halfWidth, lift, 0.0f);
+            var rightHeads = origin + rotation * new Vector3(halfWidth, lift, length);
+            var leftHeads = origin + rotation * new Vector3(-halfWidth, lift, length);
+
+            UpdateLine(_headsOutlineRenderer, new[] { leftFoul, rightFoul, rightHeads, leftHeads, leftFoul });
+            UpdateSurface(leftFoul, rightFoul, leftHeads, rightHeads);
+        }
+
+        private void EnsurePreviewObjects()
+        {
+            var parent = visualizationRoot != null ? visualizationRoot : transform;
+            if (_headsSurfaceObject == null)
+            {
+                _headsSurfaceObject = new GameObject("LaneHeadsSectionSurface");
+                _headsSurfaceObject.transform.SetParent(parent, false);
+                _headsSurfaceMeshFilter = _headsSurfaceObject.AddComponent<MeshFilter>();
+                _headsSurfaceMeshRenderer = _headsSurfaceObject.AddComponent<MeshRenderer>();
+                _headsSurfaceMesh = new Mesh { name = "LaneHeadsSectionSurfaceMesh" };
+                _headsSurfaceMeshFilter.sharedMesh = _headsSurfaceMesh;
+            }
+
+            if (_headsSurfaceMaterial == null)
+            {
+                _headsSurfaceMaterial = CreateColorMaterial("LaneHeadsSectionSurfaceMaterial", headsSurfaceColor, true);
+            }
+
+            _headsSurfaceMaterial.color = headsSurfaceColor;
+            _headsSurfaceMeshRenderer.sharedMaterial = _headsSurfaceMaterial;
+
+            if (_headsOutlineRenderer == null)
+            {
+                var lineObject = new GameObject("LaneHeadsSectionOutline");
+                lineObject.transform.SetParent(parent, false);
+                _headsOutlineRenderer = lineObject.AddComponent<LineRenderer>();
+                _headsOutlineRenderer.useWorldSpace = true;
+                _headsOutlineRenderer.numCapVertices = 4;
+                _headsOutlineRenderer.numCornerVertices = 4;
+            }
+
+            if (_headsOutlineMaterial == null)
+            {
+                _headsOutlineMaterial = CreateColorMaterial("LaneHeadsSectionOutlineMaterial", headsOutlineColor, false);
+            }
+
+            _headsOutlineRenderer.sharedMaterial = _headsOutlineMaterial;
+        }
+
+        private void UpdateLine(LineRenderer renderer, Vector3[] points)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.enabled = true;
+            renderer.startColor = headsOutlineColor;
+            renderer.endColor = headsOutlineColor;
+            renderer.startWidth = Mathf.Max(0.004f, headsLineWidthMeters);
+            renderer.endWidth = Mathf.Max(0.004f, headsLineWidthMeters);
+            renderer.positionCount = points.Length;
+            renderer.SetPositions(points);
+        }
+
+        private void UpdateSurface(Vector3 leftFoul, Vector3 rightFoul, Vector3 leftHeads, Vector3 rightHeads)
+        {
+            if (_headsSurfaceObject == null || _headsSurfaceMesh == null)
+            {
+                return;
+            }
+
+            _headsSurfaceObject.SetActive(true);
+            var t = _headsSurfaceObject.transform;
+            _headsSurfaceMesh.Clear();
+            _headsSurfaceMesh.vertices = new[]
+            {
+                t.InverseTransformPoint(leftFoul),
+                t.InverseTransformPoint(rightFoul),
+                t.InverseTransformPoint(leftHeads),
+                t.InverseTransformPoint(rightHeads),
+            };
+            _headsSurfaceMesh.triangles = new[] { 0, 2, 1, 1, 2, 3 };
+            _headsSurfaceMesh.RecalculateBounds();
+        }
+
+        private void ClearHeadsPreview()
+        {
+            if (_headsOutlineRenderer != null)
+            {
+                _headsOutlineRenderer.enabled = false;
+                _headsOutlineRenderer.positionCount = 0;
+            }
+
+            if (_headsSurfaceObject != null)
+            {
+                _headsSurfaceObject.SetActive(false);
+            }
+        }
+
+        private bool TryApplyLaneLockToProofCapture(StandaloneLaneLockResult result, out string note)
+        {
+            note = "proof_capture_missing";
+            if (proofCapture == null || result == null)
+            {
+                return false;
+            }
+
+            return proofCapture.TryApplyLaneLockResult(result, out note);
+        }
+
+        private void ClearProofCaptureLaneLock()
+        {
+            if (proofCapture == null)
+            {
+                return;
+            }
+
+            proofCapture.ClearLaneLock();
+        }
+
+        private bool TryPublishConfirmedLane(StandaloneLaneLockResult result, out string note)
+        {
+            note = "lane_metadata_sender_missing";
+            if (liveMetadataSender == null)
+            {
+                return false;
+            }
+
+            if (proofCapture == null || string.IsNullOrWhiteSpace(proofCapture.ActiveSessionId))
+            {
+                note = "lane_session_not_active";
+                return false;
+            }
+
+            return liveMetadataSender.TrySendLaneLockConfirm(
+                proofCapture.ActiveSessionId,
+                proofCapture.ActiveStreamId,
+                result.requestId,
+                true,
+                "quest_lane_confirmed",
+                result,
+                out note);
+        }
+
+        private bool TryPublishLaneRejection(string requestId, string reason, out string note)
+        {
+            note = "lane_metadata_sender_missing";
+            if (liveMetadataSender == null)
+            {
+                return false;
+            }
+
+            if (proofCapture == null || string.IsNullOrWhiteSpace(proofCapture.ActiveSessionId))
+            {
+                note = "lane_session_not_active";
+                return false;
+            }
+
+            return liveMetadataSender.TrySendLaneLockConfirm(
+                proofCapture.ActiveSessionId,
+                proofCapture.ActiveStreamId,
+                requestId,
+                false,
+                string.IsNullOrWhiteSpace(reason) ? "user_relock" : reason,
+                out note);
+        }
+
+        private bool IsPinching()
+        {
+            var strength = handPinchSource != null && handPinchSource.IsTracked
+                ? Mathf.Clamp01(handPinchSource.GetFingerPinchStrength(OVRHand.HandFinger.Index))
+                : 0.0f;
+            var threshold = _wasPinching
+                ? Mathf.Max(0.05f, pinchReleaseThreshold)
+                : Mathf.Max(0.05f, pinchPressThreshold);
+            return strength >= threshold;
         }
 
         private void ResolveReferences()
         {
-            if (laneLockCapture == null)
+            if (floorPlaneSource == null)
             {
-                laneLockCapture = FindFirstObjectByType<StandaloneQuestLaneLockCapture>();
-            }
-
-            if (foulLineSelector == null)
-            {
-                foulLineSelector = FindFirstObjectByType<StandaloneQuestFoulLineRaySelector>();
-            }
-
-            if (liveResultReceiver == null)
-            {
-                liveResultReceiver = FindFirstObjectByType<StandaloneQuestLiveResultReceiver>();
-            }
-
-            if (liveMetadataSender == null)
-            {
-                liveMetadataSender = FindFirstObjectByType<StandaloneQuestLiveMetadataSender>();
+                floorPlaneSource = FindFirstObjectByType<StandaloneQuestFloorPlaneSource>();
             }
 
             if (proofCapture == null)
@@ -171,630 +662,93 @@ namespace QuestBowlingStandalone.QuestApp
                 proofCapture = FindFirstObjectByType<StandaloneQuestLocalProofCapture>();
             }
 
-            if (laneLockResultRenderer == null)
-            {
-                laneLockResultRenderer = FindFirstObjectByType<StandaloneQuestLaneLockResultRenderer>();
-            }
-        }
-
-        private void RefreshState(bool force)
-        {
-            ObserveLaneResultTimeout();
-
-            if (force)
-            {
-                DebugLog($"lane_state={LaneState}");
-            }
-
-            PrimaryActionLabel = ComputePrimaryActionLabel();
-            PrimaryActionInteractable = ComputePrimaryActionInteractable();
-            SecondaryActionLabel = ComputeSecondaryActionLabel();
-            SecondaryActionVisible = ComputeSecondaryActionVisible();
-            SecondaryActionInteractable = ComputeSecondaryActionInteractable();
-        }
-
-        private string ComputePrimaryActionLabel()
-        {
-            if (_hasFailure
-                && !string.IsNullOrWhiteSpace(_failureLabel)
-                && LaneState != StandaloneQuestLaneLockUiState.SelectingLeftFoulLine
-                && LaneState != StandaloneQuestLaneLockUiState.SelectingRightFoulLine
-                && LaneState != StandaloneQuestLaneLockUiState.RequestQueued
-                && LaneState != StandaloneQuestLaneLockUiState.WaitingForCandidate)
-            {
-                return _failureLabel;
-            }
-
-            if (IsSelectionError(_lastSelectionStatus)
-                && (LaneState == StandaloneQuestLaneLockUiState.SelectingLeftFoulLine
-                    || LaneState == StandaloneQuestLaneLockUiState.SelectingRightFoulLine)
-                && Time.realtimeSinceStartup < _selectionErrorVisibleUntilRealtime)
-            {
-                return NoteToLabel(_lastSelectionStatus);
-            }
-
-            switch (LaneState)
-            {
-                case StandaloneQuestLaneLockUiState.SelectingLeftFoulLine:
-                    return selectLeftText;
-                case StandaloneQuestLaneLockUiState.SelectingRightFoulLine:
-                    return selectRightText;
-                case StandaloneQuestLaneLockUiState.SelectionReady:
-                    return selectionReadyText;
-                case StandaloneQuestLaneLockUiState.RequestQueued:
-                    return requestQueuedText;
-                case StandaloneQuestLaneLockUiState.WaitingForCandidate:
-                    return awaitingResultText;
-                case StandaloneQuestLaneLockUiState.CandidateReceived:
-                    return acceptLaneText;
-                case StandaloneQuestLaneLockUiState.Confirmed:
-                    return lockedText;
-                case StandaloneQuestLaneLockUiState.Failed:
-                    return string.IsNullOrWhiteSpace(_failureLabel) ? failedText : _failureLabel;
-                default:
-                    return idleText;
-            }
-        }
-
-        private bool ComputePrimaryActionInteractable()
-        {
-            switch (LaneState)
-            {
-                case StandaloneQuestLaneLockUiState.SelectingLeftFoulLine:
-                case StandaloneQuestLaneLockUiState.SelectingRightFoulLine:
-                case StandaloneQuestLaneLockUiState.RequestQueued:
-                case StandaloneQuestLaneLockUiState.WaitingForCandidate:
-                case StandaloneQuestLaneLockUiState.Confirmed:
-                    return false;
-                default:
-                    return laneLockCapture != null;
-            }
-        }
-
-        private string ComputeSecondaryActionLabel()
-        {
-            return LaneState == StandaloneQuestLaneLockUiState.Confirmed ? relockLaneText : retryLaneText;
-        }
-
-        private bool ComputeSecondaryActionVisible()
-        {
-            return LaneState == StandaloneQuestLaneLockUiState.CandidateReceived
-                || LaneState == StandaloneQuestLaneLockUiState.Confirmed;
-        }
-
-        private bool ComputeSecondaryActionInteractable()
-        {
-            return ComputeSecondaryActionVisible()
-                && liveMetadataSender != null
-                && proofCapture != null
-                && (!string.IsNullOrWhiteSpace(_pendingLaneCandidateRequestId)
-                    || !string.IsNullOrWhiteSpace(_confirmedLaneRequestId));
-        }
-
-        private void BeginFoulLineSelection()
-        {
-            if (foulLineSelector == null)
-            {
-                SetFailure("foul_line_selector_missing");
-                return;
-            }
-
-            ClearLocalLaneFacts();
-            laneLockResultRenderer?.ClearVisualization("lane_reselect_started");
-            foulLineSelector.BeginFoulLineSelection();
-            SetLaneState(StandaloneQuestLaneLockUiState.SelectingLeftFoulLine);
-            LastStatus = "selecting_foul_line";
-            RefreshState(force: true);
-        }
-
-        private void RejectConfirmedLaneAndReselect()
-        {
-            if (!string.IsNullOrWhiteSpace(_confirmedLaneRequestId))
-            {
-                if (liveMetadataSender == null)
-                {
-                    SetFailure("live_metadata_sender_missing");
-                    return;
-                }
-
-                if (proofCapture == null)
-                {
-                    SetFailure("proof_capture_missing");
-                    return;
-                }
-
-                var rejected = liveMetadataSender.TrySendLaneLockConfirm(
-                    proofCapture.ActiveSessionId,
-                    proofCapture.ActiveStreamId,
-                    _confirmedLaneRequestId,
-                    false,
-                    "user_relock_requested",
-                    out var rejectNote);
-                if (!rejected)
-                {
-                    SetFailure(rejectNote);
-                    return;
-                }
-            }
-
-            BeginFoulLineSelection();
-        }
-
-        private void RejectPendingLaneCandidateAndReselect()
-        {
-            if (string.IsNullOrWhiteSpace(_pendingLaneCandidateRequestId))
-            {
-                SetFailure("lane_lock_confirm_request_id_missing");
-                return;
-            }
-
             if (liveMetadataSender == null)
             {
-                SetFailure("live_metadata_sender_missing");
-                return;
+                liveMetadataSender = FindFirstObjectByType<StandaloneQuestLiveMetadataSender>();
             }
 
-            if (proofCapture == null)
+            if (laneRenderer == null)
             {
-                SetFailure("proof_capture_missing");
-                return;
+                laneRenderer = FindFirstObjectByType<StandaloneQuestLaneLockResultRenderer>();
             }
 
-            var rejected = liveMetadataSender.TrySendLaneLockConfirm(
-                proofCapture.ActiveSessionId,
-                proofCapture.ActiveStreamId,
-                _pendingLaneCandidateRequestId,
-                false,
-                "user_reject_lane_candidate",
-                out var rejectNote);
-            if (!rejected)
+            if (headTransform == null && Camera.main != null)
             {
-                SetFailure(rejectNote);
-                return;
+                headTransform = Camera.main.transform;
             }
 
-            BeginFoulLineSelection();
+            if (handPinchSource == null)
+            {
+                handPinchSource = FindFirstObjectByType<OVRHand>();
+            }
         }
 
-        private void BeginLaneLockRequest()
+        private void ResetStabilization()
         {
-            var started = laneLockCapture.TryBeginLaneLockRequest(out var note);
-            LastStatus = note;
-            DebugLog($"lane_lock_request={(started ? "started" : "ignored")} note={note}");
-
-            RefreshState(force: true);
+            _samples.Clear();
+            _hasSmoothedPose = false;
+            _smoothedOrigin = Vector3.zero;
+            _smoothedForward = Vector3.forward;
+            _smoothedOriginVelocity = Vector3.zero;
         }
 
-        private void ConfirmPendingLaneCandidate()
+        private void Fail(string note)
         {
-            if (!_hasPendingLaneCandidate)
-            {
-                return;
-            }
-
-            if (liveMetadataSender == null)
-            {
-                SetFailure("live_metadata_sender_missing");
-                return;
-            }
-
-            var sessionId = proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
-            var streamId = proofCapture != null ? proofCapture.ActiveStreamId : string.Empty;
-            var sent = liveMetadataSender.TrySendLaneLockConfirm(
-                sessionId,
-                streamId,
-                _pendingLaneCandidateRequestId,
-                true,
-                "user_accept_lane_overlay",
-                out var note);
-            if (!sent)
-            {
-                SetFailure(note);
-                return;
-            }
-
-            _confirmedLaneRequestId = _pendingLaneCandidateRequestId;
-            _pendingLaneCandidateRequestId = string.Empty;
-            _hasPendingLaneCandidate = false;
-            _awaitingLaneCandidate = false;
-            _awaitingLaneRequestId = string.Empty;
-            _laneConfirmed = true;
-            _hasFailure = false;
-            LastStatus = note;
-            SetLaneState(StandaloneQuestLaneLockUiState.Confirmed);
-            RefreshState(force: true);
+            State = StandaloneQuestLaneLockUiState.Failed;
+            ClearHeadsPreview();
+            laneRenderer?.ClearVisualization(note);
+            SetStatus("lane_lock_failed:" + note);
         }
 
-        private void ObserveLaneResultTimeout()
+        private void SetStatus(string status)
         {
-            if (!_awaitingLaneCandidate)
+            LastStatus = status ?? string.Empty;
+            if (verboseLogging)
             {
-                return;
+                Debug.Log("[StandaloneQuestLaneLockStateCoordinator] " + LastStatus);
             }
-
-            var timeoutSeconds = Mathf.Max(1.0f, laneResultTimeoutSeconds);
-            if (Time.realtimeSinceStartup - _awaitingLaneCandidateStartedRealtime < timeoutSeconds)
-            {
-                return;
-            }
-
-            SetFailure("lane_lock_result_timeout", clearFoulLineSelection: true);
         }
 
-        private void OnLaneLockResultReceived(StandaloneLaneLockResult result)
+        private static Vector3 ProjectPointToPlane(Vector3 point, Vector3 planePoint, Vector3 planeNormal)
         {
-            if (result == null)
-            {
-                SetFailure("lane_lock_result_missing", clearFoulLineSelection: true);
-                return;
-            }
-
-            var resultRequestId = result.requestId ?? string.Empty;
-            if (!_awaitingLaneCandidate
-                || string.IsNullOrWhiteSpace(_awaitingLaneRequestId)
-                || !string.Equals(resultRequestId, _awaitingLaneRequestId, StringComparison.Ordinal))
-            {
-                LastStatus = string.IsNullOrWhiteSpace(resultRequestId)
-                    ? "lane_lock_result_ignored_request_missing"
-                    : $"lane_lock_result_ignored:{resultRequestId}";
-                DebugLog(LastStatus);
-                return;
-            }
-
-            _awaitingLaneCandidate = false;
-            _awaitingLaneRequestId = string.Empty;
-            _awaitingLaneCandidateStartedRealtime = 0.0f;
-            _hasPendingLaneCandidate = false;
-            _pendingLaneCandidateRequestId = string.Empty;
-            _laneConfirmed = false;
-            _confirmedLaneRequestId = string.Empty;
-
-            if (!result.success)
-            {
-                SetFailure(result.failureReason, clearFoulLineSelection: true);
-                return;
-            }
-
-            _hasPendingLaneCandidate = true;
-            _pendingLaneCandidateRequestId = result.requestId ?? string.Empty;
-            _hasFailure = false;
-            LastStatus = "lane_candidate_received";
-            SetLaneState(StandaloneQuestLaneLockUiState.CandidateReceived);
-            RefreshState(force: true);
+            return point - planeNormal * Vector3.Dot(point - planePoint, planeNormal);
         }
 
-        private void SubscribeToResults()
+        private static Material CreateColorMaterial(string name, Color color, bool transparent)
         {
-            if (liveResultReceiver == null)
+            var shader = Shader.Find("Unlit/Color");
+            if (shader == null)
             {
-                return;
+                shader = Shader.Find("Sprites/Default");
             }
 
-            liveResultReceiver.LaneLockResultReceived -= OnLaneLockResultReceived;
-            liveResultReceiver.LaneLockResultReceived += OnLaneLockResultReceived;
+            var material = new Material(shader)
+            {
+                name = name,
+                color = color,
+            };
+
+            if (transparent)
+            {
+                material.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+                material.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+                material.SetInt("_ZWrite", 0);
+                material.SetInt("_Cull", (int)CullMode.Off);
+                material.EnableKeyword("_ALPHABLEND_ON");
+                material.renderQueue = (int)RenderQueue.Transparent;
+            }
+
+            return material;
         }
 
-        private void UnsubscribeFromResults()
+        private struct PoseSample
         {
-            if (liveResultReceiver == null)
-            {
-                return;
-            }
-
-            liveResultReceiver.LaneLockResultReceived -= OnLaneLockResultReceived;
-        }
-
-        private void SubscribeToSelector()
-        {
-            if (foulLineSelector == null)
-            {
-                return;
-            }
-
-            foulLineSelector.SelectionEvent -= OnFoulLineSelectionEvent;
-            foulLineSelector.SelectionEvent += OnFoulLineSelectionEvent;
-        }
-
-        private void UnsubscribeFromSelector()
-        {
-            if (foulLineSelector == null)
-            {
-                return;
-            }
-
-            foulLineSelector.SelectionEvent -= OnFoulLineSelectionEvent;
-        }
-
-        private void SubscribeToCapture()
-        {
-            if (laneLockCapture == null)
-            {
-                return;
-            }
-
-            laneLockCapture.RequestEvent -= OnLaneLockRequestEvent;
-            laneLockCapture.RequestEvent += OnLaneLockRequestEvent;
-        }
-
-        private void UnsubscribeFromCapture()
-        {
-            if (laneLockCapture == null)
-            {
-                return;
-            }
-
-            laneLockCapture.RequestEvent -= OnLaneLockRequestEvent;
-        }
-
-        private void OnLaneLockRequestEvent(StandaloneLaneLockRequestEvent requestEvent)
-        {
-            LastStatus = requestEvent.Note;
-
-            switch (requestEvent.Kind)
-            {
-                case StandaloneLaneLockRequestEventKind.Started:
-                    _awaitingLaneCandidate = true;
-                    _awaitingLaneRequestId = requestEvent.RequestId;
-                    _awaitingLaneCandidateStartedRealtime = Time.realtimeSinceStartup;
-                    _hasFailure = false;
-                    SetLaneState(StandaloneQuestLaneLockUiState.RequestQueued);
-                    break;
-
-                case StandaloneLaneLockRequestEventKind.Sent:
-                    _awaitingLaneCandidate = true;
-                    if (!string.IsNullOrWhiteSpace(requestEvent.RequestId))
-                    {
-                        _awaitingLaneRequestId = requestEvent.RequestId;
-                    }
-
-                    _awaitingLaneCandidateStartedRealtime = Time.realtimeSinceStartup;
-                    _hasFailure = false;
-                    SetLaneState(StandaloneQuestLaneLockUiState.WaitingForCandidate);
-                    break;
-
-                case StandaloneLaneLockRequestEventKind.Failed:
-                    SetFailure(requestEvent.Note, clearFoulLineSelection: true);
-                    return;
-            }
-
-            RefreshState(force: true);
-        }
-
-        private void OnFoulLineSelectionEvent(StandaloneFoulLineSelectionEvent selectionEvent)
-        {
-            LastStatus = selectionEvent.Note;
-
-            switch (selectionEvent.Kind)
-            {
-                case StandaloneFoulLineSelectionEventKind.Started:
-                    _hasFailure = false;
-                    _lastSelectionStatus = selectionEvent.Note;
-                    SetLaneState(StandaloneQuestLaneLockUiState.SelectingLeftFoulLine);
-                    break;
-
-                case StandaloneFoulLineSelectionEventKind.PointAccepted:
-                    _hasFailure = false;
-                    _lastSelectionStatus = selectionEvent.Note;
-                    if (selectionEvent.Step == StandaloneFoulLineSelectionStep.Left)
-                    {
-                        SetLaneState(StandaloneQuestLaneLockUiState.SelectingRightFoulLine);
-                    }
-                    break;
-
-                case StandaloneFoulLineSelectionEventKind.PointRejected:
-                    _lastSelectionStatus = FailureStatusForSelectionEvent(selectionEvent);
-                    _selectionErrorVisibleUntilRealtime = Time.realtimeSinceStartup
-                        + Mathf.Max(0.1f, selectionErrorDisplaySeconds);
-                    SetLaneState(selectionEvent.Step == StandaloneFoulLineSelectionStep.Left
-                        ? StandaloneQuestLaneLockUiState.SelectingLeftFoulLine
-                        : StandaloneQuestLaneLockUiState.SelectingRightFoulLine);
-                    break;
-
-                case StandaloneFoulLineSelectionEventKind.Completed:
-                    _hasFailure = false;
-                    _lastSelectionStatus = selectionEvent.Note;
-                    SetLaneState(StandaloneQuestLaneLockUiState.SelectionReady);
-                    if (autoSubmitAfterFoulLineSelection
-                        && laneLockCapture != null
-                        && laneLockCapture.HasFoulLineSelection
-                        && !laneLockCapture.IsRequestActive
-                        && !_awaitingLaneCandidate
-                        && !_hasPendingLaneCandidate
-                        && !_laneConfirmed)
-                    {
-                        BeginLaneLockRequest();
-                        return;
-                    }
-                    break;
-
-                case StandaloneFoulLineSelectionEventKind.Cancelled:
-                    _lastSelectionStatus = selectionEvent.Note;
-                    _hasFailure = false;
-                    SetLaneState(StandaloneQuestLaneLockUiState.Unknown);
-                    break;
-            }
-
-            RefreshState(force: true);
-        }
-
-        private void ClearLocalLaneFacts()
-        {
-            _awaitingLaneCandidate = false;
-            _awaitingLaneRequestId = string.Empty;
-            _hasPendingLaneCandidate = false;
-            _pendingLaneCandidateRequestId = string.Empty;
-            _laneConfirmed = false;
-            _confirmedLaneRequestId = string.Empty;
-            _hasFailure = false;
-            _failureLabel = string.Empty;
-            _lastSelectionStatus = string.Empty;
-            _selectionErrorVisibleUntilRealtime = 0.0f;
-            laneLockCapture?.ClearFoulLineSelection();
-        }
-
-        private void SetFailure(string note)
-        {
-            SetFailure(note, clearFoulLineSelection: false);
-        }
-
-        private void SetFailure(string note, bool clearFoulLineSelection)
-        {
-            _awaitingLaneCandidate = false;
-            _awaitingLaneRequestId = string.Empty;
-            _awaitingLaneCandidateStartedRealtime = 0.0f;
-            if (clearFoulLineSelection)
-            {
-                laneLockCapture?.ClearFoulLineSelection();
-            }
-
-            _hasFailure = true;
-            _failureLabel = NoteToLabel(note);
-            LastStatus = string.IsNullOrWhiteSpace(note) ? "lane_lock_failed" : note;
-            SetLaneState(StandaloneQuestLaneLockUiState.Failed);
-            RefreshState(force: true);
-        }
-
-        private void SetLaneState(StandaloneQuestLaneLockUiState nextState)
-        {
-            if (LaneState == nextState)
-            {
-                return;
-            }
-
-            LaneState = nextState;
-            DebugLog($"lane_state={LaneState}");
-        }
-
-        private bool IsSelectionError(string note)
-        {
-            note = NormalizeSelectionFailureNote(note);
-            if (string.IsNullOrWhiteSpace(note))
-            {
-                return false;
-            }
-
-            return note.StartsWith("floor_hit_", StringComparison.Ordinal)
-                || note.StartsWith("ray_parallel_to_floor", StringComparison.Ordinal)
-                || note.StartsWith("selection_frame_metadata_missing", StringComparison.Ordinal)
-                || note.StartsWith("floor_plane_unavailable:", StringComparison.Ordinal)
-                || note.StartsWith("foul_line_selection_points_too_close", StringComparison.Ordinal);
-        }
-
-        private static string NormalizeSelectionFailureNote(string note)
-        {
-            if (string.IsNullOrWhiteSpace(note))
-            {
-                return string.Empty;
-            }
-
-            const string leftPrefix = "left_foul_line_selection_failed:";
-            if (note.StartsWith(leftPrefix, StringComparison.Ordinal))
-            {
-                return note.Substring(leftPrefix.Length);
-            }
-
-            const string rightPrefix = "right_foul_line_selection_failed:";
-            if (note.StartsWith(rightPrefix, StringComparison.Ordinal))
-            {
-                return note.Substring(rightPrefix.Length);
-            }
-
-            return note;
-        }
-
-        private static string FailureStatusForSelectionEvent(StandaloneFoulLineSelectionEvent selectionEvent)
-        {
-            var note = selectionEvent.Note ?? string.Empty;
-            return selectionEvent.Step == StandaloneFoulLineSelectionStep.Left
-                ? $"left_foul_line_selection_failed:{note}"
-                : $"right_foul_line_selection_failed:{note}";
-        }
-
-        private string NoteToLabel(string note)
-        {
-            note = NormalizeSelectionFailureNote(note);
-            if (string.IsNullOrWhiteSpace(note))
-            {
-                return failedText;
-            }
-
-            if (note.StartsWith("foul_line_selection_missing", StringComparison.Ordinal))
-            {
-                return "Select Foul Line";
-            }
-
-            if (note.StartsWith("floor_hit_too_far", StringComparison.Ordinal))
-            {
-                return "Aim Closer";
-            }
-
-            if (note.StartsWith("ray_parallel_to_floor", StringComparison.Ordinal)
-                || note.StartsWith("floor_hit_behind_ray", StringComparison.Ordinal))
-            {
-                return "Aim At Floor";
-            }
-
-            if (note.StartsWith("selection_frame_metadata_missing", StringComparison.Ordinal))
-            {
-                return "Camera Not Ready";
-            }
-
-            if (note.StartsWith("floor_plane_unavailable:", StringComparison.Ordinal))
-            {
-                return "Floor Not Ready";
-            }
-
-            if (note.StartsWith("session_stream_not_active", StringComparison.Ordinal))
-            {
-                return "Starting Session";
-            }
-
-            if (note.StartsWith("lane_lock_request_failed_no_frames", StringComparison.Ordinal))
-            {
-                return "No Frames";
-            }
-
-            if (note.StartsWith("lane_lock_request_failed_low_frame_count", StringComparison.Ordinal))
-            {
-                return "Hold Steady";
-            }
-
-            if (note.StartsWith("lane_lock_request_send_failed", StringComparison.Ordinal))
-            {
-                return "Send Failed";
-            }
-
-            if (note.StartsWith("lane_lock_result_timeout", StringComparison.Ordinal))
-            {
-                return resultTimeoutText;
-            }
-
-            if (note.StartsWith("metadata_stream_not_connected", StringComparison.Ordinal))
-            {
-                return "Link Missing";
-            }
-
-            if (note.StartsWith("lane_lock_confirm_request_id_missing", StringComparison.Ordinal))
-            {
-                return "No Lane";
-            }
-
-            if (note.StartsWith("foul_line_selection_points_too_close", StringComparison.Ordinal))
-            {
-                return "Wider Points";
-            }
-
-            return failedText;
-        }
-
-        private void DebugLog(string message)
-        {
-            if (!verboseLogging)
-            {
-                return;
-            }
-
-            Debug.Log($"[StandaloneQuestLaneLockStateCoordinator] {message}");
+            public float time;
+            public Vector3 origin;
+            public Vector3 forward;
+            public Vector3 floorPoint;
+            public Vector3 floorNormal;
         }
     }
 }
+

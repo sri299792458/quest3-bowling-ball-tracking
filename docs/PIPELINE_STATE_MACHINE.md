@@ -2,9 +2,9 @@
 
 Last updated: 2026-04-27
 
-This document describes the current pipeline state machine as implemented, why it feels random, and the target redesign.
+This document describes the final live pipeline state model: who owns each transition, which events are durable, and which ambiguous states are intentionally removed.
 
-The goal is not to add more fallbacks.
+The goal is not to add more escape paths.
 The goal is to make the product run from one explicit state model where every transition has an owner, an event, and a durable record.
 
 ## First Principles
@@ -88,39 +88,29 @@ Current problems:
 Owners:
 
 - `StandaloneQuestLaneLockButton`
-- `StandaloneQuestFoulLineRaySelector`
-- `StandaloneQuestLaneLockCapture`
+- `StandaloneQuestLaneLockStateCoordinator`
 - `StandaloneQuestLaneLockResultRenderer`
 
 Current implicit states:
 
 ```text
-NoSelection
-  -> SelectingLeftFoulLinePoint
-  -> SelectingRightFoulLinePoint
-  -> FoulLineSelectionReady
-  -> LaneLockRequestActive
-  -> LaneLockRequestSent
-  -> WaitingForLaneLockResult
-  -> LaneVisualizationRendered
+Idle
+  -> PlacingHeads
+  -> FullLanePreview
+  -> Locked
 ```
 
 Current transition triggers:
 
-- pressing `Lock Lane` starts foul-line selection if no selection exists
-- first ray click becomes the left foul-line point
-- second ray click becomes the right foul-line point
-- pressing `Lock Lane` again sends a `lane_lock_request`
-- laptop returns `lane_lock_result`
-- Quest renders the lane overlay when the result succeeds
+- pinch/hold places a heads-region rectangle on the Quest floor plane
+- releasing the pinch previews the full lane overlay
+- pressing `Confirm Lane` sends `lane_lock_confirm` with the complete `lane_lock_result`
+- the laptop persists that result and arms shot detection
 
 Current problems:
 
-- older builds let button text do state-machine work through transient labels
-- the low-level selector and request sender still expose independent booleans, but the coordinator now owns the visible lane state
-- the lane-lock result is visualized as a candidate and must be explicitly accepted or retried
-- `lane_lock_confirm` now exists, and the current UI has explicit accept/retry controls
-- laptop no longer treats the latest successful lane-lock result as usable immediately
+- the confirmed lane geometry must reach the laptop before shot detection can start
+- a rejected/relocked lane disables shot detection until a new lane is confirmed
 
 ### Current Laptop Receiver State
 
@@ -138,7 +128,7 @@ NoDirectory
   -> MediaSamplesAppending
   -> MetadataSessionStartSeen
   -> FrameMetadataAppending
-  -> LaneLockRequestsAppending
+  -> LaneLockConfirmsAppending
   -> ShotBoundariesAppending
   -> OutboundResultsAppending
   -> SessionEndSeen
@@ -150,7 +140,7 @@ Current transition triggers:
 - metadata channel can also create or open the same session directory
 - media samples append to `stream.h264`
 - metadata messages append to `metadata_stream.jsonl`
-- lane-lock request messages also append to `lane_lock_requests.jsonl`
+- confirmed lane messages append to `lane_lock_confirms.jsonl`
 - shot-boundary messages also append to `shot_boundaries.jsonl`
 - local analysis publishes result envelopes to `127.0.0.1:8770`
 - result hub appends to `outbound_results.jsonl` and broadcasts to Quest clients
@@ -187,9 +177,6 @@ Current implicit states:
 
 ```text
 SessionDiscovered
-  -> NewLaneLockRequestSeen
-  -> LaneLockRequestProcessed
-  -> LaneLockResultPublished
   -> AutoShotBoundaryScan
   -> CompletedShotWindowSeen
   -> ShotWindowProcessed
@@ -200,14 +187,12 @@ Durable state today:
 
 ```text
 analysis_live_pipeline/pipeline_state.json
-  processedLaneLockRequests: requestId -> status
   processedShotWindows: windowId -> status
 ```
 
 Current transition triggers:
 
 - polling loop discovers `live_*` directories
-- unprocessed lane-lock requests are solved once
 - shot detector scans frames if configured
 - completed shot windows are tracked once
 - results are published to the live receiver
@@ -215,7 +200,7 @@ Current transition triggers:
 Current problems:
 
 - pipeline state records what was processed, not what state the session is in
-- lane lock has no candidate/confirmed distinction
+- lane lock is now confirmed on Quest before the laptop arms shot detection
 - shot detection can be configured, but the pipeline does not own an explicit "armed" state
 - shot-boundary detector has its own separate state file
 - shot tracking has per-window outputs, but no session-level shot lifecycle
@@ -554,7 +539,6 @@ Keep append-only logs, but make them event logs rather than hidden state:
 
 ```text
 metadata_stream.jsonl
-lane_lock_requests.jsonl
 lane_lock_confirms.jsonl
 shot_boundaries.jsonl
 outbound_results.jsonl

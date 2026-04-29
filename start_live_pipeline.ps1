@@ -1,5 +1,4 @@
 param(
-    [switch]$LaneOnly,
     [switch]$NoSam2
 )
 
@@ -92,11 +91,11 @@ if (-not (Test-Path $python)) {
     throw "Missing repo venv python: $python. Run .\laptop_receiver\setup_laptop_env.ps1 first."
 }
 
-if (-not $LaneOnly -and -not (Test-Path $yoloCheckpoint)) {
+if (-not (Test-Path $yoloCheckpoint)) {
     throw "Missing YOLO26s checkpoint: $yoloCheckpoint"
 }
 
-if (-not $LaneOnly -and -not $NoSam2) {
+if (-not $NoSam2) {
     if (-not (Test-Path $sam2Root)) {
         throw "Missing SAM2 repo: $sam2Root. Run .\laptop_receiver\setup_laptop_env.ps1 first."
     }
@@ -135,11 +134,9 @@ try {
     Write-Host "  stderr: $receiverStderr"
 
     $pipelineArgs = @("-m", "laptop_receiver.run_live_session_pipeline")
-    if (-not $LaneOnly) {
-        $pipelineArgs += @("--yolo-checkpoint", $yoloCheckpoint)
-        if (-not $NoSam2) {
-            $pipelineArgs += "--run-sam2"
-        }
+    $pipelineArgs += @("--yolo-checkpoint", $yoloCheckpoint)
+    if (-not $NoSam2) {
+        $pipelineArgs += "--run-sam2"
     }
 
     Write-Host "Starting live session pipeline in this terminal."
