@@ -492,7 +492,34 @@ class LiveShotBoundaryDetector:
         if self._sam2_tracker is None:
             raise RuntimeError("Camera SAM2 tracker is not configured.")
         if not self._sam2_tracker.active:
-            raise RuntimeError("Camera SAM2 tracker cannot resume an already-open shot after process restart.")
+            frame_metadata = decoded_frame.metadata or {}
+            frame_seq = self._frame_seq(frame_metadata, decoded_frame.frame_index)
+            end_reason = "camera_sam2_stale_open_shot_closed"
+            end_event = self._build_boundary_event(
+                boundary_type=SHOT_BOUNDARY_END,
+                session_id=str(active_shot.get("sessionId") or session_id),
+                shot_id=str(active_shot.get("shotId") or shot_id),
+                lane_lock_request_id=str(active_shot.get("laneLockRequestId") or lane_lock.request_id),
+                metadata=frame_metadata,
+                frame_seq=frame_seq,
+                reason=end_reason,
+            )
+            self._append_boundary_event(root, end_event)
+
+            cooldown_frames = int(round(float(self.config.shot_cooldown_seconds) * fps))
+            state["mode"] = "idle"
+            state["pendingCandidate"] = None
+            state["activeShot"] = None
+            state["cooldownUntilFrameSeq"] = int(frame_seq + max(cooldown_frames, 0))
+            state["lastReason"] = end_reason
+            state["lastCameraSam2Result"] = {
+                "kind": "live_camera_sam2_track_result",
+                "success": False,
+                "failure_reason": "camera_sam2_tracker_lost_after_process_restart",
+                "stop_reason": end_reason,
+                "source_frame_idx_end": int(decoded_frame.frame_index),
+            }
+            return [end_event]
 
         frame_metadata = decoded_frame.metadata or {}
         frame_seq = self._frame_seq(frame_metadata, decoded_frame.frame_index)

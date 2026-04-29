@@ -12,6 +12,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayDeque;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.net.InetSocketAddress;
@@ -27,6 +28,7 @@ public final class StandaloneVideoEncoderPlugin {
     private static final int STREAM_PACKET_TYPE_SESSION_END = 3;
     private static final int STREAM_PACKET_TYPE_CODEC_CONFIG = 4;
     private static final int STREAM_SAMPLE_FLAG_KEYFRAME = 1;
+    private static final int LIVE_PACKET_QUEUE_CAPACITY = 120;
     private static final byte[] ANNEX_B_START_CODE = new byte[] { 0, 0, 0, 1 };
 
     static {
@@ -61,6 +63,23 @@ public final class StandaloneVideoEncoderPlugin {
     private boolean liveStreamConnected;
     private String liveStreamLastError = "";
     private boolean liveCodecConfigSent;
+    private Thread liveStreamWriterThread;
+    private final Object liveStreamQueueGate = new Object();
+    private final ArrayDeque<LiveStreamPacket> liveStreamQueue = new ArrayDeque<>();
+    private boolean liveStreamWriterStopRequested;
+    private long liveStreamDroppedPacketCount;
+
+    private static final class LiveStreamPacket {
+        final int packetType;
+        final byte[] payload;
+        final boolean closeAfterWrite;
+
+        LiveStreamPacket(int packetType, byte[] payload, boolean closeAfterWrite) {
+            this.packetType = packetType;
+            this.payload = payload == null ? new byte[0] : payload;
+            this.closeAfterWrite = closeAfterWrite;
+        }
+    }
 
     public boolean startSession(String outputPath, int width, int height, int fps, int bitrateKbps, float iFrameIntervalSeconds) {
         synchronized (gate) {
@@ -187,6 +206,8 @@ public final class StandaloneVideoEncoderPlugin {
                 liveStreamConnected = true;
                 liveStreamLastError = "";
                 liveCodecConfigSent = false;
+                liveStreamDroppedPacketCount = 0L;
+                startLiveStreamWriterLocked();
 
                 JSONObject payload = new JSONObject();
                 payload.put("session_id", liveStreamSessionId);
@@ -196,7 +217,12 @@ public final class StandaloneVideoEncoderPlugin {
                 payload.put("fps", configuredFps);
                 payload.put("bitrate_kbps", configuredBitrateKbps);
                 payload.put("codec", "h264");
-                writeStreamPacketLocked(STREAM_PACKET_TYPE_SESSION_START, payload.toString().getBytes("UTF-8"));
+                if (!enqueueLivePacketLocked(
+                        STREAM_PACKET_TYPE_SESSION_START,
+                        payload.toString().getBytes("UTF-8"),
+                        false)) {
+                    throw new IOException("live_stream_queue_full");
+                }
                 if (muxerStarted && codec != null) {
                     maybeWriteLiveCodecConfigLocked(codec.getOutputFormat());
                 }
@@ -242,6 +268,8 @@ public final class StandaloneVideoEncoderPlugin {
                 root.put("live_stream_session_id", liveStreamSessionId);
                 root.put("live_stream_shot_id", liveStreamShotId);
                 root.put("live_stream_sent_sample_count", liveStreamSentSampleCount);
+                root.put("live_stream_queued_packet_count", liveStreamQueueSize());
+                root.put("live_stream_dropped_packet_count", liveStreamDroppedPacketCount);
                 root.put("live_stream_last_error", liveStreamLastError);
             } catch (JSONException ex) {
                 return "{\"status\":\"error\",\"message\":\"" + escapeJson(ex.getMessage()) + "\"}";
@@ -444,8 +472,10 @@ public final class StandaloneVideoEncoderPlugin {
             samplePayload.putInt(streamFlags);
             samplePayload.putInt(sampleBytes.length);
             samplePayload.put(sampleBytes);
-            writeStreamPacketLocked(STREAM_PACKET_TYPE_SAMPLE, samplePayload.array());
-            liveStreamSentSampleCount++;
+            if (!enqueueLivePacketLocked(STREAM_PACKET_TYPE_SAMPLE, samplePayload.array(), false)) {
+                liveStreamLastError = "live_stream_queue_full";
+                closeLiveStreamLocked(false, liveStreamLastError);
+            }
         } catch (Exception ex) {
             liveStreamLastError = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             closeLiveStreamLocked(false, liveStreamLastError);
@@ -463,7 +493,11 @@ public final class StandaloneVideoEncoderPlugin {
                 return;
             }
 
-            writeStreamPacketLocked(STREAM_PACKET_TYPE_CODEC_CONFIG, codecConfig);
+            if (!enqueueLivePacketLocked(STREAM_PACKET_TYPE_CODEC_CONFIG, codecConfig, false)) {
+                liveStreamLastError = "live_stream_queue_full";
+                closeLiveStreamLocked(false, liveStreamLastError);
+                return;
+            }
             liveCodecConfigSent = true;
         } catch (Exception ex) {
             liveStreamLastError = ex.getClass().getSimpleName() + ": " + ex.getMessage();
@@ -471,8 +505,25 @@ public final class StandaloneVideoEncoderPlugin {
         }
     }
 
-    private void writeStreamPacketLocked(int packetType, byte[] payload) throws IOException {
-        if (liveStreamOutput == null) {
+    private boolean enqueueLivePacketLocked(int packetType, byte[] payload, boolean closeAfterWrite) {
+        if (!liveStreamConnected || liveStreamOutput == null || liveStreamWriterThread == null) {
+            return false;
+        }
+
+        synchronized (liveStreamQueueGate) {
+            if (liveStreamQueue.size() >= LIVE_PACKET_QUEUE_CAPACITY) {
+                liveStreamDroppedPacketCount++;
+                return false;
+            }
+
+            liveStreamQueue.addLast(new LiveStreamPacket(packetType, payload, closeAfterWrite));
+            liveStreamQueueGate.notifyAll();
+            return true;
+        }
+    }
+
+    private void writeStreamPacket(OutputStream output, int packetType, byte[] payload) throws IOException {
+        if (output == null) {
             throw new IOException("liveStreamOutput missing");
         }
 
@@ -482,26 +533,154 @@ public final class StandaloneVideoEncoderPlugin {
         header.put((byte) STREAM_PACKET_VERSION);
         header.put((byte) packetType);
         header.putInt(body.length);
-        liveStreamOutput.write(header.array());
+        output.write(header.array());
         if (body.length > 0) {
-            liveStreamOutput.write(body);
+            output.write(body);
         }
-        liveStreamOutput.flush();
+        output.flush();
     }
 
     private void closeLiveStreamLocked(boolean sendSessionEnd, String reason) {
+        boolean sessionEndQueued = false;
         if (sendSessionEnd && liveStreamConnected && liveStreamOutput != null) {
             try {
                 JSONObject payload = new JSONObject();
                 payload.put("session_id", liveStreamSessionId);
                 payload.put("shot_id", liveStreamShotId);
                 payload.put("reason", reason == null ? "stream_closed" : reason);
-                writeStreamPacketLocked(STREAM_PACKET_TYPE_SESSION_END, payload.toString().getBytes("UTF-8"));
+                sessionEndQueued = enqueueLivePacketLocked(
+                        STREAM_PACKET_TYPE_SESSION_END,
+                        payload.toString().getBytes("UTF-8"),
+                        true);
             } catch (Exception ex) {
                 liveStreamLastError = ex.getClass().getSimpleName() + ": " + ex.getMessage();
             }
         }
 
+        if (sessionEndQueued) {
+            signalLiveStreamWriterStopLocked(false);
+        } else {
+            Thread writerThread = liveStreamWriterThread;
+            liveStreamWriterThread = null;
+            signalLiveStreamWriterStopLocked(true);
+            closeLiveStreamResourcesLocked();
+            if (writerThread != null) {
+                writerThread.interrupt();
+            }
+        }
+
+        liveStreamConnected = false;
+        liveStreamHost = "";
+        liveStreamPort = 0;
+        liveStreamSessionId = "";
+        liveStreamShotId = "";
+        liveCodecConfigSent = false;
+    }
+
+    private void startLiveStreamWriterLocked() {
+        synchronized (liveStreamQueueGate) {
+            liveStreamQueue.clear();
+            liveStreamWriterStopRequested = false;
+        }
+
+        liveStreamWriterThread = new Thread(this::liveStreamWriterLoop, "StandaloneVideoEncoderLiveWriter");
+        liveStreamWriterThread.start();
+    }
+
+    private void signalLiveStreamWriterStopLocked(boolean clearQueue) {
+        synchronized (liveStreamQueueGate) {
+            liveStreamWriterStopRequested = true;
+            if (clearQueue) {
+                liveStreamQueue.clear();
+            }
+            liveStreamQueueGate.notifyAll();
+        }
+    }
+
+    private int liveStreamQueueSize() {
+        synchronized (liveStreamQueueGate) {
+            return liveStreamQueue.size();
+        }
+    }
+
+    private void liveStreamWriterLoop() {
+        Thread currentThread = Thread.currentThread();
+        try {
+            while (true) {
+                LiveStreamPacket packet;
+                synchronized (liveStreamQueueGate) {
+                    while (liveStreamQueue.isEmpty() && !liveStreamWriterStopRequested) {
+                        try {
+                            liveStreamQueueGate.wait();
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+
+                    if (liveStreamQueue.isEmpty() && liveStreamWriterStopRequested) {
+                        return;
+                    }
+
+                    packet = liveStreamQueue.removeFirst();
+                }
+
+                OutputStream output;
+                synchronized (gate) {
+                    output = liveStreamOutput;
+                }
+                if (output == null) {
+                    return;
+                }
+
+                try {
+                    writeStreamPacket(output, packet.packetType, packet.payload);
+                    if (packet.packetType == STREAM_PACKET_TYPE_SAMPLE) {
+                        synchronized (gate) {
+                            if (liveStreamWriterThread == currentThread) {
+                                liveStreamSentSampleCount++;
+                            }
+                        }
+                    }
+                } catch (Exception ex) {
+                    synchronized (gate) {
+                        if (liveStreamWriterThread == currentThread) {
+                            liveStreamLastError = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+                            liveStreamConnected = false;
+                        }
+                    }
+                    return;
+                }
+
+                if (packet.closeAfterWrite) {
+                    return;
+                }
+            }
+        } finally {
+            boolean ownsWriter;
+            synchronized (gate) {
+                ownsWriter = liveStreamWriterThread == currentThread;
+                if (ownsWriter) {
+                    closeLiveStreamResourcesLocked();
+                    liveStreamWriterThread = null;
+                    liveStreamConnected = false;
+                    liveStreamHost = "";
+                    liveStreamPort = 0;
+                    liveStreamSessionId = "";
+                    liveStreamShotId = "";
+                    liveCodecConfigSent = false;
+                }
+            }
+            if (ownsWriter) {
+                synchronized (liveStreamQueueGate) {
+                    liveStreamQueue.clear();
+                    liveStreamWriterStopRequested = false;
+                }
+            }
+        }
+    }
+
+    private void closeLiveStreamResourcesLocked() {
         if (liveStreamOutput != null) {
             try {
                 liveStreamOutput.close();
@@ -517,13 +696,6 @@ public final class StandaloneVideoEncoderPlugin {
             }
             liveStreamSocket = null;
         }
-
-        liveStreamConnected = false;
-        liveStreamHost = "";
-        liveStreamPort = 0;
-        liveStreamSessionId = "";
-        liveStreamShotId = "";
-        liveCodecConfigSent = false;
     }
 
     private static byte[] buildCodecConfigAnnexB(MediaFormat format) {

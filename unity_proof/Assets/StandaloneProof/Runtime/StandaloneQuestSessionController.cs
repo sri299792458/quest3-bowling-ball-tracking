@@ -37,6 +37,8 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void OnEnable()
         {
+            SubscribeToMetadataFailures();
+
             if (!autoStartSession || _startupCoroutine != null)
             {
                 return;
@@ -49,11 +51,13 @@ namespace QuestBowlingStandalone.QuestApp
         {
             CancelStartupCoroutine();
             AbortSession("disabled");
+            UnsubscribeFromMetadataFailures();
         }
 
         private void OnDestroy()
         {
             AbortSession("destroyed");
+            UnsubscribeFromMetadataFailures();
         }
 
         private void OnApplicationQuit()
@@ -335,6 +339,39 @@ namespace QuestBowlingStandalone.QuestApp
 
             StopCoroutine(_startupCoroutine);
             _startupCoroutine = null;
+        }
+
+        private void SubscribeToMetadataFailures()
+        {
+            if (liveMetadataSender == null)
+            {
+                return;
+            }
+
+            liveMetadataSender.MetadataStreamFailed -= OnMetadataStreamFailed;
+            liveMetadataSender.MetadataStreamFailed += OnMetadataStreamFailed;
+        }
+
+        private void UnsubscribeFromMetadataFailures()
+        {
+            if (liveMetadataSender == null)
+            {
+                return;
+            }
+
+            liveMetadataSender.MetadataStreamFailed -= OnMetadataStreamFailed;
+        }
+
+        private void OnMetadataStreamFailed(string reason)
+        {
+            if (!_sessionActive)
+            {
+                return;
+            }
+
+            var failureReason = string.IsNullOrWhiteSpace(reason) ? "metadata_stream_failed" : reason;
+            DebugLog("Aborting live session because metadata stream failed: " + failureReason);
+            AbortSession("metadata_stream_failed:" + failureReason);
         }
 
         private void DebugLog(string message)

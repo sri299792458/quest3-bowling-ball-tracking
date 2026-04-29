@@ -83,7 +83,9 @@ namespace QuestBowlingStandalone.QuestApp
         private string _activeSessionId;
         private string _activeShotId;
 
+        public event Action<string> MetadataStreamFailed;
         public bool EnabledForAutoRun => enabledForAutoRun;
+        public string LastStatus { get; private set; } = string.Empty;
 
         public void SetEndpoint(string targetHost, int targetPort)
         {
@@ -150,6 +152,7 @@ namespace QuestBowlingStandalone.QuestApp
             if (_writer == null)
             {
                 note = "metadata_stream_not_connected";
+                FailActiveMetadataStream(note);
                 return false;
             }
 
@@ -168,7 +171,7 @@ namespace QuestBowlingStandalone.QuestApp
             catch (Exception ex)
             {
                 note = ex.GetType().Name + ": " + ex.Message;
-                AbortSession();
+                FailActiveMetadataStream(note);
                 return false;
             }
         }
@@ -223,6 +226,7 @@ namespace QuestBowlingStandalone.QuestApp
             if (_writer == null)
             {
                 note = "metadata_stream_not_connected";
+                FailActiveMetadataStream(note);
                 return false;
             }
 
@@ -241,7 +245,7 @@ namespace QuestBowlingStandalone.QuestApp
             catch (Exception ex)
             {
                 note = ex.GetType().Name + ": " + ex.Message;
-                AbortSession();
+                FailActiveMetadataStream(note);
                 return false;
             }
         }
@@ -264,6 +268,7 @@ namespace QuestBowlingStandalone.QuestApp
             if (_writer == null)
             {
                 note = "metadata_stream_not_connected";
+                FailActiveMetadataStream(note);
                 return false;
             }
 
@@ -290,7 +295,7 @@ namespace QuestBowlingStandalone.QuestApp
             catch (Exception ex)
             {
                 note = ex.GetType().Name + ": " + ex.Message;
-                AbortSession();
+                FailActiveMetadataStream(note);
                 return false;
             }
         }
@@ -315,6 +320,7 @@ namespace QuestBowlingStandalone.QuestApp
             if (_writer == null)
             {
                 note = "metadata_stream_not_connected";
+                FailActiveMetadataStream(note);
                 return false;
             }
 
@@ -338,7 +344,7 @@ namespace QuestBowlingStandalone.QuestApp
             catch (Exception ex)
             {
                 note = ex.GetType().Name + ": " + ex.Message;
-                AbortSession();
+                FailActiveMetadataStream(note);
                 return false;
             }
         }
@@ -425,6 +431,14 @@ namespace QuestBowlingStandalone.QuestApp
             var json = JsonUtility.ToJson(payload);
             _writer.WriteLine(json);
             _writer.Flush();
+        }
+
+        private void FailActiveMetadataStream(string reason)
+        {
+            LastStatus = string.IsNullOrWhiteSpace(reason) ? "metadata_stream_failed" : reason;
+            DebugLog("Metadata stream failed: " + LastStatus);
+            AbortSession();
+            MetadataStreamFailed?.Invoke(LastStatus);
         }
 
         private void DebugLog(string message)
