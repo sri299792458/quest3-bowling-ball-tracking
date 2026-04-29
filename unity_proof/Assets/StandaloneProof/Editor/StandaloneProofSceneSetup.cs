@@ -779,6 +779,7 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("host").stringValue = string.Empty;
             serializedObject.FindProperty("port").intValue = 8769;
             serializedObject.FindProperty("connectTimeoutMs").intValue = 1000;
+            serializedObject.FindProperty("reconnectDelayMs").intValue = 1000;
             serializedObject.FindProperty("enabledForAutoRun").boolValue = true;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();

@@ -154,6 +154,11 @@ class LiveShotBoundaryDetector:
 
         lane_lock = load_confirmed_lane_lock(root)
         if lane_lock is None:
+            latest_cursor = self._latest_frame_cursor(root)
+            if latest_cursor is not None:
+                latest_frame_index, latest_frame_seq = latest_cursor
+                state["lastScannedFrameIndex"] = max(_int(state.get("lastScannedFrameIndex"), -1), latest_frame_index)
+                state["lastScannedFrameSeq"] = max(_int(state.get("lastScannedFrameSeq"), -1), latest_frame_seq)
             state["mode"] = "idle"
             state["pendingCandidate"] = None
             state["activeShot"] = None
@@ -179,6 +184,23 @@ class LiveShotBoundaryDetector:
             )
 
         self._sync_state_with_boundaries(state, shot_boundaries.events, shot_boundaries.open_start)
+        latest_cursor = self._latest_frame_cursor(root)
+        if latest_cursor is not None:
+            latest_frame_index, latest_frame_seq = latest_cursor
+            if latest_frame_seq <= _int(state.get("lastScannedFrameSeq"), -1):
+                state["lastReason"] = "no_new_frames"
+                self._save_state(root, state)
+                return self._result(
+                    root,
+                    state_path,
+                    state,
+                    status=str(state.get("mode") or "idle"),
+                    reason="no_new_frames",
+                    confirmed_lane_lock_request_id=lane_lock.request_id,
+                )
+            state["latestAvailableFrameIndex"] = int(latest_frame_index)
+            state["latestAvailableFrameSeq"] = int(latest_frame_seq)
+
         artifact = load_local_clip_artifact(root)
         if not artifact.frame_metadata:
             self._save_state(root, state)
@@ -201,7 +223,8 @@ class LiveShotBoundaryDetector:
         end_events_emitted = 0
         last_reason = "no_new_frames"
 
-        for decoded_frame in artifact.iter_frames():
+        start_frame_index = max(_int(state.get("lastScannedFrameIndex"), -1) + 1, 0)
+        for decoded_frame in artifact.iter_frames(start_frame_index=start_frame_index):
             metadata = decoded_frame.metadata or {}
             frame_seq = self._frame_seq(metadata, decoded_frame.frame_index)
             if frame_seq <= _int(state.get("lastScannedFrameSeq"), -1):
@@ -841,6 +864,33 @@ class LiveShotBoundaryDetector:
         state.setdefault("pendingCandidate", None)
         state.setdefault("activeShot", None)
         return state
+
+    def _latest_frame_cursor(self, root: Path) -> tuple[int, int] | None:
+        metadata_stream_path = root / "metadata_stream.jsonl"
+        if not metadata_stream_path.exists():
+            return None
+
+        latest_frame_index = -1
+        latest_frame_seq = -1
+        for line in metadata_stream_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                row = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if row.get("kind") != "frame_metadata":
+                continue
+            frame_metadata = row.get("frame_metadata")
+            if not isinstance(frame_metadata, Mapping):
+                continue
+            latest_frame_index += 1
+            latest_frame_seq = self._frame_seq(frame_metadata, latest_frame_index)
+
+        if latest_frame_index < 0:
+            return None
+        return latest_frame_index, latest_frame_seq
 
     def _save_state(self, root: Path, state: Mapping[str, Any]) -> None:
         self._state_dir(root).mkdir(parents=True, exist_ok=True)

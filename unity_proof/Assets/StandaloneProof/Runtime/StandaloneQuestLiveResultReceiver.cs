@@ -51,11 +51,13 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private string host = "";
         [SerializeField] private int port = 8769;
         [SerializeField] private int connectTimeoutMs = 1000;
+        [SerializeField] private int reconnectDelayMs = 1000;
         [SerializeField] private bool enabledForAutoRun = true;
         [SerializeField] private bool verboseLogging = true;
 
         private readonly object _queueLock = new object();
         private readonly Queue<string> _pendingLines = new Queue<string>();
+        private readonly HashSet<string> _seenMessageIds = new HashSet<string>();
 
         private TcpClient _client;
         private Thread _readerThread;
@@ -105,6 +107,11 @@ namespace QuestBowlingStandalone.QuestApp
             _activeShotId = shotId ?? string.Empty;
             _stopRequested = false;
             _threadStatus = null;
+            lock (_queueLock)
+            {
+                _pendingLines.Clear();
+            }
+            _seenMessageIds.Clear();
             LastStatus = "result_receiver_starting";
 
             _readerThread = new Thread(ResultReaderLoop)
@@ -156,45 +163,64 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void ResultReaderLoop()
         {
-            try
+            while (!_stopRequested)
             {
-                using (var client = new TcpClient())
+                try
                 {
-                    _client = client;
-                    client.NoDelay = true;
-                    ConnectWithTimeout(client, host, port, Math.Max(1, connectTimeoutMs));
-                    SetThreadStatus($"result_receiver_connected {host}:{port}");
-
-                    using (var stream = client.GetStream())
-                    using (var reader = new StreamReader(stream, new UTF8Encoding(false)))
+                    using (var client = new TcpClient())
                     {
-                        while (!_stopRequested)
+                        _client = client;
+                        client.NoDelay = true;
+                        ConnectWithTimeout(client, host, port, Math.Max(1, connectTimeoutMs));
+                        SetThreadStatus($"result_receiver_connected {host}:{port}");
+
+                        using (var stream = client.GetStream())
+                        using (var reader = new StreamReader(stream, new UTF8Encoding(false)))
                         {
-                            var line = reader.ReadLine();
-                            if (line == null)
+                            while (!_stopRequested)
                             {
-                                break;
-                            }
+                                var line = reader.ReadLine();
+                                if (line == null)
+                                {
+                                    break;
+                                }
 
-                            if (line.Length == 0)
-                            {
-                                continue;
-                            }
+                                if (line.Length == 0)
+                                {
+                                    continue;
+                                }
 
-                            EnqueueLine(line);
+                                EnqueueLine(line);
+                            }
                         }
                     }
+
+                    SetThreadStatus("result_receiver_disconnected");
+                }
+                catch (Exception ex)
+                {
+                    SetThreadStatus(ex.GetType().Name + ": " + ex.Message);
+                }
+                finally
+                {
+                    _client = null;
                 }
 
-                SetThreadStatus("result_receiver_disconnected");
+                if (!_stopRequested)
+                {
+                    SleepBeforeReconnect();
+                }
             }
-            catch (Exception ex)
+        }
+
+        private void SleepBeforeReconnect()
+        {
+            var remainingMs = Math.Max(50, reconnectDelayMs);
+            while (!_stopRequested && remainingMs > 0)
             {
-                SetThreadStatus(ex.GetType().Name + ": " + ex.Message);
-            }
-            finally
-            {
-                _client = null;
+                var sliceMs = Math.Min(remainingMs, 100);
+                Thread.Sleep(sliceMs);
+                remainingMs -= sliceMs;
             }
         }
 
@@ -244,23 +270,36 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            if (!string.IsNullOrEmpty(header.message_id) && _seenMessageIds.Contains(header.message_id))
+            {
+                LastStatus = "ignored_duplicate_result";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            var processed = false;
             if (header.kind == "lane_lock_result")
             {
-                ProcessLaneLockResult(line);
-                return;
+                processed = ProcessLaneLockResult(line);
             }
-
-            if (header.kind == "shot_result")
+            else if (header.kind == "shot_result")
             {
-                ProcessShotResult(line);
+                processed = ProcessShotResult(line);
+            }
+            else
+            {
+                LastStatus = "unsupported_result_kind:" + header.kind;
+                DebugLog(LastStatus);
                 return;
             }
 
-            LastStatus = "unsupported_result_kind:" + header.kind;
-            DebugLog(LastStatus);
+            if (processed && !string.IsNullOrEmpty(header.message_id))
+            {
+                _seenMessageIds.Add(header.message_id);
+            }
         }
 
-        private void ProcessLaneLockResult(string line)
+        private bool ProcessLaneLockResult(string line)
         {
             LaneLockResultEnvelope envelope;
             try
@@ -271,30 +310,31 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 LastStatus = ex.GetType().Name + ": invalid_lane_lock_result_json";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             if (envelope == null || envelope.lane_lock_result == null)
             {
                 LastStatus = "lane_lock_result_missing_payload";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             if (envelope.lane_lock_result.schemaVersion != "lane_lock_result")
             {
                 LastStatus = "unsupported_lane_lock_result_schema";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             LastLaneLockResult = envelope.lane_lock_result;
             LastStatus = envelope.lane_lock_result.success ? "lane_lock_result_received" : "lane_lock_result_failed";
             DebugLog($"{LastStatus} requestId={envelope.lane_lock_result.requestId} confidence={envelope.lane_lock_result.confidence:0.000}");
             LaneLockResultReceived?.Invoke(envelope.lane_lock_result);
+            return true;
         }
 
-        private void ProcessShotResult(string line)
+        private bool ProcessShotResult(string line)
         {
             ShotResultEnvelope envelope;
             try
@@ -305,21 +345,21 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 LastStatus = ex.GetType().Name + ": invalid_shot_result_json";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             if (envelope == null || envelope.shot_result == null)
             {
                 LastStatus = "shot_result_missing_payload";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             if (envelope.shot_result.schemaVersion != "shot_result")
             {
                 LastStatus = "unsupported_shot_result_schema";
                 DebugLog(LastStatus);
-                return;
+                return false;
             }
 
             LastShotResult = envelope.shot_result;
@@ -327,6 +367,7 @@ namespace QuestBowlingStandalone.QuestApp
             var pointCount = envelope.shot_result.trajectory != null ? envelope.shot_result.trajectory.Length : 0;
             DebugLog($"{LastStatus} windowId={envelope.shot_result.windowId} trajectoryPoints={pointCount}");
             ShotResultReceived?.Invoke(envelope.shot_result);
+            return true;
         }
 
         private void EnqueueLine(string line)

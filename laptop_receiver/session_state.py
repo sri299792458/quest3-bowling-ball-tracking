@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 SESSION_STATE_SCHEMA_VERSION = "quest_bowling_session_state_v1"
 SESSION_STATE_FILENAME = "session_state.json"
+SESSION_STATE_LOCK_FILENAME = ".session_state.lock"
 STATE_FILE_RETRY_COUNT = 8
 STATE_FILE_RETRY_DELAY_SECONDS = 0.025
 
@@ -58,6 +60,10 @@ def session_state_path(session_dir: Path | str) -> Path:
     return Path(session_dir).expanduser().resolve() / SESSION_STATE_FILENAME
 
 
+def session_state_lock_path(session_dir: Path | str) -> Path:
+    return Path(session_dir).expanduser().resolve() / SESSION_STATE_LOCK_FILENAME
+
+
 def default_session_state(
     session_dir: Path | str,
     *,
@@ -78,13 +84,9 @@ def default_session_state(
             "mediaSessionStartSeen": False,
             "metadataSessionStartSeen": False,
             "codecConfigSeen": False,
-            "sampleCount": 0,
-            "keyframeCount": 0,
-            "metadataMessageCount": 0,
-            "outboundResultCount": 0,
-            "firstPtsUs": None,
-            "lastPtsUs": None,
+            "sessionEndSeen": False,
             "lastFrameSeq": None,
+            "lastFramePtsUs": None,
         },
         "lane": {
             "state": LANE_UNKNOWN,
@@ -122,6 +124,11 @@ def default_session_state(
 
 
 def load_session_state(session_dir: Path | str) -> dict[str, Any]:
+    with _session_state_lock(session_dir):
+        return _load_session_state_unlocked(session_dir)
+
+
+def _load_session_state_unlocked(session_dir: Path | str) -> dict[str, Any]:
     path = session_state_path(session_dir)
     if not path.exists():
         return default_session_state(session_dir)
@@ -142,6 +149,11 @@ def load_session_state(session_dir: Path | str) -> dict[str, Any]:
 
 
 def write_session_state(session_dir: Path | str, state: dict[str, Any]) -> Path:
+    with _session_state_lock(session_dir):
+        return _write_session_state_unlocked(session_dir, state)
+
+
+def _write_session_state_unlocked(session_dir: Path | str, state: dict[str, Any]) -> Path:
     path = session_state_path(session_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     state["updatedUnixMs"] = now_unix_ms()
@@ -170,24 +182,38 @@ def update_session_state(
     replay: dict[str, Any] | None = None,
     diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    state = load_session_state(session_dir)
-    if session_id is not None and session_id:
-        state["sessionId"] = session_id
-    if stream_id is not None and stream_id:
-        state["streamId"] = stream_id
+    with _session_state_lock(session_dir):
+        state = _load_session_state_unlocked(session_dir)
+        if session_id is not None and session_id:
+            state["sessionId"] = session_id
+        if stream_id is not None and stream_id:
+            state["streamId"] = stream_id
 
-    for section_name, values in (
-        ("transport", transport),
-        ("lane", lane),
-        ("shot", shot),
-        ("replay", replay),
-        ("diagnostics", diagnostics),
-    ):
-        if values:
-            state.setdefault(section_name, {}).update(values)
+        for section_name, values in (
+            ("transport", transport),
+            ("lane", lane),
+            ("shot", shot),
+            ("replay", replay),
+            ("diagnostics", diagnostics),
+        ):
+            if values:
+                state.setdefault(section_name, {}).update(values)
 
-    write_session_state(session_dir, state)
-    return state
+        _write_session_state_unlocked(session_dir, state)
+        return state
+
+
+def increment_replay_successful_shot_count(session_dir: Path | str, *, latest_window_id: str) -> dict[str, Any]:
+    with _session_state_lock(session_dir):
+        state = _load_session_state_unlocked(session_dir)
+        replay_state = state.setdefault("replay", {})
+        replay_state["state"] = REPLAY_HAS_RESULTS
+        replay_state["latestWindowId"] = str(latest_window_id)
+        replay_state["successfulShotCount"] = int(replay_state.get("successfulShotCount") or 0) + 1
+        diagnostics = state.setdefault("diagnostics", {})
+        diagnostics["lastEvent"] = f"replay:{REPLAY_HAS_RESULTS}"
+        _write_session_state_unlocked(session_dir, state)
+        return state
 
 
 def mark_transport(
@@ -235,6 +261,35 @@ def _sleep_for_state_file_retry(attempt: int) -> None:
     time.sleep(STATE_FILE_RETRY_DELAY_SECONDS * float(attempt + 1))
 
 
+@contextmanager
+def _session_state_lock(session_dir: Path | str) -> Iterator[None]:
+    lock_path = session_state_lock_path(session_dir)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def _ensure_sections(state: dict[str, Any]) -> None:
     state.setdefault("transport", {})
     state.setdefault("lane", {})
@@ -242,6 +297,12 @@ def _ensure_sections(state: dict[str, Any]) -> None:
     state.setdefault("replay", {})
     state.setdefault("diagnostics", {})
     state["transport"].setdefault("state", TRANSPORT_CONNECTING)
+    state["transport"].setdefault("mediaSessionStartSeen", False)
+    state["transport"].setdefault("metadataSessionStartSeen", False)
+    state["transport"].setdefault("codecConfigSeen", False)
+    state["transport"].setdefault("sessionEndSeen", False)
+    state["transport"].setdefault("lastFrameSeq", None)
+    state["transport"].setdefault("lastFramePtsUs", None)
     state["lane"].setdefault("state", LANE_UNKNOWN)
     state["shot"].setdefault("state", SHOT_DISABLED_UNTIL_LANE_CONFIRMED)
     state["shot"].setdefault("activeLaneLockRequestId", "")

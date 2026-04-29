@@ -263,9 +263,8 @@ def run_live_shot_tracking_stage(
         "trackingSuccess": bool(yolo_result.success and sam2_result is not None and sam2_result.success),
         "success": bool(shot_result.success),
     }
-    result_path = resolved_output_dir / "shot_tracking_result.json"
-    result_path.write_text(json.dumps(result_document, indent=2), encoding="utf-8")
-    (resolved_output_dir / "shot_result.json").write_text(json.dumps(shot_result.to_dict(), indent=2), encoding="utf-8")
+    result_path = resolved_output_dir / "shot_result.json"
+    result_path.write_text(json.dumps(shot_result.to_dict(), indent=2), encoding="utf-8")
 
     return LiveShotTrackingStageOutput(
         session_dir=artifact.root_dir,

@@ -94,13 +94,22 @@ class LocalClipArtifact:
     def metadata_frame_count(self) -> int:
         return len(self.frame_metadata)
 
-    def iter_frames(self) -> Iterator[DecodedFrame]:
+    def iter_frames(self, start_frame_index: int = 0) -> Iterator[DecodedFrame]:
         capture = cv2.VideoCapture(str(self.video_path))
         if not capture.isOpened():
             raise RuntimeError(f"Could not open video: {self.video_path}")
 
         try:
-            frame_index = 0
+            frame_index = max(int(start_frame_index), 0)
+            if frame_index > 0:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                actual_position = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+                if actual_position < frame_index:
+                    while actual_position < frame_index:
+                        ok = capture.grab()
+                        if not ok:
+                            return
+                        actual_position += 1
             while True:
                 ok, frame = capture.read()
                 if not ok:

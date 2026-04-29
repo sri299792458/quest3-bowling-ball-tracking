@@ -17,7 +17,6 @@ from laptop_receiver.session_state import (
     LANE_FAILED,
     LANE_REJECTED,
     LANE_REQUEST_QUEUED,
-    REPLAY_HAS_RESULTS,
     SHOT_ARMED,
     SHOT_DISABLED_UNTIL_LANE_CONFIRMED,
     SHOT_OPEN,
@@ -28,10 +27,9 @@ from laptop_receiver.session_state import (
     TRANSPORT_ENDED,
     TRANSPORT_STREAMING,
     mark_lane,
-    mark_replay,
     mark_shot,
     mark_transport,
-    write_session_state,
+    increment_replay_successful_shot_count,
 )
 
 
@@ -174,10 +172,14 @@ class LiveStreamSession:
     codec_config_seen: bool = False
     codec_config_bytes: int = 0
 
-    def open(self) -> None:
+    def open(self, *, append_existing: bool = False) -> None:
         self.root_dir.mkdir(parents=True, exist_ok=True)
-        self.media_file = self.media_stream_path.open("wb")
-        self.media_samples_file = self.media_samples_path.open("w", encoding="utf-8", newline="\n")
+        self.media_file = self.media_stream_path.open("ab" if append_existing else "wb")
+        self.media_samples_file = self.media_samples_path.open(
+            "a" if append_existing else "w",
+            encoding="utf-8",
+            newline="\n",
+        )
         self.metadata_stream_file = self.metadata_stream_path.open("a", encoding="utf-8", newline="\n")
         self.lane_lock_requests_file = self.lane_lock_requests_path.open("a", encoding="utf-8", newline="\n")
         self.lane_lock_confirms_file = self.lane_lock_confirms_path.open("a", encoding="utf-8", newline="\n")
@@ -276,7 +278,6 @@ class LiveStreamSession:
         self._mark_transport(
             TRANSPORT_CONNECTING,
             codecConfigSeen=True,
-            codecConfigBytes=self.codec_config_bytes,
         )
         self.persist_receipt()
 
@@ -410,23 +411,12 @@ class LiveStreamSession:
         self.persist_receipt()
 
     def _mark_transport(self, state: str, **fields: Any) -> None:
-        transport_fields = {
-            "sampleCount": self.sample_count,
-            "keyframeCount": self.keyframe_count,
-            "metadataMessageCount": self.metadata_message_count,
-            "outboundResultCount": self.outbound_result_count,
-            "firstPtsUs": self.first_pts_us,
-            "lastPtsUs": self.last_pts_us,
-            "codecConfigSeen": self.codec_config_seen,
-            "codecConfigBytes": self.codec_config_bytes,
-        }
-        transport_fields.update(fields)
         mark_transport(
             self.root_dir,
             state,
             session_id=self.session_id,
             stream_id=self.shot_id,
-            **transport_fields,
+            **fields,
         )
 
     def _mark_result_state(self, payload: dict[str, Any]) -> None:
@@ -472,15 +462,7 @@ class LiveStreamSession:
                     lastFailureReason="",
                     lastReason="shot_result_ready",
                 )
-                replay_state = mark_replay(
-                    self.root_dir,
-                    REPLAY_HAS_RESULTS,
-                    latestWindowId=window_id,
-                )
-                replay = replay_state.get("replay", {})
-                replay["successfulShotCount"] = int(replay.get("successfulShotCount") or 0) + 1
-                replay_state["replay"] = replay
-                write_session_state(self.root_dir, replay_state)
+                increment_replay_successful_shot_count(self.root_dir, latest_window_id=window_id)
             else:
                 mark_shot(
                     self.root_dir,
@@ -497,6 +479,24 @@ class LiveStreamSession:
 class LiveStreamRegistry:
     incoming_root: Path
     sessions: dict[tuple[str, str], LiveStreamSession] = field(default_factory=dict)
+
+    def recover_existing_sessions(self) -> None:
+        if not self.incoming_root.exists():
+            return
+
+        candidates = sorted(
+            [path for path in self.incoming_root.iterdir() if path.is_dir() and path.name.startswith("live_")],
+            key=lambda path: path.stat().st_mtime,
+        )
+        for root_dir in candidates:
+            recovered = self._recover_session(root_dir)
+            if recovered is None:
+                continue
+            key = (recovered.session_id, recovered.shot_id)
+            existing = self.sessions.get(key)
+            if existing is not None:
+                existing.close()
+            self.sessions[key] = recovered
 
     def get_or_create(self, session_id: str, shot_id: str) -> LiveStreamSession:
         key = (session_id, shot_id)
@@ -556,6 +556,71 @@ class LiveStreamRegistry:
         self.sessions[key] = session
         return session
 
+    def _recover_session(self, root_dir: Path) -> LiveStreamSession | None:
+        identity = self._recover_session_identity(root_dir)
+        if identity is None:
+            return None
+        session_id, shot_id = identity
+        receipt = self._load_json(root_dir / "stream_receipt.json")
+        session_end_payload = self._load_json(root_dir / "session_end.json")
+        session_start_payload = self._load_json(root_dir / "session_start.json")
+        session = LiveStreamSession(
+            session_id=session_id,
+            shot_id=shot_id,
+            root_dir=root_dir,
+            media_stream_path=root_dir / "stream.h264",
+            media_samples_path=root_dir / "media_samples.jsonl",
+            metadata_stream_path=root_dir / "metadata_stream.jsonl",
+            lane_lock_requests_path=root_dir / "lane_lock_requests.jsonl",
+            lane_lock_confirms_path=root_dir / "lane_lock_confirms.jsonl",
+            shot_boundaries_path=root_dir / "shot_boundaries.jsonl",
+            outbound_results_path=root_dir / "outbound_results.jsonl",
+            codec_config_path=root_dir / "codec_config.h264",
+            session_start_path=root_dir / "session_start.json",
+            session_end_path=root_dir / "session_end.json",
+            stream_receipt_path=root_dir / "stream_receipt.json",
+            session_started_payload=session_start_payload or None,
+            session_ended_payload=session_end_payload or None,
+            sample_count=int(receipt.get("sample_count") or self._count_lines(root_dir / "media_samples.jsonl")),
+            keyframe_count=int(receipt.get("keyframe_count") or 0),
+            metadata_message_count=int(
+                receipt.get("metadata_message_count") or self._count_lines(root_dir / "metadata_stream.jsonl")
+            ),
+            outbound_result_count=int(
+                receipt.get("outbound_result_count") or self._count_lines(root_dir / "outbound_results.jsonl")
+            ),
+            first_pts_us=receipt.get("first_pts_us"),
+            last_pts_us=receipt.get("last_pts_us"),
+            codec_config_seen=bool(receipt.get("codec_config_seen") or (root_dir / "codec_config.h264").exists()),
+            codec_config_bytes=int(receipt.get("codec_config_bytes") or 0),
+        )
+        session.open(append_existing=True)
+        session.persist_receipt()
+        return session
+
+    def _recover_session_identity(self, root_dir: Path) -> tuple[str, str] | None:
+        for path in (root_dir / "stream_receipt.json", root_dir / "session_start.json"):
+            payload = self._load_json(path)
+            session_id = str(payload.get("session_id") or "").strip()
+            shot_id = str(payload.get("shot_id") or "").strip()
+            if session_id and shot_id:
+                return session_id, shot_id
+        return None
+
+    def _load_json(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _count_lines(self, path: Path) -> int:
+        if not path.exists():
+            return 0
+        return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
     def _next_root_dir(self, session_id: str, shot_id: str) -> Path:
         base = self.incoming_root / f"live_{_sanitize_file_part(session_id)}_{_sanitize_file_part(shot_id)}"
         if not base.exists():
@@ -583,18 +648,19 @@ class LiveStreamRegistry:
 @dataclass
 class LiveResultHub:
     registry: LiveStreamRegistry
-    clients: set[asyncio.StreamWriter] = field(default_factory=set)
+    clients: dict[asyncio.StreamWriter, asyncio.Lock] = field(default_factory=dict)
 
     async def handle_result_client(
         self,
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        self.clients.add(writer)
+        self.clients[writer] = asyncio.Lock()
         try:
+            await self.replay_outbound_results(writer)
             await reader.read()
         finally:
-            self.clients.discard(writer)
+            self.clients.pop(writer, None)
             writer.close()
             await writer.wait_closed()
 
@@ -646,22 +712,46 @@ class LiveResultHub:
         if not self.clients:
             return
 
-        encoded = (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
         dead_clients: list[asyncio.StreamWriter] = []
+        line = json.dumps(payload, separators=(",", ":"))
         for client in list(self.clients):
             try:
-                client.write(encoded)
-                await client.drain()
+                await self._send_line(client, line)
             except Exception:
                 dead_clients.append(client)
 
         for client in dead_clients:
-            self.clients.discard(client)
+            self.clients.pop(client, None)
             try:
                 client.close()
                 await client.wait_closed()
             except Exception:
                 pass
+
+    async def replay_outbound_results(self, writer: asyncio.StreamWriter) -> None:
+        sessions = sorted(
+            list(self.registry.sessions.values()),
+            key=lambda session: session.root_dir.stat().st_mtime if session.root_dir.exists() else 0.0,
+        )
+        for session in sessions:
+            path = session.outbound_results_path
+            if not path.exists():
+                continue
+            for line in path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped:
+                    await self._send_line(writer, stripped)
+
+    async def _send_line(self, writer: asyncio.StreamWriter, line: str) -> None:
+        lock = self.clients.get(writer)
+        encoded = (line + "\n").encode("utf-8")
+        if lock is None:
+            writer.write(encoded)
+            await writer.drain()
+            return
+        async with lock:
+            writer.write(encoded)
+            await writer.drain()
 
 
 async def _read_exact(reader: asyncio.StreamReader, size: int) -> bytes:
@@ -808,6 +898,7 @@ async def _run_servers(args: argparse.Namespace) -> None:
     incoming_root = args.incoming_root.expanduser().resolve()
     incoming_root.mkdir(parents=True, exist_ok=True)
     registry = LiveStreamRegistry(incoming_root=incoming_root)
+    registry.recover_existing_sessions()
     result_hub = LiveResultHub(registry=registry)
     loop = asyncio.get_running_loop()
     discovery_transport, _ = await loop.create_datagram_endpoint(

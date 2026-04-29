@@ -35,7 +35,7 @@ from laptop_receiver.session_state import (
 
 
 PIPELINE_STATE_SCHEMA_VERSION = "live_session_pipeline_state"
-PUBLISH_SKIPPED_ORPHANED_STREAM = "skipped_orphaned_stream"
+PUBLISH_FAILED_UNKNOWN_STREAM = "failed_unknown_active_stream"
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -166,9 +166,7 @@ class LiveSessionPipeline:
             time.sleep(max(float(self.config.poll_interval_seconds), 0.05))
 
     def _process_session_dir(self, session_dir: Path, summary: PipelineProcessSummary) -> None:
-        state = self._load_session_state(session_dir)
-        if bool(state.get("orphanedLiveStream")):
-            return
+        state = self._load_pipeline_state(session_dir)
 
         envelopes = _load_jsonl(session_dir / "lane_lock_requests.jsonl")
         if envelopes:
@@ -192,12 +190,10 @@ class LiveSessionPipeline:
 
                 publish_status = self._process_lane_lock_request(session_dir, request_id, processed_requests)
                 summary.lane_lock_requests_processed += 1
-                if publish_status == PUBLISH_SKIPPED_ORPHANED_STREAM:
-                    state["orphanedLiveStream"] = True
-                    state["orphanedUnixMs"] = _now_unix_ms()
-                self._save_session_state(session_dir, state)
-                if bool(state.get("orphanedLiveStream")):
-                    return
+                if publish_status == PUBLISH_FAILED_UNKNOWN_STREAM:
+                    processed_requests.pop(request_id, None)
+                    summary.errors.append(f"{session_dir}: lane_lock_result publish failed: unknown active stream")
+                self._save_pipeline_state(session_dir, state)
 
         if self._shot_boundary_detector is not None:
             detector_result = self._shot_boundary_detector.process_session_dir(session_dir)
@@ -225,7 +221,7 @@ class LiveSessionPipeline:
             summary.errors.append(f"{session_dir}: {error}")
 
         if self.config.shot_tracking_config is not None and shot_boundaries.completed_windows:
-            state = self._load_session_state(session_dir)
+            state = self._load_pipeline_state(session_dir)
             processed_windows = state.setdefault("processedShotWindows", {})
             if not isinstance(processed_windows, dict):
                 raise RuntimeError("pipeline_state processedShotWindows must be an object.")
@@ -248,12 +244,10 @@ class LiveSessionPipeline:
                 )
                 publish_status = self._process_shot_window(session_dir, window, processed_windows)
                 summary.completed_shot_windows_processed += 1
-                if publish_status == PUBLISH_SKIPPED_ORPHANED_STREAM:
-                    state["orphanedLiveStream"] = True
-                    state["orphanedUnixMs"] = _now_unix_ms()
-                self._save_session_state(session_dir, state)
-                if bool(state.get("orphanedLiveStream")):
-                    return
+                if publish_status == PUBLISH_FAILED_UNKNOWN_STREAM:
+                    processed_windows.pop(window.window_id, None)
+                    summary.errors.append(f"{session_dir}: shot_result publish failed: unknown active stream")
+                self._save_pipeline_state(session_dir, state)
 
     def _process_lane_lock_request(
         self,
@@ -381,7 +375,7 @@ class LiveSessionPipeline:
             )
         except LaptopResultPublishError as exc:
             if exc.error_code == "unknown_active_stream":
-                return False, PUBLISH_SKIPPED_ORPHANED_STREAM, str(exc)
+                return False, PUBLISH_FAILED_UNKNOWN_STREAM, str(exc)
             raise
         return True, "published", ""
 
@@ -450,7 +444,7 @@ class LiveSessionPipeline:
     def _state_path(self, session_dir: Path) -> Path:
         return self._state_dir(session_dir) / "pipeline_state.json"
 
-    def _load_session_state(self, session_dir: Path) -> dict[str, Any]:
+    def _load_pipeline_state(self, session_dir: Path) -> dict[str, Any]:
         state = _load_json(self._state_path(session_dir))
         if not state:
             return {
@@ -468,7 +462,7 @@ class LiveSessionPipeline:
             raise RuntimeError("pipeline_state processedShotWindows must be an object.")
         return state
 
-    def _save_session_state(self, session_dir: Path, state: dict[str, Any]) -> None:
+    def _save_pipeline_state(self, session_dir: Path, state: dict[str, Any]) -> None:
         state_dir = self._state_dir(session_dir)
         state_dir.mkdir(parents=True, exist_ok=True)
         self._state_path(session_dir).write_text(json.dumps(state, indent=2), encoding="utf-8")

@@ -1232,6 +1232,7 @@ MonoBehaviour:
   host:
   port: 8769
   connectTimeoutMs: 1000
+  reconnectDelayMs: 1000
   enabledForAutoRun: 1
   verboseLogging: 1
 --- !u!114 &1545997012
