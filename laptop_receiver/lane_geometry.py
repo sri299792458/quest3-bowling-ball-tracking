@@ -185,6 +185,16 @@ def world_point_to_lane_coordinates(world_point: np.ndarray, lane_lock: LaneLock
     )
 
 
+def lane_coordinates_to_world_point(lane_point: LanePoint, lane_lock: LaneLockResult) -> np.ndarray:
+    basis = lane_basis_from_lock(lane_lock)
+    return (
+        basis.origin_world
+        + float(lane_point.x_meters) * basis.right_axis_world
+        + float(lane_point.s_meters) * basis.downlane_axis_world
+        + float(lane_point.h_meters) * basis.up_axis_world
+    )
+
+
 def is_lane_point_plausible(
     lane_point: LanePoint,
     lane_lock: LaneLockResult,

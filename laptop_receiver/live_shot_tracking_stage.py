@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import csv
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 from typing import Any
 
-from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
-from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult, SourceFrameRange
+from laptop_receiver.lane_lock_types import LaneLockResult, SourceFrameRange
 from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveCameraSam2TrackResult
 from laptop_receiver.live_lane_lock_results import load_lane_lock_result_for_request
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
+from laptop_receiver.trajectory_reconstruction import trajectory_from_sam2_mask_track
 
 
 @dataclass(frozen=True)
@@ -67,12 +66,6 @@ def _frame_index_bounds_for_window(
     return start_index, end_index
 
 
-def _frame_state_for_index(frame_metadata: list[dict[str, Any]], frame_index: int) -> FrameCameraState:
-    if frame_index < 0 or frame_index >= len(frame_metadata):
-        raise RuntimeError(f"Frame index {frame_index} is outside metadata range 0..{len(frame_metadata) - 1}.")
-    return FrameCameraState.from_frame_metadata(frame_metadata[frame_index])
-
-
 def _trajectory_from_sam2_track(
     *,
     artifact: Any,
@@ -81,42 +74,15 @@ def _trajectory_from_sam2_track(
     sam2_result: Any,
 ) -> list[Any]:
     track_csv_path = Path(str(sam2_result.track_csv_path))
-    if not track_csv_path.exists():
-        raise RuntimeError(f"SAM2 track CSV does not exist: {track_csv_path}")
-
-    intrinsics = CameraIntrinsics.from_session_metadata(artifact.session_metadata)
-    trajectory: list[Any] = []
-    with track_csv_path.open("r", encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            if int(row.get("present") or 0) != 1:
-                continue
-
-            if row.get("source_frame_idx") not in ("", None):
-                source_frame_idx = int(row["source_frame_idx"])
-            else:
-                local_frame_idx = int(row["frame_idx"])
-                source_frame_idx = local_frame_idx + int(sam2_result.source_frame_idx_start)
-            frame_state = _frame_state_for_index(artifact.frame_metadata, source_frame_idx)
-            image_point_px = bottom_center_from_box(
-                [
-                    float(row["bbox_x1"]),
-                    float(row["bbox_y1"]),
-                    float(row["bbox_x2"]),
-                    float(row["bbox_y2"]),
-                ]
-            )
-            trajectory.append(
-                project_ball_image_point_to_lane_space(
-                    session_id=window.session_id,
-                    shot_id=window.shot_id,
-                    image_point_px=image_point_px,
-                    frame_camera_state=frame_state,
-                    intrinsics=intrinsics,
-                    lane_lock=lane_lock,
-                    point_definition="camera_sam2_bbox_bottom_contact_proxy",
-                )
-            )
-    return trajectory
+    return trajectory_from_sam2_mask_track(
+        artifact=artifact,
+        session_id=window.session_id,
+        shot_id=window.shot_id,
+        lane_lock=lane_lock,
+        track_csv_path=track_csv_path,
+        source_frame_idx_start=int(sam2_result.source_frame_idx_start),
+        window_end_frame_seq=int(window.frame_seq_end),
+    )
 
 
 def _build_shot_result(

@@ -9,6 +9,7 @@ import sys
 import time
 from typing import Any, Mapping
 
+import cv2
 import numpy as np
 
 from laptop_receiver.standalone_warm_sam2_tracker import (
@@ -16,6 +17,9 @@ from laptop_receiver.standalone_warm_sam2_tracker import (
     DEFAULT_SAM2_CHECKPOINT,
     DEFAULT_SAM2_ROOT,
 )
+
+
+MASK_MEASUREMENT_TOP_WEIGHT = 0.74
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -44,6 +48,45 @@ def _centroid_from_mask(mask: np.ndarray) -> tuple[float, float] | None:
     if len(xs) == 0:
         return None
     return float(xs.mean()), float(ys.mean())
+
+
+def _mask_quantile_point(mask: np.ndarray, q: float, band_fraction: float = 0.18) -> tuple[float, float] | None:
+    ys, xs = np.where(mask)
+    if len(xs) == 0:
+        return None
+
+    y_value = float(np.quantile(ys.astype(np.float64), float(q)))
+    height = max(float(ys.max() - ys.min() + 1), 1.0)
+    band = max(2.0, height * float(band_fraction))
+    if float(q) <= 0.5:
+        selected = ys.astype(np.float64) <= y_value + band
+    else:
+        selected = ys.astype(np.float64) >= y_value - band
+    if not np.any(selected):
+        return float(xs.mean()), y_value
+    return float(xs[selected].mean()), y_value
+
+
+def _largest_contour_from_mask(mask: np.ndarray) -> list[list[int]]:
+    mask_u8 = mask.astype(np.uint8) * 255
+    contours, _hierarchy = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return []
+    contour = max(contours, key=cv2.contourArea)
+    return [[int(point[0][0]), int(point[0][1])] for point in contour]
+
+
+def _equivalent_radius_from_mask(mask: np.ndarray) -> float:
+    area = float(mask.sum())
+    if area <= 0.0:
+        return 0.0
+    return float(np.sqrt(area / np.pi))
+
+
+def _mask_quality_from_area(area: int) -> float:
+    if int(area) <= 0:
+        return 0.0
+    return max(0.25, min(1.0, float(np.sqrt(float(area))) / 45.0))
 
 
 def _mask_from_logits(mask_logits: Any) -> np.ndarray | None:
@@ -80,6 +123,7 @@ class LiveCameraSam2TrackResult:
     analysis_dir: str
     seed_path: str
     track_csv_path: str
+    mask_contours_path: str
     tracked_frames: int
     first_frame: int | None
     last_frame: int | None
@@ -101,6 +145,7 @@ class LiveCameraSam2TrackResult:
             analysis_dir=str(payload.get("analysis_dir") or payload.get("analysisDir") or ""),
             seed_path=str(payload.get("seed_path") or payload.get("seedPath") or ""),
             track_csv_path=str(payload.get("track_csv_path") or payload.get("trackCsvPath") or ""),
+            mask_contours_path=str(payload.get("mask_contours_path") or payload.get("maskContoursPath") or ""),
             tracked_frames=_int(payload.get("tracked_frames") or payload.get("trackedFrames")),
             first_frame=payload.get("first_frame") if payload.get("first_frame") is not None else payload.get("firstFrame"),
             last_frame=payload.get("last_frame") if payload.get("last_frame") is not None else payload.get("lastFrame"),
@@ -245,6 +290,7 @@ class LiveCameraSam2Tracker:
         output_dir.mkdir(parents=True, exist_ok=True)
         seed_path = output_dir / "seed.json"
         track_csv_path = output_dir / "track.csv"
+        mask_contours_path = output_dir / "mask_contours.jsonl"
         result_path = output_dir / "camera_sam2_result.json"
         summary_path = output_dir / "summary.json"
 
@@ -265,6 +311,12 @@ class LiveCameraSam2Tracker:
             "bbox_y2",
             "centroid_x",
             "centroid_y",
+            "mask_top10_x",
+            "mask_top10_y",
+            "mask_measurement_x",
+            "mask_measurement_y",
+            "mask_equivalent_radius_px",
+            "mask_quality",
             "detector_confidence",
             "camera_timestamp_us",
             "pts_us",
@@ -274,6 +326,10 @@ class LiveCameraSam2Tracker:
             writer.writeheader()
             for row in self._rows:
                 writer.writerow(row)
+
+        with mask_contours_path.open("w", encoding="utf-8") as handle:
+            for contour_row in self._contour_rows:
+                handle.write(json.dumps(contour_row, separators=(",", ":")) + "\n")
 
         present_rows = [row for row in self._rows if _int(row.get("present")) == 1]
         present_frames = [_int(row.get("frame_idx")) for row in present_rows]
@@ -295,6 +351,8 @@ class LiveCameraSam2Tracker:
             "maxTrackSeconds": float(self.config.max_track_seconds),
             "lostTrackGraceFrames": int(self.config.lost_track_grace_frames),
             "trackCalls": int(self._track_calls),
+            "maskContourFrames": len(self._contour_rows),
+            "maskMeasurementTopWeight": float(MASK_MEASUREMENT_TOP_WEIGHT),
         }
         result = LiveCameraSam2TrackResult(
             kind="live_camera_sam2_track_result",
@@ -303,6 +361,7 @@ class LiveCameraSam2Tracker:
             analysis_dir=str(output_dir),
             seed_path=str(seed_path),
             track_csv_path=str(track_csv_path),
+            mask_contours_path=str(mask_contours_path),
             tracked_frames=tracked_frames,
             first_frame=min(present_frames) if present_frames else None,
             last_frame=max(present_frames) if present_frames else None,
@@ -381,6 +440,10 @@ class LiveCameraSam2Tracker:
         mask = _mask_from_logits(mask_logits) if len(obj_ids) else None
         bbox = _bbox_from_mask(mask) if mask is not None else None
         centroid = _centroid_from_mask(mask) if mask is not None else None
+        top10 = _mask_quantile_point(mask, 0.10) if mask is not None else None
+        area = int(mask.sum()) if mask is not None else 0
+        equivalent_radius = _equivalent_radius_from_mask(mask) if mask is not None else 0.0
+        mask_quality = _mask_quality_from_area(area)
         present = bbox is not None
         if present:
             self._consecutive_missing_frames = 0
@@ -395,18 +458,66 @@ class LiveCameraSam2Tracker:
             "sam_local_frame_idx": int(frame_index) - int(self._seed_frame_index or frame_index),
             "object_id": int(obj_ids[0]) if len(obj_ids) else int(self.config.object_id),
             "present": 1 if present else 0,
-            "area": int(mask.sum()) if mask is not None else 0,
+            "area": area,
             "bbox_x1": "" if bbox is None else bbox[0],
             "bbox_y1": "" if bbox is None else bbox[1],
             "bbox_x2": "" if bbox is None else bbox[2],
             "bbox_y2": "" if bbox is None else bbox[3],
             "centroid_x": "" if centroid is None else f"{centroid[0]:.2f}",
             "centroid_y": "" if centroid is None else f"{centroid[1]:.2f}",
+            "mask_top10_x": "" if top10 is None else f"{top10[0]:.2f}",
+            "mask_top10_y": "" if top10 is None else f"{top10[1]:.2f}",
+            "mask_measurement_x": (
+                ""
+                if top10 is None or centroid is None
+                else f"{(MASK_MEASUREMENT_TOP_WEIGHT * top10[0] + (1.0 - MASK_MEASUREMENT_TOP_WEIGHT) * centroid[0]):.2f}"
+            ),
+            "mask_measurement_y": (
+                ""
+                if top10 is None or centroid is None
+                else f"{(MASK_MEASUREMENT_TOP_WEIGHT * top10[1] + (1.0 - MASK_MEASUREMENT_TOP_WEIGHT) * centroid[1]):.2f}"
+            ),
+            "mask_equivalent_radius_px": f"{equivalent_radius:.3f}",
+            "mask_quality": f"{mask_quality:.3f}",
             "detector_confidence": "" if detector_confidence is None else f"{float(detector_confidence):.6f}",
             "camera_timestamp_us": _int(metadata.get("cameraTimestampUs")),
             "pts_us": _int(metadata.get("ptsUs")),
         }
         self._rows.append(row)
+        if present and mask is not None:
+            self._contour_rows.append(
+                {
+                    "frame_idx": int(frame_index),
+                    "source_frame_idx": int(frame_index),
+                    "frame_seq": int(frame_seq),
+                    "object_id": int(obj_ids[0]) if len(obj_ids) else int(self.config.object_id),
+                    "area": area,
+                    "bbox": list(bbox) if bbox is not None else [],
+                    "centroid": [] if centroid is None else [round(float(centroid[0]), 3), round(float(centroid[1]), 3)],
+                    "mask_top10": [] if top10 is None else [round(float(top10[0]), 3), round(float(top10[1]), 3)],
+                    "mask_measurement": (
+                        []
+                        if top10 is None or centroid is None
+                        else [
+                            round(
+                                float(
+                                    MASK_MEASUREMENT_TOP_WEIGHT * top10[0]
+                                    + (1.0 - MASK_MEASUREMENT_TOP_WEIGHT) * centroid[0]
+                                ),
+                                3,
+                            ),
+                            round(
+                                float(
+                                    MASK_MEASUREMENT_TOP_WEIGHT * top10[1]
+                                    + (1.0 - MASK_MEASUREMENT_TOP_WEIGHT) * centroid[1]
+                                ),
+                                3,
+                            ),
+                        ]
+                    ),
+                    "contour": _largest_contour_from_mask(mask),
+                }
+            )
 
     def _reset_active(self) -> None:
         self._active = False
@@ -416,6 +527,7 @@ class LiveCameraSam2Tracker:
         self._last_frame_index: int | None = None
         self._seed: dict[str, Any] | None = None
         self._rows: list[dict[str, Any]] = []
+        self._contour_rows: list[dict[str, Any]] = []
         self._consecutive_missing_frames = 0
         self._init_seconds = 0.0
         self._track_seconds = 0.0
