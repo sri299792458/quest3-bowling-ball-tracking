@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterator, Mapping
+
+import cv2
 
 from laptop_receiver.lane_geometry import bottom_center_from_box, project_ball_image_point_to_lane_space
 from laptop_receiver.lane_lock_types import CameraIntrinsics, FrameCameraState, LaneLockResult
@@ -137,11 +139,102 @@ class _ProjectedCandidate:
         }
 
 
+class _SequentialLiveFrameReader:
+    def __init__(self) -> None:
+        self._root_dir: Path | None = None
+        self._video_path: Path | None = None
+        self._capture: Any | None = None
+        self._next_frame_index = 0
+
+    def close(self) -> None:
+        if self._capture is not None:
+            self._capture.release()
+        self._capture = None
+        self._root_dir = None
+        self._video_path = None
+        self._next_frame_index = 0
+
+    def invalidate_for_root(self, root: Path) -> None:
+        if self._root_dir == root:
+            self.close()
+
+    def iter_frames(
+        self,
+        artifact: LocalClipArtifact,
+        *,
+        start_frame_index: int,
+        stop_frame_index: int | None,
+    ) -> Iterator[DecodedFrame]:
+        start_index = max(int(start_frame_index), 0)
+        stop_index = int(stop_frame_index) if stop_frame_index is not None else None
+        if stop_index is not None and start_index > stop_index:
+            return
+
+        self._ensure_position(artifact, start_index)
+        while stop_index is None or int(self._next_frame_index) <= stop_index:
+            if self._capture is None:
+                return
+            ok, frame = self._capture.read()
+            if not ok:
+                self.close()
+                return
+
+            frame_index = int(self._next_frame_index)
+            metadata = artifact.frame_metadata[frame_index] if frame_index < len(artifact.frame_metadata) else {}
+            self._next_frame_index = frame_index + 1
+            yield DecodedFrame(frame_index=frame_index, image_bgr=frame, metadata=metadata)
+
+    def _ensure_position(self, artifact: LocalClipArtifact, frame_index: int) -> None:
+        if self._root_dir != artifact.root_dir or self._video_path != artifact.video_path:
+            self.close()
+        if self._capture is None:
+            self._open_at(artifact, frame_index)
+            return
+
+        if frame_index < int(self._next_frame_index):
+            self.close()
+            self._open_at(artifact, frame_index)
+            return
+
+        while int(self._next_frame_index) < frame_index:
+            ok = self._capture.grab()
+            if not ok:
+                self.close()
+                self._open_at(artifact, frame_index)
+                return
+            self._next_frame_index += 1
+
+    def _open_at(self, artifact: LocalClipArtifact, frame_index: int) -> None:
+        capture = cv2.VideoCapture(str(artifact.video_path))
+        if not capture.isOpened():
+            raise RuntimeError(f"Could not open video: {artifact.video_path}")
+
+        self._capture = capture
+        self._root_dir = artifact.root_dir
+        self._video_path = artifact.video_path
+        self._next_frame_index = 0
+
+        target_index = max(int(frame_index), 0)
+        if target_index <= 0:
+            return
+
+        capture.set(cv2.CAP_PROP_POS_FRAMES, target_index)
+        actual_position = int(capture.get(cv2.CAP_PROP_POS_FRAMES) or 0)
+        self._next_frame_index = actual_position
+        while int(self._next_frame_index) < target_index:
+            ok = capture.grab()
+            if not ok:
+                self.close()
+                return
+            self._next_frame_index += 1
+
+
 class LiveShotBoundaryDetector:
     def __init__(self, config: LiveShotBoundaryDetectorConfig) -> None:
         self.config = config
         self._model: Any | None = None
         self._sam2_tracker = LiveCameraSam2Tracker(config.sam2_config) if config.sam2_config is not None else None
+        self._frame_reader = _SequentialLiveFrameReader()
         if bool(config.require_sam2_tracking) and self._sam2_tracker is None:
             raise RuntimeError("Camera SAM2 tracking is required, but no SAM2 config was provided.")
         if bool(config.warm_models_on_start):
@@ -165,6 +258,7 @@ class LiveShotBoundaryDetector:
             state["pendingCandidate"] = None
             state["activeShot"] = None
             state["lastReason"] = "lane_lock_confirm_missing"
+            self._frame_reader.invalidate_for_root(root)
             self._save_state(root, state)
             return self._result(
                 root,
@@ -230,7 +324,11 @@ class LiveShotBoundaryDetector:
         start_frame_index = max(_int(state.get("lastScannedFrameIndex"), -1) + 1, 0)
         max_frames_this_poll = max(int(self.config.max_frames_per_poll), 1)
         save_interval = max(int(self.config.state_save_interval_frames), 1)
-        for decoded_frame in artifact.iter_frames(start_frame_index=start_frame_index):
+        for decoded_frame in self._frame_reader.iter_frames(
+            artifact,
+            start_frame_index=start_frame_index,
+            stop_frame_index=latest_available_frame_index,
+        ):
             if latest_available_frame_index is not None and int(decoded_frame.frame_index) > latest_available_frame_index:
                 break
 
