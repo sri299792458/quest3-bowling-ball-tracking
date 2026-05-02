@@ -8,10 +8,40 @@ namespace QuestBowlingStandalone.QuestApp
     public enum StandaloneQuestLaneLockUiState
     {
         Idle,
+        ArmedForPlacement,
         PlacingHeads,
         FullLanePreview,
         Locked,
         Failed,
+    }
+
+    public readonly struct StandaloneQuestLaneLockPresentation
+    {
+        public StandaloneQuestLaneLockPresentation(
+            string primaryLabel,
+            bool primaryVisible,
+            bool primaryInteractable,
+            string secondaryLabel,
+            bool secondaryVisible,
+            bool secondaryInteractable,
+            string readinessBlockerLabel)
+        {
+            PrimaryLabel = primaryLabel ?? string.Empty;
+            PrimaryVisible = primaryVisible;
+            PrimaryInteractable = primaryInteractable;
+            SecondaryLabel = secondaryLabel ?? string.Empty;
+            SecondaryVisible = secondaryVisible;
+            SecondaryInteractable = secondaryInteractable;
+            ReadinessBlockerLabel = readinessBlockerLabel ?? string.Empty;
+        }
+
+        public string PrimaryLabel { get; }
+        public bool PrimaryVisible { get; }
+        public bool PrimaryInteractable { get; }
+        public string SecondaryLabel { get; }
+        public bool SecondaryVisible { get; }
+        public bool SecondaryInteractable { get; }
+        public string ReadinessBlockerLabel { get; }
     }
 
     public sealed class StandaloneQuestLaneLockStateCoordinator : MonoBehaviour
@@ -19,7 +49,9 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("References")]
         [SerializeField] private StandaloneQuestFloorPlaneSource floorPlaneSource;
         [SerializeField] private StandaloneQuestLocalProofCapture proofCapture;
+        [SerializeField] private StandaloneQuestSessionController sessionController;
         [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
+        [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
         [SerializeField] private StandaloneQuestLaneLockResultRenderer laneRenderer;
         [SerializeField] private Transform headTransform;
         [SerializeField] private OVRHand handPinchSource;
@@ -53,6 +85,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         private readonly List<PoseSample> _samples = new List<PoseSample>();
         private bool _wasPinching;
+        private bool _ignorePinchUntilReleased;
         private bool _hasSmoothedPose;
         private Vector3 _smoothedOrigin;
         private Vector3 _smoothedForward;
@@ -70,33 +103,23 @@ namespace QuestBowlingStandalone.QuestApp
         public string LastStatus { get; private set; } = "pinch_hold_ready";
         public event Action<StandaloneQuestLaneLockUiState, string> StateChanged;
 
-        public string PrimaryActionLabel
+        public StandaloneQuestLaneLockPresentation Presentation => ResolvePresentation();
+        public string PrimaryActionLabel => Presentation.PrimaryLabel;
+        public bool PrimaryActionVisible => Presentation.PrimaryVisible;
+        public bool PrimaryActionInteractable => Presentation.PrimaryInteractable;
+        public string SecondaryActionLabel => Presentation.SecondaryLabel;
+        public bool SecondaryActionVisible => Presentation.SecondaryVisible;
+        public bool SecondaryActionInteractable => Presentation.SecondaryInteractable;
+        public string ReadinessBlockerLabel => Presentation.ReadinessBlockerLabel;
+        public bool LaneInteractionReady => TryGetLaneInteractionReadiness(out _, out _);
+        public string LaneInteractionBlockerLabel
         {
             get
             {
-                switch (State)
-                {
-                    case StandaloneQuestLaneLockUiState.PlacingHeads:
-                        return "Release To Preview";
-                    case StandaloneQuestLaneLockUiState.FullLanePreview:
-                        return "Lock Lane";
-                    case StandaloneQuestLaneLockUiState.Locked:
-                        return "Ready";
-                    case StandaloneQuestLaneLockUiState.Failed:
-                        return "Try Again";
-                    default:
-                        return "Place Lane";
-                }
+                TryGetLaneInteractionReadiness(out var blockerLabel, out _);
+                return blockerLabel;
             }
         }
-
-        public bool PrimaryActionInteractable => State == StandaloneQuestLaneLockUiState.FullLanePreview;
-        public string SecondaryActionLabel => State == StandaloneQuestLaneLockUiState.Locked ? "Relock" : "Retry";
-        public bool SecondaryActionVisible =>
-            State == StandaloneQuestLaneLockUiState.FullLanePreview ||
-            State == StandaloneQuestLaneLockUiState.Locked ||
-            State == StandaloneQuestLaneLockUiState.Failed;
-        public bool SecondaryActionInteractable => SecondaryActionVisible;
 
         private void Awake()
         {
@@ -108,10 +131,31 @@ namespace QuestBowlingStandalone.QuestApp
         private void Update()
         {
             var pinching = IsPinching();
+            var pinchStarted = pinching && !_wasPinching;
+            var pinchReleased = !pinching && _wasPinching;
 
-            if ((State == StandaloneQuestLaneLockUiState.Idle || State == StandaloneQuestLaneLockUiState.Failed)
-                && pinching
-                && !_wasPinching)
+            if (!LaneInteractionReady &&
+                (State == StandaloneQuestLaneLockUiState.ArmedForPlacement ||
+                 State == StandaloneQuestLaneLockUiState.PlacingHeads))
+            {
+                ResetLane("lane_preflight_lost");
+                _wasPinching = pinching;
+                return;
+            }
+
+            if (_ignorePinchUntilReleased)
+            {
+                if (!pinching)
+                {
+                    _ignorePinchUntilReleased = false;
+                    SetStatus("lane_placement_armed_pinch_hold");
+                }
+
+                _wasPinching = pinching;
+                return;
+            }
+
+            if (State == StandaloneQuestLaneLockUiState.ArmedForPlacement && pinchStarted)
             {
                 BeginPlacement();
             }
@@ -122,7 +166,7 @@ namespace QuestBowlingStandalone.QuestApp
                 {
                     UpdatePlacementPreview();
                 }
-                else if (_wasPinching)
+                else if (pinchReleased)
                 {
                     FinishPlacement();
                 }
@@ -133,15 +177,183 @@ namespace QuestBowlingStandalone.QuestApp
 
         public void HandlePrimaryAction()
         {
-            if (State == StandaloneQuestLaneLockUiState.FullLanePreview)
-            {
-                ConfirmLane();
-            }
+            HandleAction(StandaloneQuestLaneLockActionKind.Primary);
         }
 
         public void HandleSecondaryAction()
         {
-            ResetLane("user_retry");
+            HandleAction(StandaloneQuestLaneLockActionKind.Secondary);
+        }
+
+        public void HandleAction(StandaloneQuestLaneLockActionKind actionKind)
+        {
+            var presentation = Presentation;
+            var visible = actionKind == StandaloneQuestLaneLockActionKind.Primary
+                ? presentation.PrimaryVisible
+                : presentation.SecondaryVisible;
+            var interactable = actionKind == StandaloneQuestLaneLockActionKind.Primary
+                ? presentation.PrimaryInteractable
+                : presentation.SecondaryInteractable;
+            if (!visible || !interactable)
+            {
+                SetStatus($"ignored_action:{State}:{actionKind}");
+                return;
+            }
+
+            if (!LaneInteractionReady && !IsLocalCancelAction(actionKind))
+            {
+                SetStatus($"ignored_action_preflight_not_ready:{State}:{actionKind}:{LaneInteractionBlockerLabel}");
+                return;
+            }
+
+            switch (State)
+            {
+                case StandaloneQuestLaneLockUiState.Idle:
+                case StandaloneQuestLaneLockUiState.Failed:
+                    if (actionKind == StandaloneQuestLaneLockActionKind.Primary)
+                    {
+                        EnterArmedForPlacement("user_place_lane");
+                    }
+                    break;
+
+                case StandaloneQuestLaneLockUiState.ArmedForPlacement:
+                    if (actionKind == StandaloneQuestLaneLockActionKind.Secondary)
+                    {
+                        ResetLane("user_cancel_placement");
+                    }
+                    break;
+
+                case StandaloneQuestLaneLockUiState.FullLanePreview:
+                    if (actionKind == StandaloneQuestLaneLockActionKind.Primary)
+                    {
+                        ConfirmLane();
+                    }
+                    else
+                    {
+                        ResetLane("user_retry");
+                    }
+                    break;
+
+                case StandaloneQuestLaneLockUiState.Locked:
+                    if (actionKind == StandaloneQuestLaneLockActionKind.Secondary)
+                    {
+                        ResetLane("user_relock");
+                    }
+                    break;
+            }
+        }
+
+        private StandaloneQuestLaneLockPresentation ResolvePresentation()
+        {
+            if (!TryGetLaneInteractionReadiness(out var blockerLabel, out _))
+            {
+                switch (State)
+                {
+                    case StandaloneQuestLaneLockUiState.ArmedForPlacement:
+                    case StandaloneQuestLaneLockUiState.FullLanePreview:
+                        return new StandaloneQuestLaneLockPresentation(
+                            blockerLabel,
+                            primaryVisible: true,
+                            primaryInteractable: false,
+                            secondaryLabel: "Cancel",
+                            secondaryVisible: true,
+                            secondaryInteractable: true,
+                            readinessBlockerLabel: blockerLabel);
+
+                    case StandaloneQuestLaneLockUiState.PlacingHeads:
+                        return new StandaloneQuestLaneLockPresentation(
+                            blockerLabel,
+                            primaryVisible: true,
+                            primaryInteractable: false,
+                            secondaryLabel: string.Empty,
+                            secondaryVisible: false,
+                            secondaryInteractable: false,
+                            readinessBlockerLabel: blockerLabel);
+
+                    case StandaloneQuestLaneLockUiState.Locked:
+                        return new StandaloneQuestLaneLockPresentation(
+                            string.Empty,
+                            primaryVisible: false,
+                            primaryInteractable: false,
+                            secondaryLabel: "Relock",
+                            secondaryVisible: true,
+                            secondaryInteractable: false,
+                            readinessBlockerLabel: blockerLabel);
+
+                    default:
+                        return new StandaloneQuestLaneLockPresentation(
+                            blockerLabel,
+                            primaryVisible: true,
+                            primaryInteractable: false,
+                            secondaryLabel: string.Empty,
+                            secondaryVisible: false,
+                            secondaryInteractable: false,
+                            readinessBlockerLabel: blockerLabel);
+                }
+            }
+
+            switch (State)
+            {
+                case StandaloneQuestLaneLockUiState.ArmedForPlacement:
+                    return new StandaloneQuestLaneLockPresentation(
+                        _ignorePinchUntilReleased ? "Release First" : "Pinch + Hold",
+                        primaryVisible: true,
+                        primaryInteractable: false,
+                        secondaryLabel: "Cancel",
+                        secondaryVisible: true,
+                        secondaryInteractable: true,
+                        readinessBlockerLabel: _ignorePinchUntilReleased ? "Release First" : "Pinch + Hold Lane");
+
+                case StandaloneQuestLaneLockUiState.PlacingHeads:
+                    return new StandaloneQuestLaneLockPresentation(
+                        "Release To Preview",
+                        primaryVisible: true,
+                        primaryInteractable: false,
+                        secondaryLabel: string.Empty,
+                        secondaryVisible: false,
+                        secondaryInteractable: false,
+                        readinessBlockerLabel: "Hold To Place Lane");
+
+                case StandaloneQuestLaneLockUiState.FullLanePreview:
+                    return new StandaloneQuestLaneLockPresentation(
+                        "Lock Lane",
+                        primaryVisible: true,
+                        primaryInteractable: true,
+                        secondaryLabel: "Retry",
+                        secondaryVisible: true,
+                        secondaryInteractable: true,
+                        readinessBlockerLabel: "Confirm Lane");
+
+                case StandaloneQuestLaneLockUiState.Locked:
+                    return new StandaloneQuestLaneLockPresentation(
+                        string.Empty,
+                        primaryVisible: false,
+                        primaryInteractable: false,
+                        secondaryLabel: "Relock",
+                        secondaryVisible: true,
+                        secondaryInteractable: true,
+                        readinessBlockerLabel: string.Empty);
+
+                case StandaloneQuestLaneLockUiState.Failed:
+                    return new StandaloneQuestLaneLockPresentation(
+                        "Try Again",
+                        primaryVisible: true,
+                        primaryInteractable: true,
+                        secondaryLabel: string.Empty,
+                        secondaryVisible: false,
+                        secondaryInteractable: false,
+                        readinessBlockerLabel: "Lane Failed - Try Again");
+
+                default:
+                    return new StandaloneQuestLaneLockPresentation(
+                        "Place Lane",
+                        primaryVisible: true,
+                        primaryInteractable: true,
+                        secondaryLabel: string.Empty,
+                        secondaryVisible: false,
+                        secondaryInteractable: false,
+                        readinessBlockerLabel: "Place Lane");
+            }
         }
 
         public void ResetLane(string reason)
@@ -152,6 +364,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _pendingResult = null;
+            _ignorePinchUntilReleased = false;
             SetState(StandaloneQuestLaneLockUiState.Idle, reason);
             ResetStabilization();
             ClearHeadsPreview();
@@ -160,9 +373,22 @@ namespace QuestBowlingStandalone.QuestApp
             SetStatus("pinch_hold_ready");
         }
 
+        private void EnterArmedForPlacement(string reason)
+        {
+            _pendingResult = null;
+            _ignorePinchUntilReleased = IsPinching();
+            SetState(StandaloneQuestLaneLockUiState.ArmedForPlacement, string.IsNullOrWhiteSpace(reason) ? "lane_placement_armed" : reason);
+            ResetStabilization();
+            ClearHeadsPreview();
+            laneRenderer?.ClearVisualization("lane_placement_armed");
+            ClearProofCaptureLaneLock();
+            SetStatus(_ignorePinchUntilReleased ? "lane_placement_armed_release_then_pinch_hold" : "lane_placement_armed_pinch_hold");
+        }
+
         private void BeginPlacement()
         {
             _pendingResult = null;
+            _ignorePinchUntilReleased = false;
             SetState(StandaloneQuestLaneLockUiState.PlacingHeads, "heads_placement_started");
             ResetStabilization();
             laneRenderer?.ClearVisualization("heads_placement_started");
@@ -210,6 +436,7 @@ namespace QuestBowlingStandalone.QuestApp
             _pendingResult.requiresConfirmation = false;
             _pendingResult.confidence = Mathf.Max(_pendingResult.confidence, 0.96f);
             _pendingResult.lockState = "Locked";
+            _ignorePinchUntilReleased = false;
 
             if (!TryPublishConfirmedLane(_pendingResult, out var publishNote))
             {
@@ -663,9 +890,19 @@ namespace QuestBowlingStandalone.QuestApp
                 proofCapture = FindFirstObjectByType<StandaloneQuestLocalProofCapture>();
             }
 
+            if (sessionController == null)
+            {
+                sessionController = FindFirstObjectByType<StandaloneQuestSessionController>();
+            }
+
             if (liveMetadataSender == null)
             {
                 liveMetadataSender = FindFirstObjectByType<StandaloneQuestLiveMetadataSender>();
+            }
+
+            if (liveResultReceiver == null)
+            {
+                liveResultReceiver = FindFirstObjectByType<StandaloneQuestLiveResultReceiver>();
             }
 
             if (laneRenderer == null)
@@ -695,6 +932,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void Fail(string note)
         {
+            _ignorePinchUntilReleased = false;
             SetState(StandaloneQuestLaneLockUiState.Failed, note);
             ClearHeadsPreview();
             laneRenderer?.ClearVisualization(note);
@@ -708,6 +946,59 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 Debug.Log("[StandaloneQuestLaneLockStateCoordinator] " + LastStatus);
             }
+        }
+
+        private bool TryGetLaneInteractionReadiness(out string blockerLabel, out string reason)
+        {
+            blockerLabel = string.Empty;
+            reason = "lane_interaction_ready";
+
+            if (sessionController == null || !sessionController.IsSessionActive)
+            {
+                blockerLabel = "Laptop Connecting";
+                reason = "session_not_active";
+                return false;
+            }
+
+            if (!sessionController.TryGetLiveMediaReadiness(out var mediaReason))
+            {
+                blockerLabel = "Media Stream Not Ready";
+                reason = string.IsNullOrWhiteSpace(mediaReason) ? "media_not_ready" : mediaReason;
+                return false;
+            }
+
+            if (liveMetadataSender == null || !liveMetadataSender.IsConnected)
+            {
+                blockerLabel = "Metadata Reconnecting";
+                reason = "metadata_not_connected";
+                return false;
+            }
+
+            if (liveResultReceiver == null || !liveResultReceiver.IsConnected)
+            {
+                blockerLabel = "Results Reconnecting";
+                reason = "results_not_connected";
+                return false;
+            }
+
+            if (!liveResultReceiver.IsPipelineReady)
+            {
+                blockerLabel = "Processing Shot";
+                var pipelineStatus = liveResultReceiver.LastPipelineStatus;
+                reason = pipelineStatus != null && !string.IsNullOrWhiteSpace(pipelineStatus.reason)
+                    ? pipelineStatus.reason
+                    : "pipeline_busy";
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool IsLocalCancelAction(StandaloneQuestLaneLockActionKind actionKind)
+        {
+            return actionKind == StandaloneQuestLaneLockActionKind.Secondary
+                && (State == StandaloneQuestLaneLockUiState.ArmedForPlacement ||
+                    State == StandaloneQuestLaneLockUiState.FullLanePreview);
         }
 
         private void SetState(StandaloneQuestLaneLockUiState nextState, string reason)

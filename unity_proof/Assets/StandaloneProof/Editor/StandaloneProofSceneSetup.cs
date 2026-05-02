@@ -87,7 +87,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureProofCapture(proofCapture, sessionContext, cameraAccess, headAnchor);
             ConfigureFloorPlaneSource(floorPlaneSource, trackingSpace != null ? trackingSpace : cameraRig.transform);
             ConfigureHandRayHelper(rightHand, rightRayHelper, enabled: true);
-            ConfigureLaneLockStateCoordinator(laneLockStateCoordinator, floorPlaneSource, proofCapture, liveMetadataSender, laneLockResultRenderer, headAnchor, rightHand, proofRig.transform);
+            ConfigureLaneLockStateCoordinator(laneLockStateCoordinator, floorPlaneSource, proofCapture, sessionController, liveMetadataSender, liveResultReceiver, laneLockResultRenderer, headAnchor, rightHand, proofRig.transform);
             ConfigureLockLaneCanvas(lockLaneCanvas, eventCamera);
             ConfigureLaneActionButton(
                 lockLaneButton,
@@ -120,6 +120,7 @@ namespace QuestBowlingStandalone.Editor
                 experienceStatusStrip,
                 sessionController,
                 laneLockStateCoordinator,
+                liveMetadataSender,
                 liveResultReceiver,
                 replayShotList.GetComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList>(),
                 shotReplayRenderer,
@@ -968,7 +969,9 @@ namespace QuestBowlingStandalone.Editor
             QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
             QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource floorPlaneSource,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture proofCapture,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer laneLockResultRenderer,
             Transform headAnchor,
             OVRHand rightHand,
@@ -977,7 +980,9 @@ namespace QuestBowlingStandalone.Editor
             var serializedObject = new SerializedObject(laneLockStateCoordinator);
             serializedObject.FindProperty("floorPlaneSource").objectReferenceValue = floorPlaneSource;
             serializedObject.FindProperty("proofCapture").objectReferenceValue = proofCapture;
+            serializedObject.FindProperty("sessionController").objectReferenceValue = sessionController;
             serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("laneRenderer").objectReferenceValue = laneLockResultRenderer;
             serializedObject.FindProperty("headTransform").objectReferenceValue = headAnchor;
             serializedObject.FindProperty("handPinchSource").objectReferenceValue = rightHand;
@@ -1200,7 +1205,7 @@ namespace QuestBowlingStandalone.Editor
                 labelRect.offsetMin = Vector2.zero;
                 labelRect.offsetMax = Vector2.zero;
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.text = "Ready For Shot";
+                label.text = string.Empty;
                 label.alignment = TextAnchor.MiddleCenter;
                 label.fontSize = 32;
                 label.resizeTextForBestFit = false;
@@ -1266,7 +1271,7 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(164.0f, 96.0f);
             serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
             serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 40.0f;
-            serializedObject.FindProperty("emptyText").stringValue = "Ready For Shot";
+            serializedObject.FindProperty("emptyText").stringValue = string.Empty;
             serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
             serializedObject.FindProperty("panelColor").colorValue = new Color(0.02f, 0.045f, 0.05f, 0.72f);
             serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
@@ -1406,6 +1411,7 @@ namespace QuestBowlingStandalone.Editor
             GameObject statusStrip,
             QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender liveMetadataSender,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
             QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList replayList,
             QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
@@ -1427,7 +1433,7 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchoredPosition = new Vector2(-500.0f, -76.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(300.0f, 154.0f);
+            rectTransform.sizeDelta = new Vector2(320.0f, 112.0f);
 
             background.color = new Color(0.015f, 0.035f, 0.04f, 0.62f);
             background.raycastTarget = false;
@@ -1461,9 +1467,9 @@ namespace QuestBowlingStandalone.Editor
                 labelRect.offsetMin = new Vector2(16.0f, 6.0f);
                 labelRect.offsetMax = new Vector2(-16.0f, -6.0f);
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.text = "Laptop  Connecting\nLane    Needed\nShot    Lock Lane\nShots   0";
-                label.alignment = TextAnchor.MiddleLeft;
-                label.fontSize = 22;
+                label.text = "Shot Not Ready\nLaptop Connecting";
+                label.alignment = TextAnchor.MiddleCenter;
+                label.fontSize = 26;
                 label.resizeTextForBestFit = false;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
@@ -1476,6 +1482,7 @@ namespace QuestBowlingStandalone.Editor
             var serializedObject = new SerializedObject(presenter);
             serializedObject.FindProperty("sessionController").objectReferenceValue = sessionController;
             serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
+            serializedObject.FindProperty("liveMetadataSender").objectReferenceValue = liveMetadataSender;
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("shotReplayList").objectReferenceValue = replayList;
             serializedObject.FindProperty("shotReplayRenderer").objectReferenceValue = shotReplayRenderer;

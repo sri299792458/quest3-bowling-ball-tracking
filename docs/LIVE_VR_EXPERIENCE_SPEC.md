@@ -69,12 +69,11 @@ If a value cannot be defended, the UI should omit it instead of guessing.
 
 The Quest UI shows:
 
-- `Needs Lane`
-- `Preview Lane`
-- `Ready`
-- `Tracking`
-- `Replay`
-- `Needs Attention`
+- lane calibration prompts before the lane is locked
+- `Shot Ready` only when it is actually safe to throw
+- `Shot Not Ready` plus one explicit blocker when it is not safe to throw
+- `Replay` while a selected shot is replaying
+- `Review` only after at least one successful shot exists
 
 The laptop can show:
 
@@ -103,7 +102,8 @@ Laptop result stream back to Quest
 User-visible headset state:
 
 ```text
-Connecting -> Needs Lane
+Shot Not Ready
+Laptop Connecting
 ```
 
 ### 2. Lane Lock
@@ -115,14 +115,17 @@ Quest shows only the heads-region placement rectangle. On pinch release, Quest s
 User-visible states:
 
 ```text
-Needs Lane
-  -> Placing Lane
-  -> Preview Lane
-  -> Ready
+Shot Not Ready
+  -> Laptop Connecting
+  -> Place Lane
+  -> Hold To Place Lane
+  -> Confirm Lane
+  -> Shot Ready
 ```
 
 Rules:
 
+- Lane placement controls are disabled until the Quest has an active laptop session, media is progressing, metadata is connected, results are connected, and the laptop is not processing a shot.
 - Confirming the lane sends the complete `lane_lock_result` to the laptop.
 - The laptop persists that lane result as the confirmed session geometry.
 - Shot detection is armed only after the laptop has a confirmed lane.
@@ -134,9 +137,37 @@ Once the lane is locked:
 
 - the full lane overlay fades down
 - optional subtle lane rails remain visible
-- a small side/peripheral status shows `Ready`
+- a small side/peripheral status shows `Shot Ready` only if the laptop/media/metadata/result gates also pass
 
 The bowler should be able to ignore the UI and bowl normally.
+
+`Shot Ready` means all observable gates are true:
+
+- Quest session is active
+- live media stream is connected
+- media has sent at least one frame and has recent progress
+- metadata socket is connected
+- result socket is connected
+- lane is locked
+- laptop pipeline is not busy with an open/analyzing shot
+- replay and review are not currently active
+
+If any gate fails, the headset must show `Shot Not Ready` and the single most useful blocker, for example:
+
+```text
+Shot Not Ready
+Place Lane
+```
+
+```text
+Shot Not Ready
+Media Stream Not Ready
+```
+
+```text
+Shot Not Ready
+Processing Shot
+```
 
 ### 4. Shot Detection And Tracking
 
@@ -147,10 +178,10 @@ SAM2 writes live mask measurements and compact contours. The final trajectory is
 User-visible headset state:
 
 ```text
-Ready -> Tracking
+Shot Ready -> Shot Not Ready / Processing Shot
 ```
 
-During `Tracking`, the headset should only show a small peripheral pulse or label. It should not render live model detections.
+During processing, the headset should only show the peripheral readiness badge. It should not render live model detections.
 
 ### 5. Replay
 
@@ -165,12 +196,12 @@ When a successful `shot_result` arrives, Quest:
 User-visible state:
 
 ```text
-Tracking -> Replay Available
+Shot Not Ready / Processing Shot -> Replay
 ```
 
 ### 6. Session Review
 
-After multiple shots, the user can open a session review panel.
+After at least one successful shot, the user can open a session review panel. The review button is hidden before then.
 
 This view focuses on consistency:
 
@@ -207,37 +238,60 @@ Design:
 
 The lane overlay must never obscure the physical lane enough to distract a bowler.
 
-### 2. Side Status Strip
+### 2. Shot Readiness Badge
 
 Small peripheral panel mounted away from the shot line, preferably near the ball-return side.
 
-Shows only product state:
+It is not a dashboard. It answers exactly one question:
 
 ```text
-Laptop
-Models
-Lane
-Ready
+Can I throw now?
 ```
 
-Each item is a compact indicator, not a log line.
-
-Examples:
+Ready state:
 
 ```text
-Laptop  Connected
-Models  Ready
-Lane    Locked
-Shot    Ready
+Shot Ready
 ```
 
-Failure examples:
+Blocked states:
 
 ```text
-Laptop  Reconnecting
-Lane    Relock Needed
-Shot    Ball Not Found
+Shot Not Ready
+Place Lane
 ```
+
+```text
+Shot Not Ready
+Confirm Lane
+```
+
+```text
+Shot Not Ready
+Laptop Connecting
+```
+
+```text
+Shot Not Ready
+Media Stream Not Ready
+```
+
+```text
+Shot Not Ready
+Metadata Reconnecting
+```
+
+```text
+Shot Not Ready
+Results Reconnecting
+```
+
+```text
+Shot Not Ready
+Processing Shot
+```
+
+Raw YOLO/SAM failure strings do not belong on this badge. They may appear in logs or in a short replay failure surface if needed.
 
 ### 3. Dynamic Replay Callouts
 
@@ -279,7 +333,7 @@ Only one or two callouts should be visible at once.
 
 A compact replay list near the side status strip.
 
-Each successful shot becomes replayable:
+The shot rail is hidden until at least one successful shot exists. Each successful shot becomes replayable:
 
 ```text
 Shot 6   17.8 mph   4.6 deg   Bkpt 8.4
@@ -297,7 +351,7 @@ The shot rail should show the latest few shots by default. Session review can ex
 
 ### 5. Session Review Card
 
-Opened intentionally, never shown automatically while preparing to throw.
+Opened intentionally, never shown automatically while preparing to throw. The review button is hidden until at least one successful shot exists.
 
 Shows consistency rather than raw volume:
 
@@ -324,44 +378,147 @@ Later extension:
 
 ## User-Visible State Model
 
-Add a Quest presentation owner:
+### Lane Calibration Statechart
+
+Lane calibration is driven by an explicit statechart. The view is a pure projection of this state; buttons do not independently decide when they are visible.
 
 ```text
-StandaloneQuestExperiencePresenter
+Idle
+  Place Lane -> ArmedForPlacement
+
+ArmedForPlacement
+  Pinch start -> PlacingHeads
+  Cancel -> Idle
+
+PlacingHeads
+  Pinch held -> update heads preview
+  Pinch release -> FullLanePreview
+  pose failure -> Failed
+
+FullLanePreview
+  Lock Lane -> Locked
+  Retry -> Idle
+
+Locked
+  Relock -> Idle
+
+Failed
+  Try Again -> ArmedForPlacement
 ```
 
-It owns only user-facing experience state:
+Declared lane UI by state:
 
 ```text
-Connecting
-NeedsLane
-PlacingLane
-PreviewLane
-Ready
-Tracking
-ReplayAvailable
-SessionReview
-NeedsAttention
+Idle:
+  primary: Place Lane
+  secondary: hidden
+
+ArmedForPlacement:
+  primary: Pinch + Hold, disabled
+  secondary: Cancel
+
+PlacingHeads:
+  primary: Release To Preview, disabled
+  secondary: hidden
+
+FullLanePreview:
+  primary: Lock Lane
+  secondary: Retry
+
+Locked:
+  primary: hidden
+  secondary: Relock
+
+Failed:
+  primary: Try Again
+  secondary: hidden
 ```
 
-It listens to pipeline producers:
+This makes invalid combinations impossible, such as showing `Try Again` and `Retry` together.
+
+### Whole Experience State Graph
+
+The headset experience also has one explicit state resolver:
+
+```text
+StandaloneQuestExperienceStateGraph
+```
+
+It receives the observable pipeline inputs:
+
+```text
+lane state
+session active
+media ready
+metadata connected
+results connected
+laptop pipeline ready
+replay playing
+review open
+successful shot count
+```
+
+It returns the bowler-facing state:
+
+```text
+Shot Ready
+Shot Not Ready / <explicit blocker>
+shot rail visible
+review button visible
+reason code for logs
+```
+
+Priority order:
+
+```text
+session not active
+media not ready
+metadata disconnected
+results disconnected
+review open
+replay playing
+lane UI missing
+lane not locked
+laptop pipeline busy
+shot ready
+```
+
+Preflight transport readiness comes before lane calibration. The headset must never ask the user to place, confirm, or relock the lane while the laptop session is unavailable. In that case the only useful product state is `Shot Not Ready / Laptop Connecting` or the relevant transport blocker.
+
+The status strip does not own the pipeline. It collects state from producers and asks the graph for a single presentation. Shot rail visibility and review button visibility also come from this graph, so the UI cannot expose review before a shot exists or show stale shot controls while the product state says they should be hidden.
+
+The graph validates invariants in runtime code:
+
+```text
+Shot Ready cannot have a blocker
+blocked states must display Shot Not Ready
+session/media/metadata/results blockers must appear before lane blockers
+shot rail and review visibility must agree
+review and shot rail are hidden until a successful shot exists
+```
+
+The graph listens to pipeline producers through `StandaloneQuestExperienceStatusStrip`:
 
 - session controller
 - lane lock coordinator
+- live metadata sender
 - live result receiver
 - shot replay list
 - shot replay renderer
+- session review panel
 
-It drives UI presenters:
+It must not derive readiness from a single optimistic flag. `Shot Ready` is true only when:
 
-- `LaneOverlayPresenter`
-- `SessionStatusPresenter`
-- `ShotReplayPresenter`
-- `ShotStatsPresenter`
-- `ShotRailPresenter`
-- `SessionReviewPresenter`
+- `StandaloneQuestSessionController.IsSessionActive`
+- `StandaloneQuestSessionController.TryGetLiveMediaReadiness(...)`
+- `StandaloneQuestLiveMetadataSender.IsConnected`
+- `StandaloneQuestLiveResultReceiver.IsConnected`
+- `StandaloneQuestLiveResultReceiver.IsPipelineReady`
+- `StandaloneQuestLaneLockStateCoordinator.State == Locked`
+- replay is not playing
+- review is not open
 
-Pipeline components continue to own transport, capture, lane lock, tracking, and result parsing. The experience presenter translates those states into bowler-facing UI.
+Pipeline components continue to own transport, capture, lane lock, tracking, and result parsing. The readiness badge only translates those states into one bowler-facing permission.
 
 ## Shot Result Contract
 
@@ -380,6 +537,45 @@ Successful `shot_result` payloads should include:
 ```
 
 `shotStats` is required for successful replayable shots once this feature lands.
+
+## Pipeline Status Contract
+
+The laptop result channel may publish lightweight status envelopes before the final `shot_result`.
+
+This is what makes the headset readiness badge honest while YOLO/SAM/trajectory analysis is running.
+
+Envelope:
+
+```json
+{
+  "schemaVersion": "laptop_result_envelope",
+  "kind": "pipeline_status",
+  "session_id": "...",
+  "shot_id": "session-stream",
+  "message_id": "...",
+  "created_unix_ms": 1770000000000,
+  "pipeline_status": {
+    "state": "shot_analyzing",
+    "ready": false,
+    "reason": "shot_tracking_started",
+    "windowId": "shot_1234"
+  }
+}
+```
+
+Current status states:
+
+- `shot_open`: a shot window is open; the user should not throw another ball
+- `shot_analyzing`: the laptop is running tracking/trajectory/stats
+- `shot_ready`: the laptop has finished publishing the result and the next shot may be allowed if all other gates pass
+
+Quest behavior:
+
+- `ready=false` forces the badge to `Shot Not Ready / Processing Shot`
+- `ready=true` clears the laptop-busy blocker
+- a final `shot_result` also clears the laptop-busy blocker
+
+This is a product readiness signal, not a debug stream. Raw frame counts and model timings stay on the laptop.
 
 ### Shot Stats Schema
 
@@ -616,12 +812,14 @@ The UI should avoid blame language. It should tell the user what to do next.
 - Anchor callouts near lane-space milestone positions.
 - Collapse to compact summary after replay.
 
-### Phase 4: Experience Presenter
+### Phase 4: Readiness Badge
 
-- Add `StandaloneQuestExperiencePresenter`.
-- Move user-facing labels out of individual pipeline components.
+- Add `StandaloneQuestExperienceStatusStrip`.
+- Replace dashboard-style status with a single throw permission.
+- Show `Shot Ready` only when all readiness gates pass.
+- Show `Shot Not Ready` with one explicit blocker otherwise.
 - Keep pipeline components as producers.
-- Centralize bowler-facing state transitions.
+- Use laptop `pipeline_status` to block readiness while analysis is running.
 
 ### Phase 5: Session Review
 
@@ -632,6 +830,14 @@ The UI should avoid blame language. It should tell the user what to do next.
 
 Implemented surface:
 
+- `StandaloneQuestExperienceStateGraph` resolves the whole headset-facing pipeline state from lane, stream, laptop, replay, review, and shot-history inputs.
+- `StandaloneQuestExperienceStatusStrip` shows `Shot Ready` or `Shot Not Ready` plus the active blocker.
+- `StandaloneQuestExperienceStatusStrip` applies graph-owned shot rail and review button visibility.
+- `StandaloneQuestLaneLockStateCoordinator` disables lane placement/confirmation/relock while laptop preflight is not ready.
+- `StandaloneQuestLiveResultReceiver` consumes `pipeline_status` and final `shot_result` envelopes.
+- `LiveSessionPipeline` publishes `pipeline_status` when a shot opens/analyzes/completes.
+- `StandaloneQuestShotReplayList` stays hidden until at least one successful shot exists; `Shot Ready` is the only throw-permission label.
+- `StandaloneQuestSessionReviewPanel` hides the `Review` button until at least one successful shot exists.
 - `StandaloneQuestSessionReviewPanel` opens only from the `Review` button.
 - It shows session averages/spreads, selected shot details, selected-vs-previous deltas, most-repeatable shot, and last-3 trends.
 - `StandaloneQuestShotReplayRenderer` draws a dim previous-shot ghost trajectory while review is open.
@@ -640,6 +846,12 @@ Implemented surface:
 
 Before calling this product-ready:
 
+- `Shot Not Ready / Laptop Connecting` must appear before lane calibration when the laptop process/hotspot/session is unavailable
+- lane placement controls must be disabled while laptop preflight is unavailable
+- `Shot Ready` must be false before lane lock
+- `Shot Ready` must be false while media/metadata/result sockets are not connected
+- `Shot Ready` must be false while laptop `pipeline_status.ready=false`
+- `Shot Ready` must return after final `shot_result` when all other gates pass
 - the three existing live shots must produce stable `shotStats`
 - pin-hit shots must report entry stats near the pin deck
 - gutter/edge shots must not be forced to pin-deck stats

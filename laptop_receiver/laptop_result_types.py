@@ -13,11 +13,13 @@ from laptop_receiver.shot_result_types import ShotResult
 RESULT_ENVELOPE_SCHEMA_VERSION = "laptop_result_envelope"
 
 RESULT_KIND_SHOT_RESULT = "shot_result"
+RESULT_KIND_PIPELINE_STATUS = "pipeline_status"
 RESULT_KIND_REPLAY_PATH = "replay_path"
 RESULT_KIND_PIPELINE_ERROR = "pipeline_error"
 
 SUPPORTED_RESULT_KINDS = {
     RESULT_KIND_SHOT_RESULT,
+    RESULT_KIND_PIPELINE_STATUS,
     RESULT_KIND_REPLAY_PATH,
     RESULT_KIND_PIPELINE_ERROR,
 }
@@ -112,6 +114,35 @@ def build_shot_result_envelope(
         "message_id": message_id or uuid4().hex,
         "created_unix_ms": int(created_unix_ms or time.time() * 1000),
         "shot_result": result.to_dict(),
+    }
+    LaptopResultEnvelope.from_dict(envelope)
+    return envelope
+
+
+def build_pipeline_status_envelope(
+    *,
+    session_id: str,
+    shot_id: str,
+    state: str,
+    ready: bool,
+    reason: str = "",
+    window_id: str = "",
+    message_id: str | None = None,
+    created_unix_ms: int | None = None,
+) -> dict[str, Any]:
+    envelope = {
+        "schemaVersion": RESULT_ENVELOPE_SCHEMA_VERSION,
+        "kind": RESULT_KIND_PIPELINE_STATUS,
+        "session_id": str(session_id or ""),
+        "shot_id": str(shot_id or ""),
+        "message_id": message_id or uuid4().hex,
+        "created_unix_ms": int(created_unix_ms or time.time() * 1000),
+        "pipeline_status": {
+            "state": str(state or ""),
+            "ready": bool(ready),
+            "reason": str(reason or ""),
+            "windowId": str(window_id or ""),
+        },
     }
     LaptopResultEnvelope.from_dict(envelope)
     return envelope

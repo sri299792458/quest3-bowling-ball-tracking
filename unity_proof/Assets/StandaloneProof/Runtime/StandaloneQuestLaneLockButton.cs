@@ -93,7 +93,7 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 canvasGroup.alpha = visible ? visibleAlpha : hiddenAlpha;
                 canvasGroup.interactable = interactable;
-                canvasGroup.blocksRaycasts = visible;
+                canvasGroup.blocksRaycasts = visible && interactable;
             }
 
             if (label != null)
@@ -107,8 +107,9 @@ namespace QuestBowlingStandalone.QuestApp
         private bool IsActionVisible()
         {
             return laneLockCoordinator == null
-                || actionKind == StandaloneQuestLaneLockActionKind.Primary
-                || laneLockCoordinator.SecondaryActionVisible;
+                || (actionKind == StandaloneQuestLaneLockActionKind.Primary
+                    ? laneLockCoordinator.PrimaryActionVisible
+                    : laneLockCoordinator.SecondaryActionVisible);
         }
 
         private bool IsActionInteractable()

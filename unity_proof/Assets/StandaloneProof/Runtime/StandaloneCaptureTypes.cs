@@ -245,6 +245,15 @@ namespace QuestBowlingStandalone.QuestApp
     }
 
     [Serializable]
+    public sealed class StandalonePipelineStatus
+    {
+        public string state;
+        public bool ready;
+        public string reason;
+        public string windowId;
+    }
+
+    [Serializable]
     public sealed class StandaloneFrameMetadata
     {
         public string schemaVersion = "capture_metadata_v1";

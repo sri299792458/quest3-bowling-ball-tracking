@@ -40,6 +40,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private bool verboseLogging;
 
         private bool _visible;
+        private bool _reviewButtonAllowed = true;
 
         public bool IsVisible => _visible;
         public string LastStatus { get; private set; } = string.Empty;
@@ -367,7 +368,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            if (shotReplayList == null || shotReplayList.ShotCount == 0)
+            if (!_reviewButtonAllowed || shotReplayList == null || shotReplayList.ShotCount == 0)
             {
                 return;
             }
@@ -415,6 +416,23 @@ namespace QuestBowlingStandalone.QuestApp
 
             var next = Mathf.Clamp(current + delta, 0, shotReplayList.ShotCount - 1);
             shotReplayList.SelectShotByIndex(next);
+        }
+
+        public void SetReviewButtonAllowed(bool allowed)
+        {
+            if (_reviewButtonAllowed == allowed)
+            {
+                return;
+            }
+
+            _reviewButtonAllowed = allowed;
+            if (!allowed && _visible)
+            {
+                SetVisible(false, false);
+                return;
+            }
+
+            Refresh();
         }
 
         private void SetVisible(bool visible, bool driveSelection)
@@ -504,9 +522,10 @@ namespace QuestBowlingStandalone.QuestApp
                 : Array.Empty<StandaloneShotResult>();
             var hasShots = shots.Length > 0;
 
+            SetToggleButtonVisible(hasShots && _reviewButtonAllowed);
             if (toggleButton != null)
             {
-                toggleButton.interactable = hasShots;
+                toggleButton.interactable = hasShots && _reviewButtonAllowed;
             }
 
             if (toggleButtonLabel != null)
@@ -538,6 +557,14 @@ namespace QuestBowlingStandalone.QuestApp
             bestShotLabel.text = BuildBestShotText(aggregate, shots);
             trendLabel.text = BuildTrendText(shots);
             SetButtonInteractivity(selectedIndex > 0, selectedIndex < shots.Length - 1);
+        }
+
+        private void SetToggleButtonVisible(bool visible)
+        {
+            if (toggleButton != null)
+            {
+                toggleButton.gameObject.SetActive(visible);
+            }
         }
 
         private void SetButtonInteractivity(bool canPrevious, bool canNext)

@@ -35,6 +35,18 @@ namespace QuestBowlingStandalone.QuestApp
             public StandaloneShotResult shot_result;
         }
 
+        [Serializable]
+        private sealed class PipelineStatusEnvelope
+        {
+            public string schemaVersion;
+            public string kind;
+            public string session_id;
+            public string shot_id;
+            public string message_id;
+            public long created_unix_ms;
+            public StandalonePipelineStatus pipeline_status;
+        }
+
         [Header("Laptop Result Channel")]
         [SerializeField] private string host = "";
         [SerializeField] private int port = 8769;
@@ -50,15 +62,20 @@ namespace QuestBowlingStandalone.QuestApp
         private TcpClient _client;
         private Thread _readerThread;
         private volatile bool _stopRequested;
+        private volatile bool _isConnected;
         private string _activeSessionId;
         private string _activeShotId;
         private volatile string _threadStatus;
 
         public event Action<StandaloneShotResult> ShotResultReceived;
+        public event Action<StandalonePipelineStatus> PipelineStatusReceived;
 
         public bool EnabledForAutoRun => enabledForAutoRun;
         public bool IsRunning => _readerThread != null && _readerThread.IsAlive;
+        public bool IsConnected => enabledForAutoRun && IsRunning && _isConnected;
+        public bool IsPipelineReady => LastPipelineStatus == null || LastPipelineStatus.ready;
         public StandaloneShotResult LastShotResult { get; private set; }
+        public StandalonePipelineStatus LastPipelineStatus { get; private set; }
         public string LastStatus { get; private set; }
 
         public void SetEndpoint(string targetHost, int targetPort)
@@ -92,6 +109,7 @@ namespace QuestBowlingStandalone.QuestApp
             _activeSessionId = sessionId ?? string.Empty;
             _activeShotId = shotId ?? string.Empty;
             _stopRequested = false;
+            _isConnected = false;
             _threadStatus = null;
             lock (_queueLock)
             {
@@ -129,6 +147,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             _client = null;
             _readerThread = null;
+            _isConnected = false;
             LastStatus = "result_receiver_stopped";
         }
 
@@ -158,6 +177,7 @@ namespace QuestBowlingStandalone.QuestApp
                         _client = client;
                         client.NoDelay = true;
                         ConnectWithTimeout(client, host, port, Math.Max(1, connectTimeoutMs));
+                        _isConnected = true;
                         SetThreadStatus($"result_receiver_connected {host}:{port}");
 
                         using (var stream = client.GetStream())
@@ -189,6 +209,7 @@ namespace QuestBowlingStandalone.QuestApp
                 }
                 finally
                 {
+                    _isConnected = false;
                     _client = null;
                 }
 
@@ -268,6 +289,10 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 processed = ProcessShotResult(line);
             }
+            else if (header.kind == "pipeline_status")
+            {
+                processed = ProcessPipelineStatus(line);
+            }
             else
             {
                 LastStatus = "unsupported_result_kind:" + header.kind;
@@ -310,10 +335,48 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             LastShotResult = envelope.shot_result;
+            LastPipelineStatus = new StandalonePipelineStatus
+            {
+                state = envelope.shot_result.success ? "shot_result_ready" : "shot_result_failed",
+                ready = true,
+                reason = envelope.shot_result.success ? "shot_result_ready" : envelope.shot_result.failureReason,
+                windowId = envelope.shot_result.windowId,
+            };
             LastStatus = envelope.shot_result.success ? "shot_result_received" : "shot_result_failed";
             var pointCount = envelope.shot_result.trajectory != null ? envelope.shot_result.trajectory.Length : 0;
             DebugLog($"{LastStatus} windowId={envelope.shot_result.windowId} trajectoryPoints={pointCount}");
             ShotResultReceived?.Invoke(envelope.shot_result);
+            PipelineStatusReceived?.Invoke(LastPipelineStatus);
+            return true;
+        }
+
+        private bool ProcessPipelineStatus(string line)
+        {
+            PipelineStatusEnvelope envelope;
+            try
+            {
+                envelope = JsonUtility.FromJson<PipelineStatusEnvelope>(line);
+            }
+            catch (Exception ex)
+            {
+                LastStatus = ex.GetType().Name + ": invalid_pipeline_status_json";
+                DebugLog(LastStatus);
+                return false;
+            }
+
+            if (envelope == null || envelope.pipeline_status == null)
+            {
+                LastStatus = "pipeline_status_missing_payload";
+                DebugLog(LastStatus);
+                return false;
+            }
+
+            LastPipelineStatus = envelope.pipeline_status;
+            LastStatus = envelope.pipeline_status.ready ? "pipeline_status_ready" : "pipeline_status_busy";
+            DebugLog(
+                $"{LastStatus} state={envelope.pipeline_status.state} " +
+                $"reason={envelope.pipeline_status.reason} windowId={envelope.pipeline_status.windowId}");
+            PipelineStatusReceived?.Invoke(envelope.pipeline_status);
             return true;
         }
 

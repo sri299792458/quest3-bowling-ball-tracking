@@ -77,6 +77,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         public event Action<string> MetadataStreamFailed;
         public bool EnabledForAutoRun => enabledForAutoRun;
+        public bool IsConnected => enabledForAutoRun && _writer != null && _client != null && _client.Connected;
         public string LastStatus { get; private set; } = string.Empty;
 
         public void SetEndpoint(string targetHost, int targetPort)

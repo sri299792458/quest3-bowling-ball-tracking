@@ -8,6 +8,7 @@ namespace QuestBowlingStandalone.QuestApp
     {
         [SerializeField] private StandaloneQuestSessionController sessionController;
         [SerializeField] private StandaloneQuestLaneLockStateCoordinator laneLockCoordinator;
+        [SerializeField] private StandaloneQuestLiveMetadataSender liveMetadataSender;
         [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
         [SerializeField] private StandaloneQuestShotReplayList shotReplayList;
         [SerializeField] private StandaloneQuestShotReplayRenderer shotReplayRenderer;
@@ -22,6 +23,9 @@ namespace QuestBowlingStandalone.QuestApp
         private float _nextRefreshAt;
 
         public string LastDisplayText { get; private set; } = string.Empty;
+        public string LastReadinessReason { get; private set; } = string.Empty;
+        public bool IsShotReady { get; private set; }
+        public StandaloneQuestExperienceState LastState { get; private set; }
 
         private void Awake()
         {
@@ -56,6 +60,11 @@ namespace QuestBowlingStandalone.QuestApp
             if (liveResultReceiver == null)
             {
                 liveResultReceiver = FindFirstObjectByType<StandaloneQuestLiveResultReceiver>();
+            }
+
+            if (liveMetadataSender == null)
+            {
+                liveMetadataSender = FindFirstObjectByType<StandaloneQuestLiveMetadataSender>();
             }
 
             if (shotReplayList == null)
@@ -112,8 +121,8 @@ namespace QuestBowlingStandalone.QuestApp
             rect.offsetMax = new Vector2(-16.0f, -6.0f);
 
             label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            label.alignment = TextAnchor.MiddleLeft;
-            label.fontSize = 22;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.fontSize = 26;
             label.resizeTextForBestFit = false;
             label.horizontalOverflow = HorizontalWrapMode.Wrap;
             label.verticalOverflow = VerticalWrapMode.Truncate;
@@ -126,92 +135,70 @@ namespace QuestBowlingStandalone.QuestApp
             ResolveReferences();
             EnsureUi();
 
-            var connected = sessionController != null && sessionController.IsSessionActive;
-            var laneReady = laneLockCoordinator != null && laneLockCoordinator.State == StandaloneQuestLaneLockUiState.Locked;
-            var shotCount = shotReplayList != null ? shotReplayList.ShotCount : 0;
-            var shotState = ResolveShotState(laneReady);
-            var displayText =
-                "Laptop  " + (connected ? "Connected" : "Connecting") + "\n"
-                + "Lane    " + ResolveLaneState() + "\n"
-                + "Shot    " + shotState + "\n"
-                + "Shots   " + shotCount;
-
-            LastDisplayText = displayText;
-            label.text = displayText;
-            label.color = connected && laneReady ? readyColor : attentionColor;
-        }
-
-        private string ResolveLaneState()
-        {
-            if (laneLockCoordinator == null)
+            var input = BuildStateInput();
+            var state = StandaloneQuestExperienceStateGraph.Resolve(input);
+            if (!StandaloneQuestExperienceStateGraph.Validate(input, state, out var validationError))
             {
-                return "Needed";
+                Debug.LogError("[StandaloneQuestExperienceStatusStrip] Invalid experience state: " + validationError);
             }
 
-            switch (laneLockCoordinator.State)
+            LastState = state;
+            IsShotReady = state.ShotReady;
+            LastReadinessReason = state.ReasonCode;
+            LastDisplayText = state.DisplayText;
+            label.text = state.DisplayText;
+            label.color = state.ShotReady ? readyColor : attentionColor;
+            ApplySurfaceVisibility(state);
+        }
+
+        private void ApplySurfaceVisibility(StandaloneQuestExperienceState state)
+        {
+            if (shotReplayList != null)
             {
-                case StandaloneQuestLaneLockUiState.PlacingHeads:
-                    return "Placing";
-                case StandaloneQuestLaneLockUiState.FullLanePreview:
-                    return "Preview";
-                case StandaloneQuestLaneLockUiState.Locked:
-                    return "Locked";
-                case StandaloneQuestLaneLockUiState.Failed:
-                    return "Retry";
-                default:
-                    return "Needed";
+                shotReplayList.SetExperienceVisible(state.ShotRailVisible);
+            }
+
+            if (sessionReviewPanel != null)
+            {
+                sessionReviewPanel.SetReviewButtonAllowed(state.ReviewButtonVisible);
             }
         }
 
-        private string ResolveShotState(bool laneReady)
+        private StandaloneQuestExperienceStateInput BuildStateInput()
         {
-            if (sessionReviewPanel != null && sessionReviewPanel.IsVisible)
+            var sessionActive = sessionController != null && sessionController.IsSessionActive;
+            var mediaReady = false;
+            var mediaReason = "session_not_active";
+            if (sessionController != null)
             {
-                return "Review";
+                mediaReady = sessionController.TryGetLiveMediaReadiness(out mediaReason);
             }
 
-            if (shotReplayRenderer != null && shotReplayRenderer.IsReplaying)
+            var pipelineReady = true;
+            var pipelineReason = string.Empty;
+            if (liveResultReceiver != null)
             {
-                return "Replay";
+                var pipelineStatus = liveResultReceiver.LastPipelineStatus;
+                pipelineReady = liveResultReceiver.IsPipelineReady;
+                pipelineReason = pipelineStatus != null && !string.IsNullOrWhiteSpace(pipelineStatus.reason)
+                    ? pipelineStatus.reason
+                    : "pipeline_busy";
             }
 
-            if (!laneReady)
-            {
-                return "Lock Lane";
-            }
-
-            var result = liveResultReceiver != null ? liveResultReceiver.LastShotResult : null;
-            if (result != null && !result.success)
-            {
-                return FailureToLabel(result.failureReason);
-            }
-
-            return "Ready";
-        }
-
-        private static string FailureToLabel(string failureReason)
-        {
-            if (string.IsNullOrWhiteSpace(failureReason))
-            {
-                return "Try Again";
-            }
-
-            if (failureReason.StartsWith("yolo_detection_failed"))
-            {
-                return "Ball Missing";
-            }
-
-            if (failureReason.StartsWith("sam2_tracking_failed"))
-            {
-                return "Track Lost";
-            }
-
-            if (failureReason.StartsWith("lane_lock"))
-            {
-                return "Lock Lane";
-            }
-
-            return "Replay Wait";
+            return new StandaloneQuestExperienceStateInput(
+                sessionActive: sessionActive,
+                mediaReady: mediaReady,
+                mediaReason: mediaReason,
+                metadataConnected: liveMetadataSender != null && liveMetadataSender.IsConnected,
+                resultsConnected: liveResultReceiver != null && liveResultReceiver.IsConnected,
+                pipelineReady: pipelineReady,
+                pipelineReason: pipelineReason,
+                replayPlaying: shotReplayRenderer != null && shotReplayRenderer.IsReplaying,
+                reviewOpen: sessionReviewPanel != null && sessionReviewPanel.IsVisible,
+                successfulShotCount: shotReplayList != null ? shotReplayList.ShotCount : 0,
+                laneCoordinatorPresent: laneLockCoordinator != null,
+                laneState: laneLockCoordinator != null ? laneLockCoordinator.State : StandaloneQuestLaneLockUiState.Idle,
+                laneBlockerLabel: laneLockCoordinator != null ? laneLockCoordinator.ReadinessBlockerLabel : "Lane UI Missing");
         }
     }
 }

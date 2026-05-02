@@ -183,7 +183,7 @@ MonoBehaviour:
   shotButtonSize: {x: 164, y: 96}
   shotButtonSpacing: 10
   shotButtonRowYOffset: 40
-  emptyText: Ready For Shot
+  emptyText:
   shotLabelPrefix: 'Shot '
   panelColor: {r: 0.02, g: 0.045, b: 0.05, a: 0.72}
   buttonColor: {r: 0.08, g: 0.17, b: 0.18, a: 0.94}
@@ -614,7 +614,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 0.9
-  m_Text: Ready For Shot
+  m_Text:
 --- !u!222 &551431083
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -660,7 +660,7 @@ RectTransform:
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
   m_AnchoredPosition: {x: -500, y: -76}
-  m_SizeDelta: {x: 300, y: 154}
+  m_SizeDelta: {x: 320, y: 112}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &569129447
 MonoBehaviour:
@@ -676,6 +676,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestExperienceStatusStrip
   sessionController: {fileID: 1545997005}
   laneLockCoordinator: {fileID: 1545997017}
+  liveMetadataSender: {fileID: 1545997004}
   liveResultReceiver: {fileID: 1545997011}
   shotReplayList: {fileID: 259532596}
   shotReplayRenderer: {fileID: 1545997014}
@@ -1439,25 +1440,20 @@ MonoBehaviour:
       m_Calls: []
   m_FontData:
     m_Font: {fileID: 10102, guid: 0000000000000000e000000000000000, type: 0}
-    m_FontSize: 22
+    m_FontSize: 26
     m_FontStyle: 0
     m_BestFit: 0
     m_MinSize: 14
     m_MaxSize: 27
-    m_Alignment: 3
+    m_Alignment: 4
     m_AlignByGeometry: 0
     m_RichText: 1
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 0.9
-  m_Text: 'Laptop  Connecting
+  m_Text: 'Shot Not Ready
 
-    Lane    Needed
-
-    Shot    Lock Lane
-
-    Shots
-    0'
+    Laptop Connecting'
 --- !u!222 &1279065879
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -1867,7 +1863,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator
   floorPlaneSource: {fileID: 1545997009}
   proofCapture: {fileID: 1545997001}
+  sessionController: {fileID: 1545997005}
   liveMetadataSender: {fileID: 1545997004}
+  liveResultReceiver: {fileID: 1545997011}
   laneRenderer: {fileID: 1545997015}
   headTransform: {fileID: 1642275084}
   handPinchSource: {fileID: 1588580009}

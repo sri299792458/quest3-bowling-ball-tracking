@@ -8,6 +8,7 @@ from typing import Any
 
 from laptop_receiver.laptop_result_types import (
     LaptopResultPublishError,
+    build_pipeline_status_envelope,
     build_shot_result_envelope,
     publish_laptop_result,
 )
@@ -172,6 +173,13 @@ class LiveSessionPipeline:
                     lastFailureReason="",
                     lastReason=shot_boundaries.open_start.reason,
                 )
+                self._publish_pipeline_status(
+                    session_dir,
+                    state="shot_open",
+                    ready=False,
+                    reason="shot_window_open",
+                    window_id=f"shot_{shot_boundaries.open_start.frame_seq}",
+                )
         for error in shot_boundaries.errors:
             summary.errors.append(f"{session_dir}: {error}")
 
@@ -224,6 +232,13 @@ class LiveSessionPipeline:
             lastFailureReason="",
             lastReason="shot_tracking_started",
         )
+        self._publish_pipeline_status(
+            session_dir,
+            state="shot_analyzing",
+            ready=False,
+            reason="shot_tracking_started",
+            window_id=window.window_id,
+        )
         stage_output = run_live_shot_tracking_stage(
             session_dir,
             window=window,
@@ -263,6 +278,13 @@ class LiveSessionPipeline:
             lastFailureReason=str(stage_output.shot_result.failure_reason),
             lastReason="shot_result_ready" if stage_output.shot_result.success else "shot_result_failed",
         )
+        self._publish_pipeline_status(
+            session_dir,
+            state="shot_ready",
+            ready=True,
+            reason="shot_result_ready" if stage_output.shot_result.success else "shot_result_failed",
+            window_id=window.window_id,
+        )
         return publish_status
 
     def _publish_laptop_result(self, envelope: dict[str, Any]) -> tuple[bool, str, str]:
@@ -277,6 +299,39 @@ class LiveSessionPipeline:
                 return False, PUBLISH_FAILED_UNKNOWN_STREAM, str(exc)
             raise
         return True, "published", ""
+
+    def _publish_pipeline_status(
+        self,
+        session_dir: Path,
+        *,
+        state: str,
+        ready: bool,
+        reason: str,
+        window_id: str = "",
+    ) -> tuple[bool, str, str]:
+        if not self.config.publish_result_host:
+            return False, "not_configured", ""
+
+        session_state = load_session_state(session_dir)
+        session_id = str(session_state.get("sessionId") or "")
+        shot_id = str(session_state.get("streamId") or "")
+        if not session_id or not shot_id:
+            return False, "session_identity_missing", ""
+
+        envelope = build_pipeline_status_envelope(
+            session_id=session_id,
+            shot_id=shot_id,
+            state=state,
+            ready=ready,
+            reason=reason,
+            window_id=window_id,
+        )
+        try:
+            return self._publish_laptop_result(envelope)
+        except LaptopResultPublishError as exc:
+            if exc.error_code == "unknown_active_stream":
+                return False, PUBLISH_FAILED_UNKNOWN_STREAM, str(exc)
+            raise
 
     def _mark_shot_from_detector_result(self, session_dir: Path, detector_result: Any) -> None:
         lane_lock_request_id = str(getattr(detector_result, "confirmed_lane_lock_request_id", "") or "")

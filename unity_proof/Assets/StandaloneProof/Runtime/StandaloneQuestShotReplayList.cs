@@ -21,7 +21,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Vector2 shotButtonSize = new Vector2(164.0f, 96.0f);
         [SerializeField] private float shotButtonSpacing = 10.0f;
         [SerializeField] private float shotButtonRowYOffset = 40.0f;
-        [SerializeField] private string emptyText = "Ready For Shot";
+        [SerializeField] private string emptyText = string.Empty;
         [SerializeField] private string shotLabelPrefix = "Shot ";
         [SerializeField] private Color panelColor = new Color(0.02f, 0.045f, 0.05f, 0.72f);
         [SerializeField] private Color buttonColor = new Color(0.08f, 0.17f, 0.18f, 0.94f);
@@ -35,6 +35,7 @@ namespace QuestBowlingStandalone.QuestApp
         private readonly List<Button> _shotButtons = new List<Button>();
         private int _selectedShotIndex = -1;
         private string _activeSessionId = string.Empty;
+        private bool _experienceVisible = true;
 
         public event Action ShotsChanged;
         public event Action<int, StandaloneShotResult> ShotSelected;
@@ -152,7 +153,10 @@ namespace QuestBowlingStandalone.QuestApp
             if (state == StandaloneQuestLaneLockUiState.Idle || state == StandaloneQuestLaneLockUiState.PlacingHeads)
             {
                 ClearShots("lane_reset:" + (reason ?? string.Empty));
+                return;
             }
+
+            RefreshList();
         }
 
         private void OnShotResultReceived(StandaloneShotResult result)
@@ -235,6 +239,17 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             return results;
+        }
+
+        public void SetExperienceVisible(bool visible)
+        {
+            if (_experienceVisible == visible)
+            {
+                return;
+            }
+
+            _experienceVisible = visible;
+            RefreshList();
         }
 
         public void ClearShots(string reason)
@@ -333,19 +348,21 @@ namespace QuestBowlingStandalone.QuestApp
             EnsureButtonCount(visibleCount);
 
             var hasShots = _shots.Count > 0;
+            var railVisible = hasShots && _experienceVisible;
+            if (panelBackground != null)
+            {
+                panelBackground.enabled = railVisible;
+            }
+
             if (emptyLabel != null)
             {
-                emptyLabel.gameObject.SetActive(!hasShots);
-                if (!hasShots && string.IsNullOrWhiteSpace(emptyLabel.text))
-                {
-                    emptyLabel.text = emptyText;
-                }
+                emptyLabel.gameObject.SetActive(false);
             }
 
             for (var index = 0; index < _shotButtons.Count; index++)
             {
                 var button = _shotButtons[index];
-                var active = index < visibleCount;
+                var active = railVisible && index < visibleCount;
                 button.gameObject.SetActive(active);
                 if (!active)
                 {
@@ -483,7 +500,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            if (_shots.Count == 0)
+            if (_shots.Count == 0 || !_experienceVisible)
             {
                 sessionSummaryLabel.gameObject.SetActive(false);
                 return;

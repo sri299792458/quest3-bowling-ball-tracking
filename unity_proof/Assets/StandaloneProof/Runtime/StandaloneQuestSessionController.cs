@@ -46,6 +46,52 @@ namespace QuestBowlingStandalone.QuestApp
         public string ActiveSessionId => proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
         public string ActiveStreamId => proofCapture != null ? proofCapture.ActiveStreamId : string.Empty;
 
+        public bool TryGetLiveMediaReadiness(out string note)
+        {
+            note = "live_media_not_ready";
+            if (!IsSessionActive)
+            {
+                note = "session_not_active";
+                return false;
+            }
+
+            if (!enableLiveStreaming)
+            {
+                note = "live_streaming_disabled";
+                return false;
+            }
+
+            if (!TryReadEncoderStatus(out var status))
+            {
+                note = "media_status_unavailable";
+                return false;
+            }
+
+            if (!status.live_stream_connected)
+            {
+                note = string.IsNullOrWhiteSpace(status.live_stream_last_error)
+                    ? "media_stream_disconnected"
+                    : "media_stream_disconnected:" + status.live_stream_last_error;
+                return false;
+            }
+
+            if (status.live_stream_sent_sample_count <= 0)
+            {
+                note = "media_stream_waiting_for_first_frame";
+                return false;
+            }
+
+            var noProgressTimeout = Mathf.Max(0.5f, mediaNoProgressTimeoutSeconds);
+            if (_lastMediaProgressAt > 0.0f && Time.realtimeSinceStartup - _lastMediaProgressAt >= noProgressTimeout)
+            {
+                note = "media_stream_no_recent_frames";
+                return false;
+            }
+
+            note = "media_stream_ready";
+            return true;
+        }
+
         [Serializable]
         private sealed class EncoderStatusSnapshot
         {
