@@ -10,6 +10,7 @@ from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveC
 from laptop_receiver.live_lane_lock_results import load_lane_lock_result_for_request
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
+from laptop_receiver.shot_stats import build_shot_stats
 from laptop_receiver.trajectory_reconstruction import trajectory_from_sam2_mask_track
 
 
@@ -95,6 +96,7 @@ def _build_shot_result(
     tracking_source = "camera_sam2"
     tracked_frames = int(sam2_result.tracked_frames) if sam2_result is not None else 0
     trajectory = []
+    shot_stats = None
     failure_reason = ""
 
     lane_lock = load_lane_lock_result_for_request(artifact.root_dir, window.lane_lock_request_id)
@@ -121,6 +123,11 @@ def _build_shot_result(
 
     if not failure_reason and not trajectory:
         failure_reason = "empty_lane_space_trajectory"
+    if not failure_reason and lane_lock is not None:
+        try:
+            shot_stats = build_shot_stats(trajectory=trajectory, lane_lock=lane_lock)
+        except Exception as exc:
+            failure_reason = f"shot_stats_failed:{exc}"
 
     average_projection_confidence = (
         sum(float(point.projection_confidence) for point in trajectory) / len(trajectory)
@@ -146,6 +153,7 @@ def _build_shot_result(
         lane_lock_request_id=lane_lock.request_id if lane_lock is not None else "",
         source_frame_range=SourceFrameRange(start=int(window.frame_seq_start), end=int(window.frame_seq_end)),
         tracking_summary=summary,
+        shot_stats=shot_stats,
         trajectory=trajectory,
     )
 

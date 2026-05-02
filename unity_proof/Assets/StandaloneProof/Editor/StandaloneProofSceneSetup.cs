@@ -22,6 +22,9 @@ namespace QuestBowlingStandalone.Editor
         private const string LockLaneButtonObjectName = "LockLaneButton";
         private const string RetryLaneButtonObjectName = "RetryLaneButton";
         private const string ReplayShotListObjectName = "ReplayShotList";
+        private const string ExperienceStatusStripObjectName = "ExperienceStatusStrip";
+        private const string SessionReviewPanelObjectName = "SessionReviewPanel";
+        private const string SessionReviewButtonObjectName = "SessionReviewButton";
 
         [MenuItem("Tools/Standalone Proof/Create Or Update Proof Scene")]
         public static void CreateOrUpdateProofScene()
@@ -48,10 +51,16 @@ namespace QuestBowlingStandalone.Editor
             var lockLaneButton = FindOrCreateLaneActionButton(LockLaneButtonObjectName, lockLaneCanvas.transform);
             var retryLaneButton = FindOrCreateLaneActionButton(RetryLaneButtonObjectName, lockLaneCanvas.transform);
             var replayShotList = FindOrCreateReplayShotList(lockLaneCanvas.transform);
+            var experienceStatusStrip = FindOrCreateExperienceStatusStrip(lockLaneCanvas.transform);
+            var sessionReviewPanel = FindOrCreateSessionReviewPanel(lockLaneCanvas.transform);
+            var sessionReviewButton = FindOrCreateSessionReviewButton(lockLaneCanvas.transform);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneCanvas);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(lockLaneButton);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(retryLaneButton);
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(replayShotList);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(experienceStatusStrip);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(sessionReviewPanel);
+            GameObjectUtility.RemoveMonoBehavioursWithMissingScript(sessionReviewButton);
 
             var sessionContext = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext>(proofRig);
             var frameSource = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource>(proofRig);
@@ -84,19 +93,37 @@ namespace QuestBowlingStandalone.Editor
                 lockLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary,
-                new Vector2(-300.0f, 0.0f),
-                new Vector2(330.0f, 120.0f),
-                "Pinch + Hold",
+                new Vector2(-495.0f, 64.0f),
+                new Vector2(300.0f, 104.0f),
+                "Place Lane",
                 new Color(0.09f, 0.13f, 0.19f, 0.94f));
             ConfigureLaneActionButton(
                 retryLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Secondary,
-                new Vector2(-20.0f, 0.0f),
-                new Vector2(210.0f, 120.0f),
-                "Retry Lane",
+                new Vector2(-260.0f, 64.0f),
+                new Vector2(180.0f, 104.0f),
+                "Retry",
                 new Color(0.18f, 0.11f, 0.10f, 0.94f));
-            ConfigureReplayShotList(replayShotList, liveResultReceiver, shotReplayRenderer);
+            ConfigureReplayShotList(
+                replayShotList,
+                liveResultReceiver,
+                shotReplayRenderer,
+                sessionController,
+                laneLockStateCoordinator);
+            ConfigureSessionReviewPanel(
+                sessionReviewPanel,
+                sessionReviewButton,
+                replayShotList.GetComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList>(),
+                shotReplayRenderer);
+            ConfigureExperienceStatusStrip(
+                experienceStatusStrip,
+                sessionController,
+                laneLockStateCoordinator,
+                liveResultReceiver,
+                replayShotList.GetComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList>(),
+                shotReplayRenderer,
+                sessionReviewPanel.GetComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionReviewPanel>());
             ConfigureLiveMetadataSender(liveMetadataSender);
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
@@ -303,6 +330,95 @@ namespace QuestBowlingStandalone.Editor
             if (canvasTransform != null)
             {
                 Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Replay Shot List");
+            }
+
+            button.layer = 5;
+            return button;
+        }
+
+        private static GameObject FindOrCreateExperienceStatusStrip(Transform canvasTransform)
+        {
+            var existing = GameObject.Find(ExperienceStatusStripObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var strip = new GameObject(
+                ExperienceStatusStripObjectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image));
+            strip.name = ExperienceStatusStripObjectName;
+            Undo.RegisterCreatedObjectUndo(strip, "Create Experience Status Strip");
+            if (canvasTransform != null)
+            {
+                Undo.SetTransformParent(strip.transform, canvasTransform, false, "Parent Experience Status Strip");
+            }
+
+            strip.layer = 5;
+            return strip;
+        }
+
+        private static GameObject FindOrCreateSessionReviewPanel(Transform canvasTransform)
+        {
+            var existing = GameObject.Find(SessionReviewPanelObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var panel = new GameObject(
+                SessionReviewPanelObjectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(CanvasGroup));
+            panel.name = SessionReviewPanelObjectName;
+            Undo.RegisterCreatedObjectUndo(panel, "Create Session Review Panel");
+            if (canvasTransform != null)
+            {
+                Undo.SetTransformParent(panel.transform, canvasTransform, false, "Parent Session Review Panel");
+            }
+
+            panel.layer = 5;
+            return panel;
+        }
+
+        private static GameObject FindOrCreateSessionReviewButton(Transform canvasTransform)
+        {
+            var existing = GameObject.Find(SessionReviewButtonObjectName);
+            if (existing != null && existing.GetComponent<RectTransform>() != null)
+            {
+                return existing;
+            }
+
+            if (existing != null)
+            {
+                Undo.DestroyObjectImmediate(existing);
+            }
+
+            var button = new GameObject(
+                SessionReviewButtonObjectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(Image),
+                typeof(Button));
+            button.name = SessionReviewButtonObjectName;
+            Undo.RegisterCreatedObjectUndo(button, "Create Session Review Button");
+            if (canvasTransform != null)
+            {
+                Undo.SetTransformParent(button.transform, canvasTransform, false, "Parent Session Review Button");
             }
 
             button.layer = 5;
@@ -821,11 +937,17 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("lineWidthMeters").floatValue = 0.035f;
             serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.11f;
             serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.035f;
+            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.34f;
+            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.055f;
+            serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.018f;
             serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
             serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
             serializedObject.FindProperty("clearOnFailedShotResult").boolValue = true;
             serializedObject.FindProperty("trajectoryColor").colorValue = new Color(0.05f, 0.9f, 1.0f, 1.0f);
             serializedObject.FindProperty("markerColor").colorValue = new Color(1.0f, 0.74f, 0.16f, 1.0f);
+            serializedObject.FindProperty("ghostTrajectoryColor").colorValue = new Color(0.56f, 0.68f, 0.72f, 0.42f);
+            serializedObject.FindProperty("calloutTextColor").colorValue = new Color(0.96f, 1.0f, 1.0f, 1.0f);
+            serializedObject.FindProperty("calloutShadowColor").colorValue = new Color(0.0f, 0.0f, 0.0f, 0.92f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(shotReplayRenderer);
@@ -893,13 +1015,13 @@ namespace QuestBowlingStandalone.Editor
             var raycaster = lockLaneCanvas.GetComponent<OVRRaycaster>();
 
             lockLaneCanvas.layer = 5;
-            rectTransform.localPosition = new Vector3(0.0f, -0.08f, 0.75f);
+            rectTransform.localPosition = new Vector3(0.0f, -0.16f, 0.85f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one * 0.001f;
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.sizeDelta = new Vector2(960.0f, 220.0f);
+            rectTransform.sizeDelta = new Vector2(1320.0f, 320.0f);
 
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = eventCamera;
@@ -994,9 +1116,11 @@ namespace QuestBowlingStandalone.Editor
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 label.text = initialText;
                 label.alignment = TextAnchor.MiddleCenter;
-                label.resizeTextForBestFit = true;
-                label.resizeTextMinSize = 24;
-                label.resizeTextMaxSize = 52;
+                label.fontSize = 40;
+                label.resizeTextForBestFit = false;
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.lineSpacing = 0.9f;
                 label.color = new Color(0.96f, 0.98f, 1.0f, 1.0f);
                 label.raycastTarget = false;
                 EditorUtility.SetDirty(label);
@@ -1022,7 +1146,9 @@ namespace QuestBowlingStandalone.Editor
         private static void ConfigureReplayShotList(
             GameObject replayShotList,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator)
         {
             if (replayShotList == null)
             {
@@ -1031,15 +1157,19 @@ namespace QuestBowlingStandalone.Editor
 
             var rectTransform = replayShotList.GetComponent<RectTransform>();
             var replayList = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList>(replayShotList);
+            var panelImage = GetOrAddComponent<Image>(replayShotList);
 
             replayShotList.layer = 5;
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = new Vector2(220.0f, 0.0f);
+            rectTransform.anchoredPosition = new Vector2(300.0f, -38.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(500.0f, 120.0f);
+            rectTransform.sizeDelta = new Vector2(760.0f, 188.0f);
+
+            panelImage.color = new Color(0.02f, 0.045f, 0.05f, 0.72f);
+            panelImage.raycastTarget = false;
 
             var labelTransform = replayShotList.transform.Find("EmptyLabel");
             Text label;
@@ -1070,34 +1200,297 @@ namespace QuestBowlingStandalone.Editor
                 labelRect.offsetMin = Vector2.zero;
                 labelRect.offsetMax = Vector2.zero;
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.text = "Waiting Shot";
+                label.text = "Ready For Shot";
                 label.alignment = TextAnchor.MiddleCenter;
-                label.resizeTextForBestFit = true;
-                label.resizeTextMinSize = 20;
-                label.resizeTextMaxSize = 42;
+                label.fontSize = 32;
+                label.resizeTextForBestFit = false;
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.lineSpacing = 0.9f;
                 label.color = new Color(0.94f, 1.0f, 1.0f, 1.0f);
                 label.raycastTarget = false;
                 EditorUtility.SetDirty(label);
             }
 
+            var summaryTransform = replayShotList.transform.Find("SessionSummary");
+            Text summaryLabel;
+            if (summaryTransform == null)
+            {
+                var summaryObject = new GameObject("SessionSummary");
+                Undo.RegisterCreatedObjectUndo(summaryObject, "Create Replay List Session Summary");
+                Undo.SetTransformParent(summaryObject.transform, replayShotList.transform, false, "Parent Replay List Session Summary");
+                summaryObject.layer = 5;
+                Undo.AddComponent<RectTransform>(summaryObject);
+                Undo.AddComponent<CanvasRenderer>(summaryObject);
+                summaryLabel = Undo.AddComponent<Text>(summaryObject);
+            }
+            else
+            {
+                summaryLabel = summaryTransform.GetComponent<Text>();
+                if (summaryLabel == null)
+                {
+                    summaryLabel = Undo.AddComponent<Text>(summaryTransform.gameObject);
+                }
+            }
+
+            if (summaryLabel != null)
+            {
+                var summaryRect = summaryLabel.GetComponent<RectTransform>();
+                summaryRect.anchorMin = new Vector2(0.03f, 0.02f);
+                summaryRect.anchorMax = new Vector2(0.97f, 0.40f);
+                summaryRect.offsetMin = Vector2.zero;
+                summaryRect.offsetMax = Vector2.zero;
+                summaryLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                summaryLabel.text = string.Empty;
+                summaryLabel.alignment = TextAnchor.MiddleCenter;
+                summaryLabel.fontSize = 18;
+                summaryLabel.resizeTextForBestFit = false;
+                summaryLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
+                summaryLabel.verticalOverflow = VerticalWrapMode.Truncate;
+                summaryLabel.lineSpacing = 0.9f;
+                summaryLabel.color = new Color(0.72f, 0.84f, 0.84f, 1.0f);
+                summaryLabel.raycastTarget = false;
+                EditorUtility.SetDirty(summaryLabel);
+            }
+
             var serializedObject = new SerializedObject(replayList);
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("shotReplayRenderer").objectReferenceValue = shotReplayRenderer;
+            serializedObject.FindProperty("sessionController").objectReferenceValue = sessionController;
+            serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
             serializedObject.FindProperty("listRoot").objectReferenceValue = rectTransform;
+            serializedObject.FindProperty("panelBackground").objectReferenceValue = panelImage;
             serializedObject.FindProperty("emptyLabel").objectReferenceValue = label;
+            serializedObject.FindProperty("sessionSummaryLabel").objectReferenceValue = summaryLabel;
             serializedObject.FindProperty("maxVisibleShots").intValue = 4;
-            serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(110.0f, 92.0f);
+            serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(164.0f, 96.0f);
             serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
-            serializedObject.FindProperty("emptyText").stringValue = "Waiting Shot";
+            serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 40.0f;
+            serializedObject.FindProperty("emptyText").stringValue = "Ready For Shot";
             serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
+            serializedObject.FindProperty("panelColor").colorValue = new Color(0.02f, 0.045f, 0.05f, 0.72f);
             serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
             serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.16f, 0.44f, 0.48f, 1.0f);
             serializedObject.FindProperty("disabledButtonColor").colorValue = new Color(0.13f, 0.15f, 0.15f, 0.70f);
             serializedObject.FindProperty("labelColor").colorValue = new Color(0.94f, 1.0f, 1.0f, 1.0f);
+            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.72f, 0.84f, 0.84f, 1.0f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(replayList);
+            EditorUtility.SetDirty(panelImage);
             EditorUtility.SetDirty(replayShotList);
+        }
+
+        private static void ConfigureSessionReviewPanel(
+            GameObject sessionReviewPanel,
+            GameObject sessionReviewButton,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList replayList,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer)
+        {
+            if (sessionReviewPanel == null || sessionReviewButton == null)
+            {
+                return;
+            }
+
+            var panelRect = sessionReviewPanel.GetComponent<RectTransform>();
+            var panelImage = GetOrAddComponent<Image>(sessionReviewPanel);
+            var panelCanvasGroup = GetOrAddComponent<CanvasGroup>(sessionReviewPanel);
+            var presenter = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestSessionReviewPanel>(sessionReviewPanel);
+
+            sessionReviewPanel.layer = 5;
+            panelRect.anchorMin = new Vector2(0.5f, 0.5f);
+            panelRect.anchorMax = new Vector2(0.5f, 0.5f);
+            panelRect.pivot = new Vector2(0.5f, 0.5f);
+            panelRect.anchoredPosition = new Vector2(300.0f, 8.0f);
+            panelRect.localRotation = Quaternion.identity;
+            panelRect.localScale = Vector3.one;
+            panelRect.sizeDelta = new Vector2(760.0f, 292.0f);
+
+            panelImage.color = new Color(0.015f, 0.035f, 0.04f, 0.88f);
+            panelImage.raycastTarget = false;
+            panelCanvasGroup.alpha = 0.0f;
+            panelCanvasGroup.interactable = false;
+            panelCanvasGroup.blocksRaycasts = false;
+
+            var buttonRect = sessionReviewButton.GetComponent<RectTransform>();
+            var buttonImage = GetOrAddComponent<Image>(sessionReviewButton);
+            var button = GetOrAddComponent<Button>(sessionReviewButton);
+            sessionReviewButton.layer = 5;
+            buttonRect.anchorMin = new Vector2(0.5f, 0.5f);
+            buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
+            buttonRect.pivot = new Vector2(0.5f, 0.5f);
+            buttonRect.anchoredPosition = new Vector2(650.0f, 116.0f);
+            buttonRect.localRotation = Quaternion.identity;
+            buttonRect.localScale = Vector3.one;
+            buttonRect.sizeDelta = new Vector2(150.0f, 62.0f);
+            buttonImage.color = new Color(0.08f, 0.17f, 0.18f, 0.94f);
+            buttonImage.raycastTarget = true;
+            button.targetGraphic = buttonImage;
+
+            var label = EnsureTextChild(sessionReviewButton.transform, "Label", "Review", 20, TextAnchor.MiddleCenter);
+            var labelRect = label.GetComponent<RectTransform>();
+            labelRect.anchorMin = Vector2.zero;
+            labelRect.anchorMax = Vector2.one;
+            labelRect.offsetMin = Vector2.zero;
+            labelRect.offsetMax = Vector2.zero;
+
+            var serializedObject = new SerializedObject(presenter);
+            serializedObject.FindProperty("shotReplayList").objectReferenceValue = replayList;
+            serializedObject.FindProperty("shotReplayRenderer").objectReferenceValue = shotReplayRenderer;
+            serializedObject.FindProperty("panelCanvasGroup").objectReferenceValue = panelCanvasGroup;
+            serializedObject.FindProperty("panelBackground").objectReferenceValue = panelImage;
+            serializedObject.FindProperty("toggleButton").objectReferenceValue = button;
+            serializedObject.FindProperty("toggleButtonLabel").objectReferenceValue = label;
+            serializedObject.FindProperty("hiddenToggleText").stringValue = "Review";
+            serializedObject.FindProperty("visibleToggleText").stringValue = "Hide";
+            serializedObject.FindProperty("panelColor").colorValue = new Color(0.015f, 0.035f, 0.04f, 0.88f);
+            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
+            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.16f, 0.44f, 0.48f, 1.0f);
+            serializedObject.FindProperty("labelColor").colorValue = new Color(0.94f, 1.0f, 1.0f, 1.0f);
+            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.70f, 0.82f, 0.84f, 1.0f);
+            serializedObject.FindProperty("verboseLogging").boolValue = true;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+
+            EditorUtility.SetDirty(label);
+            EditorUtility.SetDirty(button);
+            EditorUtility.SetDirty(buttonImage);
+            EditorUtility.SetDirty(sessionReviewButton);
+            EditorUtility.SetDirty(panelCanvasGroup);
+            EditorUtility.SetDirty(panelImage);
+            EditorUtility.SetDirty(presenter);
+            EditorUtility.SetDirty(sessionReviewPanel);
+        }
+
+        private static Text EnsureTextChild(Transform parent, string objectName, string text, int fontSize, TextAnchor alignment)
+        {
+            var child = parent.Find(objectName);
+            Text label = null;
+            if (child != null)
+            {
+                label = child.GetComponent<Text>();
+            }
+
+            if (label == null)
+            {
+                GameObject labelObject;
+                if (child == null)
+                {
+                    labelObject = new GameObject(objectName);
+                    Undo.RegisterCreatedObjectUndo(labelObject, $"Create {objectName}");
+                    Undo.SetTransformParent(labelObject.transform, parent, false, $"Parent {objectName}");
+                    labelObject.layer = parent.gameObject.layer;
+                    Undo.AddComponent<RectTransform>(labelObject);
+                    Undo.AddComponent<CanvasRenderer>(labelObject);
+                }
+                else
+                {
+                    labelObject = child.gameObject;
+                }
+
+                label = Undo.AddComponent<Text>(labelObject);
+            }
+
+            label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            label.text = text;
+            label.alignment = alignment;
+            label.fontSize = fontSize;
+            label.resizeTextForBestFit = false;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Truncate;
+            label.color = new Color(0.94f, 1.0f, 1.0f, 1.0f);
+            label.raycastTarget = false;
+            return label;
+        }
+
+        private static void ConfigureExperienceStatusStrip(
+            GameObject statusStrip,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController sessionController,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList replayList,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestSessionReviewPanel sessionReviewPanel)
+        {
+            if (statusStrip == null)
+            {
+                return;
+            }
+
+            var rectTransform = statusStrip.GetComponent<RectTransform>();
+            var background = GetOrAddComponent<Image>(statusStrip);
+            var presenter = GetOrAddComponent<QuestBowlingStandalone.QuestApp.StandaloneQuestExperienceStatusStrip>(statusStrip);
+
+            statusStrip.layer = 5;
+            rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            rectTransform.anchoredPosition = new Vector2(-500.0f, -76.0f);
+            rectTransform.localRotation = Quaternion.identity;
+            rectTransform.localScale = Vector3.one;
+            rectTransform.sizeDelta = new Vector2(300.0f, 154.0f);
+
+            background.color = new Color(0.015f, 0.035f, 0.04f, 0.62f);
+            background.raycastTarget = false;
+
+            var labelTransform = statusStrip.transform.Find("StatusLabel");
+            Text label;
+            if (labelTransform == null)
+            {
+                var labelObject = new GameObject("StatusLabel");
+                Undo.RegisterCreatedObjectUndo(labelObject, "Create Experience Status Label");
+                Undo.SetTransformParent(labelObject.transform, statusStrip.transform, false, "Parent Experience Status Label");
+                labelObject.layer = 5;
+                Undo.AddComponent<RectTransform>(labelObject);
+                Undo.AddComponent<CanvasRenderer>(labelObject);
+                label = Undo.AddComponent<Text>(labelObject);
+            }
+            else
+            {
+                label = labelTransform.GetComponent<Text>();
+                if (label == null)
+                {
+                    label = Undo.AddComponent<Text>(labelTransform.gameObject);
+                }
+            }
+
+            if (label != null)
+            {
+                var labelRect = label.GetComponent<RectTransform>();
+                labelRect.anchorMin = Vector2.zero;
+                labelRect.anchorMax = Vector2.one;
+                labelRect.offsetMin = new Vector2(16.0f, 6.0f);
+                labelRect.offsetMax = new Vector2(-16.0f, -6.0f);
+                label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+                label.text = "Laptop  Connecting\nLane    Needed\nShot    Lock Lane\nShots   0";
+                label.alignment = TextAnchor.MiddleLeft;
+                label.fontSize = 22;
+                label.resizeTextForBestFit = false;
+                label.horizontalOverflow = HorizontalWrapMode.Wrap;
+                label.verticalOverflow = VerticalWrapMode.Truncate;
+                label.lineSpacing = 0.9f;
+                label.color = new Color(1.0f, 0.86f, 0.48f, 1.0f);
+                label.raycastTarget = false;
+                EditorUtility.SetDirty(label);
+            }
+
+            var serializedObject = new SerializedObject(presenter);
+            serializedObject.FindProperty("sessionController").objectReferenceValue = sessionController;
+            serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
+            serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("shotReplayList").objectReferenceValue = replayList;
+            serializedObject.FindProperty("shotReplayRenderer").objectReferenceValue = shotReplayRenderer;
+            serializedObject.FindProperty("sessionReviewPanel").objectReferenceValue = sessionReviewPanel;
+            serializedObject.FindProperty("background").objectReferenceValue = background;
+            serializedObject.FindProperty("label").objectReferenceValue = label;
+            serializedObject.FindProperty("backgroundColor").colorValue = new Color(0.015f, 0.035f, 0.04f, 0.62f);
+            serializedObject.FindProperty("readyColor").colorValue = new Color(0.82f, 1.0f, 0.92f, 1.0f);
+            serializedObject.FindProperty("attentionColor").colorValue = new Color(1.0f, 0.86f, 0.48f, 1.0f);
+            serializedObject.FindProperty("refreshIntervalSeconds").floatValue = 0.20f;
+            serializedObject.ApplyModifiedPropertiesWithoutUndo();
+
+            EditorUtility.SetDirty(background);
+            EditorUtility.SetDirty(presenter);
+            EditorUtility.SetDirty(statusStrip);
         }
 
         private static void ConfigureCoordinator(

@@ -153,6 +153,82 @@ namespace QuestBowlingStandalone.QuestApp
     }
 
     [Serializable]
+    public sealed class StandaloneTrajectoryCoverageStats
+    {
+        public float startSFeet;
+        public float endSFeet;
+        public float trackedDistanceFeet;
+        public float coverageConfidence;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotSpeedStats
+    {
+        public float averageMph;
+        public float earlyMph;
+        public float entryMph;
+        public float speedLossMph;
+        public bool hasAverageSpeed;
+        public bool hasEarlySpeed;
+        public bool hasEntrySpeed;
+        public bool hasSpeedLoss;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotPositionStats
+    {
+        public float arrowsBoard;
+        public float breakpointBoard;
+        public float breakpointDistanceFeet;
+        public float entryBoard;
+        public float boardsCrossed;
+        public bool hasArrowsBoard;
+        public bool hasBreakpoint;
+        public bool hasEntryBoard;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotAngleStats
+    {
+        public float launchAngleDegrees;
+        public float entryAngleDegrees;
+        public float signedEntryAngleDegrees;
+        public float breakpointAngleDegrees;
+        public bool hasLaunchAngle;
+        public bool hasEntryAngle;
+        public bool hasBreakpointAngle;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotStatMilestone
+    {
+        public string kind;
+        public string label;
+        public int frameSeq;
+        public float sMeters;
+        public float xMeters;
+        public float board;
+        public float distanceFeet;
+        public float normalizedReplayTime;
+        public string primaryValue;
+    }
+
+    [Serializable]
+    public sealed class StandaloneShotStats
+    {
+        public string schemaVersion = "shot_stats_v1";
+        public string pointDefinition;
+        public float laneLengthMeters;
+        public float laneWidthMeters;
+        public int boardCount;
+        public StandaloneTrajectoryCoverageStats trajectoryCoverage;
+        public StandaloneShotSpeedStats speed;
+        public StandaloneShotPositionStats positions;
+        public StandaloneShotAngleStats angles;
+        public StandaloneShotStatMilestone[] milestones;
+    }
+
+    [Serializable]
     public sealed class StandaloneShotResult
     {
         public string schemaVersion = "shot_result";
@@ -164,6 +240,7 @@ namespace QuestBowlingStandalone.QuestApp
         public string laneLockRequestId;
         public StandaloneSourceFrameRange sourceFrameRange;
         public StandaloneShotTrackingSummary trackingSummary;
+        public StandaloneShotStats shotStats;
         public StandaloneLaneSpaceBallPoint[] trajectory;
     }
 

@@ -68,6 +68,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         public StandaloneQuestLaneLockUiState State { get; private set; } = StandaloneQuestLaneLockUiState.Idle;
         public string LastStatus { get; private set; } = "pinch_hold_ready";
+        public event Action<StandaloneQuestLaneLockUiState, string> StateChanged;
 
         public string PrimaryActionLabel
         {
@@ -78,19 +79,19 @@ namespace QuestBowlingStandalone.QuestApp
                     case StandaloneQuestLaneLockUiState.PlacingHeads:
                         return "Release To Preview";
                     case StandaloneQuestLaneLockUiState.FullLanePreview:
-                        return "Confirm Lane";
+                        return "Lock Lane";
                     case StandaloneQuestLaneLockUiState.Locked:
-                        return "Lane Locked";
+                        return "Ready";
                     case StandaloneQuestLaneLockUiState.Failed:
-                        return "Pinch Again";
+                        return "Try Again";
                     default:
-                        return "Pinch + Hold";
+                        return "Place Lane";
                 }
             }
         }
 
         public bool PrimaryActionInteractable => State == StandaloneQuestLaneLockUiState.FullLanePreview;
-        public string SecondaryActionLabel => State == StandaloneQuestLaneLockUiState.Locked ? "Relock Lane" : "Retry";
+        public string SecondaryActionLabel => State == StandaloneQuestLaneLockUiState.Locked ? "Relock" : "Retry";
         public bool SecondaryActionVisible =>
             State == StandaloneQuestLaneLockUiState.FullLanePreview ||
             State == StandaloneQuestLaneLockUiState.Locked ||
@@ -151,7 +152,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _pendingResult = null;
-            State = StandaloneQuestLaneLockUiState.Idle;
+            SetState(StandaloneQuestLaneLockUiState.Idle, reason);
             ResetStabilization();
             ClearHeadsPreview();
             laneRenderer?.ClearVisualization(reason);
@@ -162,7 +163,7 @@ namespace QuestBowlingStandalone.QuestApp
         private void BeginPlacement()
         {
             _pendingResult = null;
-            State = StandaloneQuestLaneLockUiState.PlacingHeads;
+            SetState(StandaloneQuestLaneLockUiState.PlacingHeads, "heads_placement_started");
             ResetStabilization();
             laneRenderer?.ClearVisualization("heads_placement_started");
             UpdatePlacementPreview();
@@ -193,7 +194,7 @@ namespace QuestBowlingStandalone.QuestApp
             ClearHeadsPreview();
             _pendingResult = BuildLaneResult(origin, forward, floorPoint, floorNormal, userConfirmed: false);
             laneRenderer?.RenderLaneLockResult(_pendingResult);
-            State = StandaloneQuestLaneLockUiState.FullLanePreview;
+            SetState(StandaloneQuestLaneLockUiState.FullLanePreview, "full_lane_preview");
             SetStatus("full_lane_preview_confirm_or_retry");
         }
 
@@ -222,7 +223,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            State = StandaloneQuestLaneLockUiState.Locked;
+            SetState(StandaloneQuestLaneLockUiState.Locked, "lane_locked");
             laneRenderer?.RenderLaneLockResult(_pendingResult);
             SetStatus("lane_locked");
         }
@@ -694,7 +695,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void Fail(string note)
         {
-            State = StandaloneQuestLaneLockUiState.Failed;
+            SetState(StandaloneQuestLaneLockUiState.Failed, note);
             ClearHeadsPreview();
             laneRenderer?.ClearVisualization(note);
             SetStatus("lane_lock_failed:" + note);
@@ -707,6 +708,17 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 Debug.Log("[StandaloneQuestLaneLockStateCoordinator] " + LastStatus);
             }
+        }
+
+        private void SetState(StandaloneQuestLaneLockUiState nextState, string reason)
+        {
+            if (State == nextState)
+            {
+                return;
+            }
+
+            State = nextState;
+            StateChanged?.Invoke(State, string.IsNullOrWhiteSpace(reason) ? string.Empty : reason);
         }
 
         private static Vector3 ProjectPointToPlane(Vector3 point, Vector3 planePoint, Vector3 planeNormal)

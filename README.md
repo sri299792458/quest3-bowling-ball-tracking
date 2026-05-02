@@ -4,6 +4,8 @@ This repository is the clean starting point for the standalone bowling replay pr
 
 The active product definition lives in [docs/STANDALONE_PRODUCT_GOAL.md](C:/Users/student/QuestBowlingStandalone/docs/STANDALONE_PRODUCT_GOAL.md).
 
+The headset experience and analytics redesign lives in [docs/LIVE_VR_EXPERIENCE_SPEC.md](C:/Users/student/QuestBowlingStandalone/docs/LIVE_VR_EXPERIENCE_SPEC.md).
+
 The detailed lane-lock design lives in [docs/LANE_LOCK_MATH_AND_CONTRACT.md](C:/Users/student/QuestBowlingStandalone/docs/LANE_LOCK_MATH_AND_CONTRACT.md).
 
 ## Working Rules

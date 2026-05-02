@@ -13,6 +13,9 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private float lineWidthMeters = 0.035f;
         [SerializeField] private float markerRadiusMeters = 0.11f;
         [SerializeField] private float verticalOffsetMeters = 0.035f;
+        [SerializeField] private float calloutVerticalOffsetMeters = 0.34f;
+        [SerializeField] private float calloutCharacterSizeMeters = 0.055f;
+        [SerializeField] private float ghostLineWidthMeters = 0.018f;
         [SerializeField] private float minReplayDurationSeconds = 0.75f;
         [SerializeField] private float maxReplayDurationSeconds = 3.0f;
         [SerializeField] private bool clearOnFailedShotResult = true;
@@ -20,15 +23,24 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Colors")]
         [SerializeField] private Color trajectoryColor = new Color(0.05f, 0.9f, 1.0f, 1.0f);
         [SerializeField] private Color markerColor = new Color(1.0f, 0.74f, 0.16f, 1.0f);
+        [SerializeField] private Color ghostTrajectoryColor = new Color(0.56f, 0.68f, 0.72f, 0.42f);
+        [SerializeField] private Color calloutTextColor = new Color(0.96f, 1.0f, 1.0f, 1.0f);
+        [SerializeField] private Color calloutShadowColor = new Color(0.0f, 0.0f, 0.0f, 0.92f);
 
         [Header("Diagnostics")]
         [SerializeField] private bool verboseLogging;
 
         private LineRenderer _lineRenderer;
+        private LineRenderer _ghostLineRenderer;
         private GameObject _markerObject;
+        private GameObject _calloutObject;
+        private TextMesh _calloutText;
+        private TextMesh _calloutShadowText;
         private Material _lineMaterial;
+        private Material _ghostLineMaterial;
         private Material _markerMaterial;
         private Vector3[] _positions = Array.Empty<Vector3>();
+        private StandaloneShotStatMilestone[] _milestones = Array.Empty<StandaloneShotStatMilestone>();
         private float _replayStartTime;
         private float _replayDurationSeconds = 1.0f;
         private bool _isReplaying;
@@ -36,6 +48,7 @@ namespace QuestBowlingStandalone.QuestApp
         public string LastStatus { get; private set; } = string.Empty;
         public int RenderedPointCount => _positions.Length;
         public bool HasReplay { get; private set; }
+        public bool HasGhostReplay { get; private set; }
         public bool IsReplaying => _isReplaying;
 
         private void Awake()
@@ -69,6 +82,12 @@ namespace QuestBowlingStandalone.QuestApp
                 _lineMaterial = null;
             }
 
+            if (_ghostLineMaterial != null)
+            {
+                Destroy(_ghostLineMaterial);
+                _ghostLineMaterial = null;
+            }
+
             if (_markerMaterial != null)
             {
                 Destroy(_markerMaterial);
@@ -94,10 +113,12 @@ namespace QuestBowlingStandalone.QuestApp
             var elapsed = Time.time - _replayStartTime;
             var t = Mathf.Clamp01(elapsed / Mathf.Max(0.001f, _replayDurationSeconds));
             _markerObject.transform.position = SampleTrajectory(t);
+            UpdateCallout(t);
 
             if (t >= 1.0f)
             {
                 _isReplaying = false;
+                UpdateCallout(1.0f);
                 SetStatus("shot_replay_complete");
             }
         }
@@ -130,6 +151,9 @@ namespace QuestBowlingStandalone.QuestApp
             EnsureRenderObjects();
 
             _positions = BuildWorldPositions(result);
+            _milestones = result.shotStats != null && result.shotStats.milestones != null
+                ? result.shotStats.milestones
+                : Array.Empty<StandaloneShotStatMilestone>();
             _replayDurationSeconds = ComputeReplayDurationSeconds(result);
             HasReplay = _positions.Length > 0;
 
@@ -142,6 +166,29 @@ namespace QuestBowlingStandalone.QuestApp
             _markerObject.transform.localScale = Vector3.one * Mathf.Max(0.01f, markerRadiusMeters * 2.0f);
 
             StartReplay("shot_replay_started");
+        }
+
+        public void RenderGhostShotResult(StandaloneShotResult result)
+        {
+            if (result == null || result.trajectory == null || result.trajectory.Length < 2)
+            {
+                ClearGhostReplay();
+                return;
+            }
+
+            EnsureRenderObjects();
+            var positions = BuildWorldPositions(result);
+            if (positions.Length < 2)
+            {
+                ClearGhostReplay();
+                return;
+            }
+
+            _ghostLineRenderer.positionCount = positions.Length;
+            _ghostLineRenderer.SetPositions(positions);
+            _ghostLineRenderer.enabled = true;
+            HasGhostReplay = true;
+            SetStatus("shot_ghost_rendered");
         }
 
         public bool ReplayLatest(out string note)
@@ -172,17 +219,24 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 _lineRenderer.enabled = _positions.Length > 1;
             }
+            if (_calloutObject != null)
+            {
+                _calloutObject.SetActive(false);
+            }
 
             _replayStartTime = Time.time;
             _isReplaying = true;
+            UpdateCallout(0.0f);
             SetStatus($"{status} points={_positions.Length}");
         }
 
         public void ClearReplay(string reason)
         {
             _positions = Array.Empty<Vector3>();
+            _milestones = Array.Empty<StandaloneShotStatMilestone>();
             _isReplaying = false;
             HasReplay = false;
+            ClearGhostReplay();
 
             if (_lineRenderer != null)
             {
@@ -195,7 +249,22 @@ namespace QuestBowlingStandalone.QuestApp
                 _markerObject.SetActive(false);
             }
 
+            if (_calloutObject != null)
+            {
+                _calloutObject.SetActive(false);
+            }
+
             SetStatus(string.IsNullOrWhiteSpace(reason) ? "shot_replay_cleared" : reason);
+        }
+
+        public void ClearGhostReplay()
+        {
+            HasGhostReplay = false;
+            if (_ghostLineRenderer != null)
+            {
+                _ghostLineRenderer.positionCount = 0;
+                _ghostLineRenderer.enabled = false;
+            }
         }
 
         private void Subscribe()
@@ -247,6 +316,30 @@ namespace QuestBowlingStandalone.QuestApp
             _lineMaterial.color = trajectoryColor;
             _lineRenderer.sharedMaterial = _lineMaterial;
 
+            if (_ghostLineRenderer == null)
+            {
+                var ghostLineObject = new GameObject("StandaloneShotReplayGhostTrajectory");
+                ghostLineObject.transform.SetParent(parent, false);
+                _ghostLineRenderer = ghostLineObject.AddComponent<LineRenderer>();
+                _ghostLineRenderer.useWorldSpace = true;
+                _ghostLineRenderer.numCornerVertices = 3;
+                _ghostLineRenderer.numCapVertices = 3;
+                _ghostLineRenderer.textureMode = LineTextureMode.Stretch;
+            }
+
+            _ghostLineRenderer.startWidth = Mathf.Max(0.003f, ghostLineWidthMeters);
+            _ghostLineRenderer.endWidth = Mathf.Max(0.003f, ghostLineWidthMeters);
+            _ghostLineRenderer.startColor = ghostTrajectoryColor;
+            _ghostLineRenderer.endColor = ghostTrajectoryColor;
+
+            if (_ghostLineMaterial == null)
+            {
+                _ghostLineMaterial = CreateColorMaterial("StandaloneShotReplayGhostLineMaterial", ghostTrajectoryColor);
+            }
+
+            _ghostLineMaterial.color = ghostTrajectoryColor;
+            _ghostLineRenderer.sharedMaterial = _ghostLineMaterial;
+
             if (_markerObject == null)
             {
                 _markerObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
@@ -269,6 +362,29 @@ namespace QuestBowlingStandalone.QuestApp
             if (renderer != null)
             {
                 renderer.sharedMaterial = _markerMaterial;
+            }
+
+            if (_calloutObject == null)
+            {
+                _calloutObject = new GameObject("StandaloneShotReplayCallout");
+                _calloutObject.transform.SetParent(parent, false);
+                _calloutText = _calloutObject.AddComponent<TextMesh>();
+                _calloutText.anchor = TextAnchor.MiddleCenter;
+                _calloutText.alignment = TextAlignment.Center;
+                _calloutText.fontSize = 96;
+                _calloutText.characterSize = Mathf.Max(0.01f, calloutCharacterSizeMeters);
+                _calloutText.color = calloutTextColor;
+
+                var shadowObject = new GameObject("Shadow");
+                shadowObject.transform.SetParent(_calloutObject.transform, false);
+                shadowObject.transform.localPosition = new Vector3(0.018f, -0.018f, 0.018f);
+                _calloutShadowText = shadowObject.AddComponent<TextMesh>();
+                _calloutShadowText.anchor = TextAnchor.MiddleCenter;
+                _calloutShadowText.alignment = TextAlignment.Center;
+                _calloutShadowText.fontSize = 96;
+                _calloutShadowText.characterSize = Mathf.Max(0.01f, calloutCharacterSizeMeters);
+                _calloutShadowText.color = calloutShadowColor;
+                _calloutObject.SetActive(false);
             }
         }
 
@@ -318,6 +434,84 @@ namespace QuestBowlingStandalone.QuestApp
             var endIndex = Mathf.Min(startIndex + 1, _positions.Length - 1);
             var localT = scaled - startIndex;
             return Vector3.Lerp(_positions[startIndex], _positions[endIndex], localT);
+        }
+
+        private void UpdateCallout(float normalizedTime)
+        {
+            if (_calloutObject == null || _calloutText == null || _positions.Length == 0 || _milestones.Length == 0)
+            {
+                return;
+            }
+
+            var milestone = ActiveMilestone(normalizedTime);
+            if (milestone == null || string.IsNullOrWhiteSpace(milestone.primaryValue))
+            {
+                _calloutObject.SetActive(false);
+                return;
+            }
+
+            var label = string.IsNullOrWhiteSpace(milestone.label) ? string.Empty : milestone.label.Trim();
+            var value = milestone.primaryValue.Trim();
+            var text = string.IsNullOrWhiteSpace(label) ? value : label + "\n" + value;
+            _calloutText.text = text;
+            _calloutText.characterSize = Mathf.Max(0.01f, calloutCharacterSizeMeters);
+            _calloutText.color = calloutTextColor;
+            if (_calloutShadowText != null)
+            {
+                _calloutShadowText.text = text;
+                _calloutShadowText.characterSize = Mathf.Max(0.01f, calloutCharacterSizeMeters);
+                _calloutShadowText.color = calloutShadowColor;
+            }
+            _calloutObject.transform.position = SampleTrajectory(milestone.normalizedReplayTime)
+                + Vector3.up * Mathf.Max(0.0f, calloutVerticalOffsetMeters);
+            FaceCamera(_calloutObject.transform);
+            _calloutObject.SetActive(true);
+        }
+
+        private StandaloneShotStatMilestone ActiveMilestone(float normalizedTime)
+        {
+            StandaloneShotStatMilestone active = null;
+            var bestTime = -1.0f;
+            var t = Mathf.Clamp01(normalizedTime);
+            for (var index = 0; index < _milestones.Length; index++)
+            {
+                var milestone = _milestones[index];
+                if (milestone == null)
+                {
+                    continue;
+                }
+
+                var milestoneTime = Mathf.Clamp01(milestone.normalizedReplayTime);
+                if (milestoneTime <= t + 0.025f && milestoneTime >= bestTime)
+                {
+                    bestTime = milestoneTime;
+                    active = milestone;
+                }
+            }
+
+            return active;
+        }
+
+        private void FaceCamera(Transform target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                return;
+            }
+
+            var toCamera = target.position - camera.transform.position;
+            if (toCamera.sqrMagnitude <= 0.0001f)
+            {
+                return;
+            }
+
+            target.rotation = Quaternion.LookRotation(toCamera.normalized, Vector3.up);
         }
 
         private Material CreateColorMaterial(string materialName, Color color)

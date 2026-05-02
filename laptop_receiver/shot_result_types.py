@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from laptop_receiver.lane_lock_types import LaneSpaceBallPoint, SourceFrameRange
+from laptop_receiver.shot_stats import ShotStats
 
 
 SHOT_RESULT_SCHEMA_VERSION = "shot_result"
@@ -72,6 +73,7 @@ class ShotResult:
     lane_lock_request_id: str
     source_frame_range: SourceFrameRange
     tracking_summary: ShotTrackingSummary
+    shot_stats: ShotStats | None
     trajectory: list[LaneSpaceBallPoint]
 
     @classmethod
@@ -101,7 +103,7 @@ class ShotResult:
                 raise ValueError(f"shot_result trajectory[{index}] shotId mismatch.")
             trajectory.append(lane_point)
 
-        return cls(
+        result = cls(
             schema_version=schema_version,
             session_id=session_id,
             shot_id=shot_id,
@@ -111,8 +113,16 @@ class ShotResult:
             lane_lock_request_id=_str(payload.get("laneLockRequestId")),
             source_frame_range=SourceFrameRange.from_dict(payload.get("sourceFrameRange")),
             tracking_summary=ShotTrackingSummary.from_dict(payload.get("trackingSummary")),
+            shot_stats=(
+                ShotStats.from_dict(payload.get("shotStats"))
+                if payload.get("shotStats") is not None
+                else None
+            ),
             trajectory=trajectory,
         )
+        if result.success and result.shot_stats is None:
+            raise ValueError("successful shot_result requires shotStats.")
+        return result
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -125,5 +135,6 @@ class ShotResult:
             "laneLockRequestId": self.lane_lock_request_id,
             "sourceFrameRange": self.source_frame_range.to_dict(),
             "trackingSummary": self.tracking_summary.to_dict(),
+            "shotStats": self.shot_stats.to_dict() if self.shot_stats is not None else None,
             "trajectory": [point.to_dict() for point in self.trajectory],
         }
