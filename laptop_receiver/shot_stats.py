@@ -18,6 +18,9 @@ ENTRY_BOARD_DISTANCE_FEET = 59.5
 ENTRY_SPEED_START_FEET = 57.0
 EARLY_SPEED_DISTANCE_FEET = 3.0
 EARLY_ANGLE_DISTANCE_FEET = 10.0
+MIN_STATS_PROJECTION_CONFIDENCE = 0.20
+STATS_LATERAL_MARGIN_METERS = 0.10
+STATS_DOWNLANE_MARGIN_METERS = 0.25
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -298,6 +301,36 @@ def _ordered_samples(trajectory: Sequence[LaneSpaceBallPoint]) -> list[_Sample]:
     return samples
 
 
+def _finite(*values: float) -> bool:
+    return all(math.isfinite(float(value)) for value in values)
+
+
+def _is_valid_stat_sample(sample: _Sample, lane_lock: LaneLockResult) -> bool:
+    point = sample.point
+    if point.lane_point is None:
+        return False
+    if not bool(point.is_on_locked_lane):
+        return False
+    if float(point.projection_confidence) < MIN_STATS_PROJECTION_CONFIDENCE:
+        return False
+    if not _finite(float(sample.x), float(sample.s), float(sample.t)):
+        return False
+
+    lane_width = max(float(lane_lock.lane_width_meters), 0.01)
+    lane_length = max(float(lane_lock.lane_length_meters), 0.01)
+    if abs(float(sample.x)) > lane_width * 0.5 + STATS_LATERAL_MARGIN_METERS:
+        return False
+    if float(sample.s) < -STATS_DOWNLANE_MARGIN_METERS:
+        return False
+    if float(sample.s) > lane_length + STATS_DOWNLANE_MARGIN_METERS:
+        return False
+    return True
+
+
+def _valid_stat_samples(samples: Sequence[_Sample], lane_lock: LaneLockResult) -> list[_Sample]:
+    return [sample for sample in samples if _is_valid_stat_sample(sample, lane_lock)]
+
+
 def _board_from_x(x_meters: float, lane_width_meters: float, board_count: int = BOARD_COUNT) -> float:
     board_width = max(float(lane_width_meters) / float(board_count), 1e-9)
     return ((float(lane_width_meters) * 0.5 - float(x_meters)) / board_width) + 0.5
@@ -307,6 +340,16 @@ def _normalized_time(index: float, count: int) -> float:
     if count <= 1:
         return 0.0
     return max(0.0, min(1.0, float(index) / float(count - 1)))
+
+
+def _normalized_sample_time(sample: _Sample, samples: Sequence[_Sample]) -> float:
+    if len(samples) <= 1:
+        return 0.0
+    start_t = float(samples[0].t)
+    end_t = float(samples[-1].t)
+    if end_t > start_t + 1e-4:
+        return max(0.0, min(1.0, (float(sample.t) - start_t) / (end_t - start_t)))
+    return _normalized_time(sample.index, len(samples))
 
 
 def _interpolate_at_s(samples: Sequence[_Sample], target_s: float) -> _Sample | None:
@@ -422,9 +465,9 @@ def build_shot_stats(
     trajectory: Sequence[LaneSpaceBallPoint],
     lane_lock: LaneLockResult,
 ) -> ShotStats:
-    samples = _ordered_samples(trajectory)
+    samples = _valid_stat_samples(_ordered_samples(trajectory), lane_lock)
     if len(samples) < 2:
-        raise RuntimeError("Cannot compute shot stats from fewer than two trajectory points.")
+        raise RuntimeError("Cannot compute shot stats from fewer than two valid trajectory points.")
 
     lane_width = float(lane_lock.lane_width_meters)
     lane_length = float(lane_lock.lane_length_meters)
@@ -500,7 +543,7 @@ def build_shot_stats(
                 x_meters=float(speed_sample.x),
                 board=_board_from_x(speed_sample.x, lane_width),
                 distance_feet=float(speed_sample.s) * METERS_TO_FEET,
-                normalized_replay_time=_normalized_time(speed_sample.index, len(samples)),
+                normalized_replay_time=_normalized_sample_time(speed_sample, samples),
                 primary_value=_format_mph(speed_value),
             )
         )
@@ -514,7 +557,7 @@ def build_shot_stats(
                 x_meters=float(arrows.x),
                 board=arrows_board,
                 distance_feet=ARROWS_DISTANCE_FEET,
-                normalized_replay_time=_normalized_time(arrows.index, len(samples)),
+                normalized_replay_time=_normalized_sample_time(arrows, samples),
                 primary_value=_format_board(arrows_board),
             )
         )
@@ -527,7 +570,7 @@ def build_shot_stats(
             x_meters=float(breakpoint.x),
             board=breakpoint_board,
             distance_feet=float(breakpoint.s) * METERS_TO_FEET,
-            normalized_replay_time=_normalized_time(breakpoint.index, len(samples)),
+            normalized_replay_time=_normalized_sample_time(breakpoint, samples),
             primary_value=f"{breakpoint_board:.1f} @ {float(breakpoint.s) * METERS_TO_FEET:.0f} ft",
         )
     )
@@ -541,7 +584,7 @@ def build_shot_stats(
                 x_meters=float(entry.x),
                 board=entry_board,
                 distance_feet=ENTRY_BOARD_DISTANCE_FEET,
-                normalized_replay_time=_normalized_time(entry.index, len(samples)),
+                normalized_replay_time=_normalized_sample_time(entry, samples),
                 primary_value=f"{entry_board:.1f} board, {abs(entry_angle):.1f} deg",
             )
         )

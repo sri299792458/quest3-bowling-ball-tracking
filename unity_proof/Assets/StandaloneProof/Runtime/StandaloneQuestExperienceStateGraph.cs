@@ -108,7 +108,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.SessionNotActive,
                     "session_not_active",
                     "Laptop Connecting",
-                    hasShots);
+                    hasShots,
+                    showShotSurfaces: false);
             }
 
             if (!input.MediaReady)
@@ -117,7 +118,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.MediaNotReady,
                     CleanReason(input.MediaReason, "media_not_ready"),
                     "Media Stream Not Ready",
-                    hasShots);
+                    hasShots,
+                    showShotSurfaces: false);
             }
 
             if (!input.MetadataConnected)
@@ -126,7 +128,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.MetadataDisconnected,
                     "metadata_not_connected",
                     "Metadata Reconnecting",
-                    hasShots);
+                    hasShots,
+                    showShotSurfaces: false);
             }
 
             if (!input.ResultsConnected)
@@ -135,7 +138,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.ResultsDisconnected,
                     "results_not_connected",
                     "Results Reconnecting",
-                    hasShots);
+                    hasShots,
+                    showShotSurfaces: false);
             }
 
             if (input.ReviewOpen)
@@ -177,10 +181,11 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (!input.PipelineReady)
             {
+                var pipelineReason = CleanReason(input.PipelineReason, "pipeline_busy");
                 return Block(
                     StandaloneQuestExperienceBlocker.PipelineBusy,
-                    CleanReason(input.PipelineReason, "pipeline_busy"),
-                    "Processing Shot",
+                    pipelineReason,
+                    PipelineBlockerLabel(pipelineReason),
                     hasShots);
             }
 
@@ -286,9 +291,11 @@ namespace QuestBowlingStandalone.QuestApp
             StandaloneQuestExperienceBlocker blocker,
             string reasonCode,
             string blockerLabel,
-            bool hasShots)
+            bool hasShots,
+            bool showShotSurfaces = true)
         {
             var label = CleanLabel(blockerLabel, "Not Ready");
+            var surfacesVisible = hasShots && showShotSurfaces;
             return new StandaloneQuestExperienceState(
                 shotReady: false,
                 displayText: ShotNotReadyHeader + "\n" + label,
@@ -296,8 +303,16 @@ namespace QuestBowlingStandalone.QuestApp
                 blockerLabel: label,
                 blocker: blocker,
                 hasSuccessfulShots: hasShots,
-                shotRailVisible: hasShots,
-                reviewButtonVisible: hasShots);
+                shotRailVisible: surfacesVisible,
+                reviewButtonVisible: surfacesVisible);
+        }
+
+        private static string PipelineBlockerLabel(string reason)
+        {
+            var cleanReason = CleanReason(reason, "pipeline_busy");
+            return cleanReason == "pipeline_status_missing" || cleanReason == "pipeline_starting"
+                ? "Laptop Preparing"
+                : "Processing Shot";
         }
 
         private static string CleanLabel(string value, string fallback)

@@ -716,6 +716,17 @@ class LiveShotBoundaryDetector:
             return None
 
         metadata = decoded_frame.metadata or {}
+        image_height, image_width = decoded_frame.image_bgr.shape[:2]
+        metadata_width = _int(metadata.get("width"), image_width)
+        metadata_height = _int(metadata.get("height"), image_height)
+        if (
+            image_width != int(intrinsics.width)
+            or image_height != int(intrinsics.height)
+            or metadata_width != image_width
+            or metadata_height != image_height
+        ):
+            return None
+
         frame_state = FrameCameraState.from_frame_metadata(metadata)
         try:
             lane_space_point = project_ball_image_point_to_lane_space(

@@ -211,7 +211,16 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
         or requested_fps <= 0.0
         or abs(probed_fps - requested_fps) > 0.5
     )
-    video_info = fallback_video_info if should_prefer_fallback else probed_video_info
+    if should_prefer_fallback:
+        video_info = VideoStreamInfo(
+            width=probed_video_info.width if probed_video_info.width > 0 else fallback_video_info.width,
+            height=probed_video_info.height if probed_video_info.height > 0 else fallback_video_info.height,
+            fps=fallback_video_info.fps,
+            frame_count=fallback_video_info.frame_count,
+            duration_seconds=fallback_video_info.duration_seconds,
+        )
+    else:
+        video_info = probed_video_info
 
     return LocalClipArtifact(
         root_dir=root_path,

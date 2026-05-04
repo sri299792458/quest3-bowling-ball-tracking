@@ -21,6 +21,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Vector2 shotButtonSize = new Vector2(164.0f, 96.0f);
         [SerializeField] private float shotButtonSpacing = 10.0f;
         [SerializeField] private float shotButtonRowYOffset = 40.0f;
+        [SerializeField] private float transientFailureMessageSeconds = 2.75f;
         [SerializeField] private string emptyText = string.Empty;
         [SerializeField] private string shotLabelPrefix = "Shot ";
         [SerializeField] private Color panelColor = new Color(0.02f, 0.045f, 0.05f, 0.72f);
@@ -35,6 +36,8 @@ namespace QuestBowlingStandalone.QuestApp
         private readonly List<Button> _shotButtons = new List<Button>();
         private int _selectedShotIndex = -1;
         private string _activeSessionId = string.Empty;
+        private string _transientMessage = string.Empty;
+        private float _transientMessageUntil;
         private bool _experienceVisible = true;
 
         public event Action ShotsChanged;
@@ -55,6 +58,11 @@ namespace QuestBowlingStandalone.QuestApp
         private void Update()
         {
             TrackSessionIdentity();
+            if (!string.IsNullOrWhiteSpace(_transientMessage) && Time.time >= _transientMessageUntil)
+            {
+                _transientMessage = string.Empty;
+                RefreshList();
+            }
         }
 
         private void OnEnable()
@@ -127,9 +135,17 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void TrackSessionIdentity()
         {
-            var sessionId = sessionController != null ? sessionController.ActiveSessionId : string.Empty;
+            var sessionId = sessionController != null && sessionController.IsSessionActive
+                ? sessionController.ActiveSessionId
+                : string.Empty;
             if (string.IsNullOrWhiteSpace(sessionId))
             {
+                if (!string.IsNullOrWhiteSpace(_activeSessionId))
+                {
+                    _activeSessionId = string.Empty;
+                    ClearShots("session_inactive");
+                }
+
                 return;
             }
 
@@ -163,33 +179,26 @@ namespace QuestBowlingStandalone.QuestApp
         {
             if (result == null)
             {
-                SetEmptyLabel("No Replay");
+                ShowTransientMessage("No Replay");
                 SetStatus("shot_result_missing");
                 return;
             }
 
             if (!result.success)
             {
-                if (_shots.Count == 0)
-                {
-                    SetEmptyLabel(_failureToLabel(result.failureReason));
-                }
-
+                ShowTransientMessage(_failureToLabel(result.failureReason));
                 SetStatus("shot_result_failed:" + (result.failureReason ?? string.Empty));
                 return;
             }
 
             if (result.trajectory == null || result.trajectory.Length == 0)
             {
-                if (_shots.Count == 0)
-                {
-                    SetEmptyLabel("No Replay");
-                }
-
+                ShowTransientMessage("No Replay");
                 SetStatus("shot_result_empty_trajectory");
                 return;
             }
 
+            _transientMessage = string.Empty;
             _shots.Add(new ShotRecord(_shots.Count + 1, result));
             _selectedShotIndex = _shots.Count - 1;
             RefreshList();
@@ -256,6 +265,7 @@ namespace QuestBowlingStandalone.QuestApp
         {
             _shots.Clear();
             _selectedShotIndex = -1;
+            _transientMessage = string.Empty;
 
             if (shotReplayRenderer != null)
             {
@@ -349,14 +359,16 @@ namespace QuestBowlingStandalone.QuestApp
 
             var hasShots = _shots.Count > 0;
             var railVisible = hasShots && _experienceVisible;
+            var messageVisible = _experienceVisible && !string.IsNullOrWhiteSpace(_transientMessage);
             if (panelBackground != null)
             {
-                panelBackground.enabled = railVisible;
+                panelBackground.enabled = railVisible || messageVisible;
             }
 
             if (emptyLabel != null)
             {
-                emptyLabel.gameObject.SetActive(false);
+                emptyLabel.text = messageVisible ? _transientMessage : emptyText;
+                emptyLabel.gameObject.SetActive(messageVisible || (!hasShots && _experienceVisible && !string.IsNullOrWhiteSpace(emptyText)));
             }
 
             for (var index = 0; index < _shotButtons.Count; index++)
@@ -641,29 +653,45 @@ namespace QuestBowlingStandalone.QuestApp
             }
         }
 
+        private void ShowTransientMessage(string value)
+        {
+            _transientMessage = string.IsNullOrWhiteSpace(value) ? "Replay Unavailable" : value.Trim();
+            _transientMessageUntil = Time.time + Mathf.Max(0.5f, transientFailureMessageSeconds);
+            RefreshList();
+        }
+
         private string _failureToLabel(string failureReason)
         {
             if (string.IsNullOrWhiteSpace(failureReason))
             {
-                return "No Replay";
+                return "Replay Unavailable";
             }
 
-            if (failureReason.StartsWith("lane_lock_result_missing") || failureReason.StartsWith("lane_lock_confirm_missing"))
+            if (failureReason.StartsWith("shot_boundary_lane_lock_request_missing")
+                || failureReason.StartsWith("lane_lock_result_missing")
+                || failureReason.StartsWith("lane_lock_confirm_missing"))
             {
-                return "Lock Lane First";
+                return "Relock Lane";
             }
 
-            if (failureReason.StartsWith("yolo_detection_failed"))
+            if (failureReason.StartsWith("yolo_detection_failed")
+                || failureReason.StartsWith("shot_start_not_found"))
             {
                 return "Ball Not Found";
             }
 
-            if (failureReason.StartsWith("sam2_tracking_failed"))
+            if (failureReason.StartsWith("sam2_tracking_failed")
+                || failureReason.StartsWith("camera_sam2_track_missing"))
             {
-                return "Track Failed";
+                return "Track Lost";
             }
 
-            return "Replay Failed";
+            if (failureReason.StartsWith("lane_projection_failed"))
+            {
+                return "Projection Failed";
+            }
+
+            return "Replay Unavailable";
         }
 
         private void SetStatus(string status)

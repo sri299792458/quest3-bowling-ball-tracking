@@ -98,11 +98,13 @@ namespace QuestBowlingStandalone.QuestApp
         private LineRenderer _headsOutlineRenderer;
         private Material _headsSurfaceMaterial;
         private Material _headsOutlineMaterial;
+        private string _activeSessionId = string.Empty;
 
         public StandaloneQuestLaneLockUiState State { get; private set; } = StandaloneQuestLaneLockUiState.Idle;
         public string LastStatus { get; private set; } = "pinch_hold_ready";
         public event Action<StandaloneQuestLaneLockUiState, string> StateChanged;
 
+        public string CurrentConfirmedLaneLockRequestId { get; private set; } = string.Empty;
         public StandaloneQuestLaneLockPresentation Presentation => ResolvePresentation();
         public string PrimaryActionLabel => Presentation.PrimaryLabel;
         public bool PrimaryActionVisible => Presentation.PrimaryVisible;
@@ -112,6 +114,20 @@ namespace QuestBowlingStandalone.QuestApp
         public bool SecondaryActionInteractable => Presentation.SecondaryInteractable;
         public string ReadinessBlockerLabel => Presentation.ReadinessBlockerLabel;
         public bool LaneInteractionReady => TryGetLaneInteractionReadiness(out _, out _);
+        public bool TryGetCurrentLaneUp(out Vector3 laneUp)
+        {
+            laneUp = Vector3.up;
+            if (State != StandaloneQuestLaneLockUiState.Locked || _pendingResult == null)
+            {
+                return false;
+            }
+
+            laneUp = _pendingResult.floorPlaneNormalWorld.sqrMagnitude > 0.0001f
+                ? _pendingResult.floorPlaneNormalWorld.normalized
+                : Vector3.up;
+            return true;
+        }
+
         public string LaneInteractionBlockerLabel
         {
             get
@@ -130,6 +146,11 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void Update()
         {
+            if (TrackSessionIdentity())
+            {
+                return;
+            }
+
             var pinching = IsPinching();
             var pinchStarted = pinching && !_wasPinching;
             var pinchReleased = !pinching && _wasPinching;
@@ -173,6 +194,39 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _wasPinching = pinching;
+        }
+
+        private bool TrackSessionIdentity()
+        {
+            var sessionId = sessionController != null && sessionController.IsSessionActive
+                ? sessionController.ActiveSessionId
+                : string.Empty;
+            if (string.IsNullOrWhiteSpace(sessionId))
+            {
+                if (!string.IsNullOrWhiteSpace(_activeSessionId))
+                {
+                    _activeSessionId = string.Empty;
+                    ResetLane("session_inactive");
+                    return true;
+                }
+
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_activeSessionId))
+            {
+                _activeSessionId = sessionId;
+                return false;
+            }
+
+            if (_activeSessionId == sessionId)
+            {
+                return false;
+            }
+
+            _activeSessionId = sessionId;
+            ResetLane("session_changed");
+            return true;
         }
 
         public void HandlePrimaryAction()
@@ -364,6 +418,7 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             _pendingResult = null;
+            CurrentConfirmedLaneLockRequestId = string.Empty;
             _ignorePinchUntilReleased = false;
             SetState(StandaloneQuestLaneLockUiState.Idle, reason);
             ResetStabilization();
@@ -376,6 +431,7 @@ namespace QuestBowlingStandalone.QuestApp
         private void EnterArmedForPlacement(string reason)
         {
             _pendingResult = null;
+            CurrentConfirmedLaneLockRequestId = string.Empty;
             _ignorePinchUntilReleased = IsPinching();
             SetState(StandaloneQuestLaneLockUiState.ArmedForPlacement, string.IsNullOrWhiteSpace(reason) ? "lane_placement_armed" : reason);
             ResetStabilization();
@@ -438,18 +494,20 @@ namespace QuestBowlingStandalone.QuestApp
             _pendingResult.lockState = "Locked";
             _ignorePinchUntilReleased = false;
 
-            if (!TryPublishConfirmedLane(_pendingResult, out var publishNote))
-            {
-                Fail(publishNote);
-                return;
-            }
-
             if (!TryApplyLaneLockToProofCapture(_pendingResult, out var note))
             {
                 Fail(note);
                 return;
             }
 
+            if (!TryPublishConfirmedLane(_pendingResult, out var publishNote))
+            {
+                ClearProofCaptureLaneLock();
+                Fail(publishNote);
+                return;
+            }
+
+            CurrentConfirmedLaneLockRequestId = _pendingResult.requestId ?? string.Empty;
             SetState(StandaloneQuestLaneLockUiState.Locked, "lane_locked");
             laneRenderer?.RenderLaneLockResult(_pendingResult);
             SetStatus("lane_locked");
@@ -932,6 +990,7 @@ namespace QuestBowlingStandalone.QuestApp
 
         private void Fail(string note)
         {
+            CurrentConfirmedLaneLockRequestId = string.Empty;
             _ignorePinchUntilReleased = false;
             SetState(StandaloneQuestLaneLockUiState.Failed, note);
             ClearHeadsPreview();
@@ -978,16 +1037,6 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 blockerLabel = "Results Reconnecting";
                 reason = "results_not_connected";
-                return false;
-            }
-
-            if (!liveResultReceiver.IsPipelineReady)
-            {
-                blockerLabel = "Processing Shot";
-                var pipelineStatus = liveResultReceiver.LastPipelineStatus;
-                reason = pipelineStatus != null && !string.IsNullOrWhiteSpace(pipelineStatus.reason)
-                    ? pipelineStatus.reason
-                    : "pipeline_busy";
                 return false;
             }
 

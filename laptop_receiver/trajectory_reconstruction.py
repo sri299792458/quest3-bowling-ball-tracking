@@ -40,8 +40,16 @@ class TrajectoryReconstructionConfig:
     velocity_sigma_s_mps: float = 4.50
     max_terminal_frames: int = 8
     terminal_speed_cap_m_per_frame: float = 0.55
-    pin_deck_completion_margin_meters: float = 4.20
+    terminal_confidence_scale: float = 0.55
+    pin_deck_completion_margin_meters: float = 5.25
     pin_deck_completion_half_width_fraction: float = 0.92
+    pin_deck_completion_edge_guard_fraction: float = 0.96
+    pin_deck_completion_max_frames: int = 36
+    pin_deck_completion_min_speed_m_per_frame: float = 0.14
+    min_projection_confidence: float = 0.20
+    min_measurement_confidence: float = 0.05
+    measurement_lateral_margin_meters: float = 0.10
+    smoothing_lateral_margin_meters: float = 0.12
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,10 @@ class LaneSpaceTrajectoryMeasurement:
     @property
     def confidence(self) -> float:
         return float(self.source_point.projection_confidence) * max(0.0, min(1.0, float(self.mask_quality)))
+
+
+def _finite(*values: float) -> bool:
+    return all(math.isfinite(float(value)) for value in values)
 
 
 def _float(value: Any, default: float = 0.0) -> float:
@@ -119,6 +131,51 @@ def _measurement_image_point(row: Mapping[str, str], config: TrajectoryReconstru
     )
 
 
+def _validate_image_geometry(artifact: Any, intrinsics: CameraIntrinsics) -> None:
+    video_info = getattr(artifact, "video_info", None)
+    if video_info is not None:
+        video_width = int(getattr(video_info, "width", 0) or 0)
+        video_height = int(getattr(video_info, "height", 0) or 0)
+        if video_width > 0 and video_height > 0 and (video_width != intrinsics.width or video_height != intrinsics.height):
+            raise RuntimeError(
+                "decoded_video_metadata_size_mismatch:"
+                f" decoded={video_width}x{video_height} metadata={intrinsics.width}x{intrinsics.height}"
+            )
+
+    for index, metadata in enumerate(getattr(artifact, "frame_metadata", []) or []):
+        width = _int(metadata.get("width"), intrinsics.width)
+        height = _int(metadata.get("height"), intrinsics.height)
+        if width != intrinsics.width or height != intrinsics.height:
+            frame_seq = _int(metadata.get("frameSeq"), index)
+            raise RuntimeError(
+                "frame_metadata_size_mismatch:"
+                f" frameSeq={frame_seq} frame={width}x{height} metadata={intrinsics.width}x{intrinsics.height}"
+            )
+
+
+def _measurement_lateral_limit(lane_lock: LaneLockResult, config: TrajectoryReconstructionConfig) -> float:
+    return max(0.01, float(lane_lock.lane_width_meters) * 0.5 + float(config.measurement_lateral_margin_meters))
+
+
+def _is_usable_measurement(
+    measurement: LaneSpaceTrajectoryMeasurement,
+    lane_lock: LaneLockResult,
+    config: TrajectoryReconstructionConfig,
+) -> bool:
+    lane_point = measurement.source_point.lane_point
+    if not _finite(float(lane_point.x_meters), float(lane_point.s_meters), float(measurement.confidence)):
+        return False
+    if not bool(measurement.source_point.is_on_locked_lane):
+        return False
+    if float(measurement.source_point.projection_confidence) < float(config.min_projection_confidence):
+        return False
+    if float(measurement.confidence) < float(config.min_measurement_confidence):
+        return False
+    if abs(float(lane_point.x_meters)) > _measurement_lateral_limit(lane_lock, config):
+        return False
+    return True
+
+
 def load_mask_track_measurements(
     *,
     artifact: Any,
@@ -134,6 +191,7 @@ def load_mask_track_measurements(
         raise RuntimeError(f"SAM2 track CSV does not exist: {track_csv_path}")
 
     intrinsics = CameraIntrinsics.from_session_metadata(artifact.session_metadata)
+    _validate_image_geometry(artifact, intrinsics)
     measurements: list[LaneSpaceTrajectoryMeasurement] = []
     with track_csv_path.open("r", encoding="utf-8", newline="") as handle:
         for row_index, row in enumerate(csv.DictReader(handle)):
@@ -156,12 +214,12 @@ def load_mask_track_measurements(
                 lane_lock=lane_lock,
                 point_definition="camera_sam2_mask_top_centroid_measurement",
             )
-            measurements.append(
-                LaneSpaceTrajectoryMeasurement(
-                    source_point=source_point,
-                    mask_quality=_float(row.get("mask_quality"), 0.5),
-                )
+            measurement = LaneSpaceTrajectoryMeasurement(
+                source_point=source_point,
+                mask_quality=_float(row.get("mask_quality"), 0.5),
             )
+            if _is_usable_measurement(measurement, lane_lock, resolved_config):
+                measurements.append(measurement)
     return measurements
 
 
@@ -212,17 +270,21 @@ def _measurement_noise(
 ) -> np.ndarray:
     lane_length = max(float(lane_lock.lane_length_meters), 1.0)
     s_norm = max(0.0, min(1.25, float(measurement.s_meters) / lane_length))
-    quality = max(0.05, min(1.0, float(measurement.mask_quality)))
+    mask_quality = max(0.05, min(1.0, float(measurement.mask_quality)))
+    confidence = max(0.05, min(1.0, float(measurement.confidence)))
     sigma_x = (
         float(config.base_sigma_x_meters)
         + 0.03 * s_norm
-        + float(config.low_quality_sigma_x_meters) * (1.0 - quality)
+        + float(config.low_quality_sigma_x_meters) * (1.0 - mask_quality)
     )
     sigma_s = (
         float(config.base_sigma_s_meters)
         + float(config.far_sigma_s_meters) * (s_norm**2)
-        + float(config.low_quality_sigma_s_meters) * (1.0 - quality)
+        + float(config.low_quality_sigma_s_meters) * (1.0 - mask_quality)
     )
+    confidence_scale = 1.0 / math.sqrt(confidence)
+    sigma_x *= confidence_scale
+    sigma_s *= confidence_scale
     return np.diag([sigma_x**2, sigma_s**2])
 
 
@@ -316,6 +378,8 @@ def _kalman_rts_smooth(
         ) @ smoother_gain.T
 
     lane_length = float(lane_lock.lane_length_meters)
+    lateral_limit = max(0.01, float(lane_lock.lane_width_meters) * 0.5 + float(config.smoothing_lateral_margin_meters))
+    states_smooth[:, 0] = np.clip(states_smooth[:, 0], -lateral_limit, lateral_limit)
     states_smooth[:, 1] = np.clip(states_smooth[:, 1], 0.0, lane_length)
     states_smooth[:, 1] = np.maximum.accumulate(states_smooth[:, 1])
     states_smooth[:, 3] = np.maximum(states_smooth[:, 3], 0.0)
@@ -333,6 +397,21 @@ def _frame_timing_by_seq(frame_metadata: list[dict[str, Any]]) -> dict[int, tupl
     return timing
 
 
+def _median_frame_time_delta_us(frame_metadata: list[dict[str, Any]], field_name: str) -> int:
+    values: list[int] = []
+    previous: int | None = None
+    for metadata in frame_metadata:
+        value = _int(metadata.get(field_name))
+        if value <= 0:
+            continue
+        if previous is not None and value > previous:
+            values.append(value - previous)
+        previous = value
+    if not values:
+        return 33_333
+    return int(round(float(np.median(np.asarray(values, dtype=np.float64)))))
+
+
 def _median_tail_velocity_per_frame(values: Sequence[float], frame_seqs: Sequence[int], tail_points: int = 8) -> float:
     if len(values) < 2:
         return 0.0
@@ -348,6 +427,44 @@ def _median_tail_velocity_per_frame(values: Sequence[float], frame_seqs: Sequenc
     if not velocities:
         return 0.0
     return float(np.median(np.asarray(velocities, dtype=np.float64)))
+
+
+def _pin_deck_completion_frame_count(
+    *,
+    last: LaneSpaceBallPoint,
+    lane_lock: LaneLockResult,
+    s_velocity: float,
+    x_velocity: float,
+    config: TrajectoryReconstructionConfig,
+) -> int:
+    lane_length = float(lane_lock.lane_length_meters)
+    remaining_s = lane_length - float(last.lane_point.s_meters)
+    if remaining_s <= 0.001:
+        return 0
+    if float(last.lane_point.s_meters) < lane_length - float(config.pin_deck_completion_margin_meters):
+        return 0
+
+    half_width = float(lane_lock.lane_width_meters) * 0.5
+    center_limit = half_width * float(config.pin_deck_completion_half_width_fraction)
+    edge_limit = half_width * float(config.pin_deck_completion_edge_guard_fraction)
+    last_x = float(last.lane_point.x_meters)
+    if abs(last_x) > center_limit:
+        return 0
+
+    completion_speed = max(float(s_velocity), float(config.pin_deck_completion_min_speed_m_per_frame))
+    completion_speed = min(float(config.terminal_speed_cap_m_per_frame), completion_speed)
+    if completion_speed <= 0.0:
+        return 0
+
+    frame_count = int(math.ceil(remaining_s / completion_speed))
+    frame_count = min(frame_count, int(config.pin_deck_completion_max_frames))
+    projected_x_at_deck = last_x + float(x_velocity) * float(frame_count)
+    if abs(projected_x_at_deck) > edge_limit:
+        return 0
+    if last_x * float(x_velocity) > 0.0 and abs(last_x) > half_width * 0.65:
+        return 0
+
+    return frame_count
 
 
 def _build_lane_space_point(
@@ -439,37 +556,45 @@ def reconstruct_lane_space_trajectory(
 
     last = points[-1]
     missing_frames = max(0, int(window_end_frame_seq) - int(last.frame_seq))
-    extrapolate_count = min(missing_frames, int(resolved_config.max_terminal_frames))
-    if extrapolate_count <= 0:
-        return points
-
     s_values = [float(point.lane_point.s_meters) for point in points]
     x_values = [float(point.lane_point.x_meters) for point in points]
     frame_seqs = [int(point.frame_seq) for point in points]
     s_velocity = max(0.0, _median_tail_velocity_per_frame(s_values, frame_seqs))
     s_velocity = min(float(resolved_config.terminal_speed_cap_m_per_frame), s_velocity)
     x_velocity = _median_tail_velocity_per_frame(x_values, frame_seqs)
+    completion_count = _pin_deck_completion_frame_count(
+        last=last,
+        lane_lock=lane_lock,
+        s_velocity=s_velocity,
+        x_velocity=x_velocity,
+        config=resolved_config,
+    )
+    extrapolate_count = max(min(missing_frames, int(resolved_config.max_terminal_frames)), completion_count)
+    if extrapolate_count <= 0:
+        return points
 
     lane_length = float(lane_lock.lane_length_meters)
-    in_center_lane = abs(float(last.lane_point.x_meters)) <= (
-        float(lane_lock.lane_width_meters)
-        * 0.5
-        * float(resolved_config.pin_deck_completion_half_width_fraction)
-    )
-    near_pin_deck = float(last.lane_point.s_meters) >= (
-        lane_length - float(resolved_config.pin_deck_completion_margin_meters)
-    )
-    if in_center_lane and near_pin_deck:
-        required_velocity = max(0.0, (lane_length - float(last.lane_point.s_meters)) / float(extrapolate_count))
+    if completion_count > 0:
+        required_velocity = max(0.0, (lane_length - float(last.lane_point.s_meters)) / float(completion_count))
         s_velocity = max(s_velocity, min(float(resolved_config.terminal_speed_cap_m_per_frame), required_velocity))
 
     timing_by_seq = _frame_timing_by_seq(frame_metadata)
+    camera_timestamp_step_us = _median_frame_time_delta_us(frame_metadata, "cameraTimestampUs")
+    pts_step_us = _median_frame_time_delta_us(frame_metadata, "ptsUs")
     previous = last
     for offset in range(1, extrapolate_count + 1):
         frame_seq = int(last.frame_seq) + offset
-        camera_timestamp_us, pts_us = timing_by_seq.get(frame_seq, (int(previous.camera_timestamp_us), int(previous.pts_us)))
+        camera_timestamp_us, pts_us = timing_by_seq.get(
+            frame_seq,
+            (
+                int(previous.camera_timestamp_us) + camera_timestamp_step_us,
+                int(previous.pts_us) + pts_step_us,
+            ),
+        )
         next_s = min(lane_length, float(previous.lane_point.s_meters) + s_velocity)
         next_x = float(previous.lane_point.x_meters) + x_velocity
+        x_limit = max(0.01, float(lane_lock.lane_width_meters) * 0.5 + float(resolved_config.smoothing_lateral_margin_meters))
+        next_x = max(-x_limit, min(x_limit, next_x))
         previous = _build_terminal_point(
             previous=previous,
             frame_seq=frame_seq,
@@ -478,9 +603,11 @@ def reconstruct_lane_space_trajectory(
             x_meters=next_x,
             s_meters=next_s,
             lane_lock=lane_lock,
-            confidence_scale=0.85,
+            confidence_scale=float(resolved_config.terminal_confidence_scale),
         )
         points.append(previous)
+        if completion_count > 0 and float(previous.lane_point.s_meters) >= lane_length - 0.001:
+            break
 
     return points
 

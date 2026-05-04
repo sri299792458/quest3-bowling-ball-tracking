@@ -17,6 +17,7 @@ from laptop_receiver.live_shot_boundaries import load_shot_boundaries
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 from laptop_receiver.session_state import (
+    LANE_CONFIRMED,
     SHOT_ANALYZING,
     SHOT_ARMED,
     SHOT_DISABLED_UNTIL_MEDIA_FRESH,
@@ -212,6 +213,8 @@ class LiveSessionPipeline:
                     summary.errors.append(f"{session_dir}: shot_result publish failed: unknown active stream")
                 self._save_pipeline_state(session_dir, state)
 
+        self._publish_armed_status_if_idle(session_dir, shot_boundaries, media_ready)
+
     def _process_shot_window(
         self,
         session_dir: Path,
@@ -332,6 +335,51 @@ class LiveSessionPipeline:
             if exc.error_code == "unknown_active_stream":
                 return False, PUBLISH_FAILED_UNKNOWN_STREAM, str(exc)
             raise
+
+    def _publish_armed_status_if_idle(self, session_dir: Path, shot_boundaries: Any, media_ready: bool) -> None:
+        if not media_ready:
+            return
+
+        if self._shot_boundary_detector is None or self.config.shot_tracking_config is None:
+            return
+
+        if shot_boundaries.open_start is not None:
+            return
+
+        state = self._load_pipeline_state(session_dir)
+        processed_windows = state.setdefault("processedShotWindows", {})
+        if not isinstance(processed_windows, dict):
+            raise RuntimeError("pipeline_state processedShotWindows must be an object.")
+
+        for window in shot_boundaries.completed_windows:
+            if window.window_id not in processed_windows:
+                return
+
+        session_state = load_session_state(session_dir)
+        lane = session_state.get("lane") or {}
+        if str(lane.get("state") or "") != LANE_CONFIRMED:
+            return
+
+        request_id = str(lane.get("confirmedRequestId") or "")
+        if not request_id:
+            return
+
+        if state.get("lastPublishedArmedLaneLockRequestId") == request_id:
+            return
+
+        published, publish_status, publish_error = self._publish_pipeline_status(
+            session_dir,
+            state="shot_detection_armed",
+            ready=True,
+            reason="confirmed_lane_armed",
+        )
+        if published:
+            state["lastPublishedArmedLaneLockRequestId"] = request_id
+        state["lastArmedStatusPublished"] = bool(published)
+        state["lastArmedStatusPublishStatus"] = publish_status
+        state["lastArmedStatusPublishError"] = publish_error
+        state["lastArmedStatusPublishedUnixMs"] = _now_unix_ms()
+        self._save_pipeline_state(session_dir, state)
 
     def _mark_shot_from_detector_result(self, session_dir: Path, detector_result: Any) -> None:
         lane_lock_request_id = str(getattr(detector_result, "confirmed_lane_lock_request_id", "") or "")

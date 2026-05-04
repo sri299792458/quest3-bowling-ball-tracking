@@ -34,7 +34,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private float laneLockConfidence;
         [SerializeField] private Vector3 laneOriginWorld;
         [SerializeField] private Quaternion laneRotationWorld = Quaternion.identity;
-        [SerializeField] private float laneWidthMeters = 1.0668f;
+        [SerializeField] private float laneWidthMeters = 1.0541f;
         [SerializeField] private float laneLengthMeters = 18.288f;
 
         private StandaloneLocalClipArtifactWriter _artifactWriter;
@@ -63,6 +63,11 @@ namespace QuestBowlingStandalone.QuestApp
         public StandaloneLaneLockMetadata CurrentLaneLockMetadata => _laneLockMetadata;
         public StandaloneShotMetadata CurrentShotMetadata => _shotMetadata;
         public StandaloneFrameMetadata LastCommittedFrameMetadata => _lastCommittedFrameMetadata;
+
+        private void Awake()
+        {
+            ClearLaneLock();
+        }
 
         public bool TryApplyLaneLockResult(StandaloneLaneLockResult result, out string note)
         {
@@ -130,6 +135,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return false;
             }
 
+            ClearLaneLock();
             _sessionId = sessionContext != null ? sessionContext.EnsureSessionId() : Guid.NewGuid().ToString("N");
             _shotId = string.IsNullOrWhiteSpace(shotId) ? "proof-shot" : shotId.Trim();
             _nextFrameSeq = 0;

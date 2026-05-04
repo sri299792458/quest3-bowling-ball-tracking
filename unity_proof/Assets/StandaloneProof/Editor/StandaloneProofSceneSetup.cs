@@ -129,7 +129,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
             ConfigureLaneLockResultRenderer(laneLockResultRenderer);
-            ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver);
+            ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver, laneLockStateCoordinator);
             ConfigureCoordinator(renderCoordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver, laptopDiscovery);
 
@@ -863,8 +863,10 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("startEncoderOnProofClip").boolValue = true;
             serializedObject.FindProperty("iFrameIntervalSeconds").floatValue = 1.0f;
             serializedObject.FindProperty("verboseLogging").boolValue = true;
-            serializedObject.FindProperty("laneLockState").enumValueIndex = 1;
-            serializedObject.FindProperty("laneLockConfidence").floatValue = 1.0f;
+            serializedObject.FindProperty("laneLockState").enumValueIndex = 0;
+            serializedObject.FindProperty("laneLockConfidence").floatValue = 0.0f;
+            serializedObject.FindProperty("laneWidthMeters").floatValue = 1.0541f;
+            serializedObject.FindProperty("laneLengthMeters").floatValue = 18.288f;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(proofCapture);
         }
@@ -930,10 +932,12 @@ namespace QuestBowlingStandalone.Editor
 
         private static void ConfigureShotReplayRenderer(
             QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator)
         {
             var serializedObject = new SerializedObject(shotReplayRenderer);
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
+            serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
             serializedObject.FindProperty("replayRoot").objectReferenceValue = null;
             serializedObject.FindProperty("lineWidthMeters").floatValue = 0.035f;
             serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.11f;
@@ -943,7 +947,9 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.018f;
             serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
             serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
-            serializedObject.FindProperty("clearOnFailedShotResult").boolValue = true;
+            serializedObject.FindProperty("minAverageProjectionConfidence").floatValue = 0.20f;
+            serializedObject.FindProperty("minOnLanePointFraction").floatValue = 0.80f;
+            serializedObject.FindProperty("clearOnFailedShotResult").boolValue = false;
             serializedObject.FindProperty("trajectoryColor").colorValue = new Color(0.05f, 0.9f, 1.0f, 1.0f);
             serializedObject.FindProperty("markerColor").colorValue = new Color(1.0f, 0.74f, 0.16f, 1.0f);
             serializedObject.FindProperty("ghostTrajectoryColor").colorValue = new Color(0.56f, 0.68f, 0.72f, 0.42f);
@@ -1271,6 +1277,7 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(164.0f, 96.0f);
             serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
             serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 40.0f;
+            serializedObject.FindProperty("transientFailureMessageSeconds").floatValue = 2.75f;
             serializedObject.FindProperty("emptyText").stringValue = string.Empty;
             serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
             serializedObject.FindProperty("panelColor").colorValue = new Color(0.02f, 0.045f, 0.05f, 0.72f);

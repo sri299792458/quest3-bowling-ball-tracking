@@ -183,6 +183,7 @@ MonoBehaviour:
   shotButtonSize: {x: 164, y: 96}
   shotButtonSpacing: 10
   shotButtonRowYOffset: 40
+  transientFailureMessageSeconds: 2.75
   emptyText:
   shotLabelPrefix: 'Shot '
   panelColor: {r: 0.02, g: 0.045, b: 0.05, a: 0.72}
@@ -1643,11 +1644,11 @@ MonoBehaviour:
   startEncoderOnProofClip: 1
   iFrameIntervalSeconds: 1
   verboseLogging: 1
-  laneLockState: 1
-  laneLockConfidence: 1
+  laneLockState: 0
+  laneLockConfidence: 0
   laneOriginWorld: {x: 0, y: 0, z: 0}
   laneRotationWorld: {x: 0, y: 0, z: 0, w: 1}
-  laneWidthMeters: 1.0668
+  laneWidthMeters: 1.0541
   laneLengthMeters: 18.288
 --- !u!114 &1545997002
 MonoBehaviour:
@@ -1790,6 +1791,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer
   liveResultReceiver: {fileID: 1545997011}
+  laneLockCoordinator: {fileID: 1545997017}
   replayRoot: {fileID: 0}
   lineWidthMeters: 0.035
   markerRadiusMeters: 0.11
@@ -1799,7 +1801,9 @@ MonoBehaviour:
   ghostLineWidthMeters: 0.018
   minReplayDurationSeconds: 0.75
   maxReplayDurationSeconds: 3
-  clearOnFailedShotResult: 1
+  minAverageProjectionConfidence: 0.2
+  minOnLanePointFraction: 0.8
+  clearOnFailedShotResult: 0
   trajectoryColor: {r: 0.05, g: 0.9, b: 1, a: 1}
   markerColor: {r: 1, g: 0.74, b: 0.16, a: 1}
   ghostTrajectoryColor: {r: 0.56, g: 0.68, b: 0.72, a: 0.42}

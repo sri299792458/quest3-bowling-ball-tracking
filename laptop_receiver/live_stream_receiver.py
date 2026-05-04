@@ -65,10 +65,23 @@ PACKET_TYPE_CODEC_CONFIG = 4
 
 SAMPLE_FLAG_KEYFRAME = 1 << 0
 MEDIA_FRESH_TIMEOUT_SECONDS = 2.0
+MAX_JSON_PACKET_BYTES = 64 * 1024
+MAX_CODEC_CONFIG_PACKET_BYTES = 256 * 1024
+MAX_SAMPLE_PACKET_BYTES = 4 * 1024 * 1024
 
 
 def _json_dumps_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, indent=2).encode("utf-8")
+
+
+def _max_media_payload_bytes(packet_type: int) -> int:
+    if packet_type in {PACKET_TYPE_SESSION_START, PACKET_TYPE_SESSION_END}:
+        return MAX_JSON_PACKET_BYTES
+    if packet_type == PACKET_TYPE_CODEC_CONFIG:
+        return MAX_CODEC_CONFIG_PACKET_BYTES
+    if packet_type == PACKET_TYPE_SAMPLE:
+        return MAX_SAMPLE_PACKET_BYTES
+    raise RuntimeError(f"Unknown media packet type: {packet_type}")
 
 
 def _sanitize_file_part(value: str) -> str:
@@ -957,6 +970,12 @@ async def _handle_media_connection(
                 raise RuntimeError(f"Invalid packet magic from {peer}: {magic!r}")
             if version != PACKET_VERSION:
                 raise RuntimeError(f"Unsupported packet version from {peer}: {version}")
+            max_payload_length = _max_media_payload_bytes(int(packet_type))
+            if payload_length > max_payload_length:
+                raise RuntimeError(
+                    f"Media packet payload too large from {peer}: "
+                    f"type={packet_type} length={payload_length} max={max_payload_length}"
+                )
             payload = await _read_exact(reader, int(payload_length))
 
             if packet_type == PACKET_TYPE_SESSION_START:

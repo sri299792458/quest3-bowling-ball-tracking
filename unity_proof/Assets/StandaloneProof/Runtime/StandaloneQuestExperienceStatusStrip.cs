@@ -174,15 +174,15 @@ namespace QuestBowlingStandalone.QuestApp
                 mediaReady = sessionController.TryGetLiveMediaReadiness(out mediaReason);
             }
 
-            var pipelineReady = true;
-            var pipelineReason = string.Empty;
+            var pipelineReady = false;
+            var pipelineReason = "pipeline_status_missing";
             if (liveResultReceiver != null)
             {
                 var pipelineStatus = liveResultReceiver.LastPipelineStatus;
                 pipelineReady = liveResultReceiver.IsPipelineReady;
                 pipelineReason = pipelineStatus != null && !string.IsNullOrWhiteSpace(pipelineStatus.reason)
                     ? pipelineStatus.reason
-                    : "pipeline_busy";
+                    : "pipeline_status_missing";
             }
 
             return new StandaloneQuestExperienceStateInput(

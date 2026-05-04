@@ -73,7 +73,7 @@ namespace QuestBowlingStandalone.QuestApp
         public bool EnabledForAutoRun => enabledForAutoRun;
         public bool IsRunning => _readerThread != null && _readerThread.IsAlive;
         public bool IsConnected => enabledForAutoRun && IsRunning && _isConnected;
-        public bool IsPipelineReady => LastPipelineStatus == null || LastPipelineStatus.ready;
+        public bool IsPipelineReady => LastPipelineStatus != null && LastPipelineStatus.ready;
         public StandaloneShotResult LastShotResult { get; private set; }
         public StandalonePipelineStatus LastPipelineStatus { get; private set; }
         public string LastStatus { get; private set; }
@@ -116,6 +116,8 @@ namespace QuestBowlingStandalone.QuestApp
                 _pendingLines.Clear();
             }
             _seenMessageIds.Clear();
+            LastShotResult = null;
+            LastPipelineStatus = null;
             LastStatus = "result_receiver_starting";
 
             _readerThread = new Thread(ResultReaderLoop)
