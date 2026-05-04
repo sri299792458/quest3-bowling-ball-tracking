@@ -1,146 +1,274 @@
 # Quest Bowling Standalone
 
-This repository is the clean starting point for the standalone bowling replay product.
+Quest Bowling Standalone is a Quest 3 mixed-reality bowling replay prototype. The headset streams passthrough camera video and frame metadata to a laptop. The laptop detects the bowling ball, tracks it with YOLO and SAM2, reconstructs a lane-space trajectory, computes shot stats, and sends replay results back to the headset.
 
-The active product definition lives in [docs/STANDALONE_PRODUCT_GOAL.md](C:/Users/student/QuestBowlingStandalone/docs/STANDALONE_PRODUCT_GOAL.md).
+The documentation rule for this repo is simple: this README describes what the current code does. Protocol files under `protocol/` are the wire contracts. Old planning docs and speculative design notes should not be treated as product truth.
 
-The headset experience and analytics redesign lives in [docs/LIVE_VR_EXPERIENCE_SPEC.md](C:/Users/student/QuestBowlingStandalone/docs/LIVE_VR_EXPERIENCE_SPEC.md).
+## Current Pipeline
 
-The detailed lane-lock design lives in [docs/LANE_LOCK_MATH_AND_CONTRACT.md](C:/Users/student/QuestBowlingStandalone/docs/LANE_LOCK_MATH_AND_CONTRACT.md).
+1. The laptop starts `live_stream_receiver` and advertises itself over UDP discovery.
+2. The Quest app discovers the laptop, opens media, metadata, and result sockets, then starts one live session for the app run.
+3. The Quest encodes passthrough frames as `1280 x 960` H.264 and sends frame metadata on a separate TCP channel.
+4. The bowler places the lane in the headset with the pinch-and-hold lane flow, then confirms it.
+5. Quest sends a `lane_lock_confirm` metadata event containing the full `lane_lock_result`.
+6. The laptop persists that confirmed lane geometry and arms shot detection.
+7. YOLO scans live decoded frames for a lane-valid ball seed.
+8. SAM2 camera tracking starts immediately from that seed and runs for the live tracking window or until sustained tracking loss.
+9. The laptop reconstructs a lane-space trajectory, smooths it, computes stats, and publishes a strict `shot_result`.
+10. Quest renders the trajectory replay, shot rail, dynamic callouts, and session review UI.
 
-## Working Rules
-
-- keep the scope centered on the standalone product, not the old experiment stack
-- maintain [running_notes.md](C:/Users/student/QuestBowlingStandalone/running_notes.md) as the current build log and decision log
-- use the local validation dataset at `C:\Users\student\QuestBowlingStandalone\data\bowling_tests`
-- only commit deliberate checkpoints
-
-## Current Baseline
-
-- single camera
-- `1280 x 960 @ 30 FPS, H.264`
-- lightweight session lane lock
-- one continuous live session stream
-- YOLO-seeded live camera SAM2 tracking
-- true lane-anchored MR replay
+There is no laptop-side lane guessing in the normal live path. Replayable shot results require a Quest-confirmed lane lock and a camera SAM2 track.
 
 ## Repository Layout
 
-- `docs/`: product definition and implementation notes
-- `unity_proof/`: active Unity project and Quest-side standalone implementation
-- `laptop_receiver/`: laptop-side media, tracking, and replay module
-- `protocol/`: shared schemas and message contracts
-- `third_party/sam2/`: repo-local SAM2 source; checkpoint is downloaded/ignored
-- `data/`: local validation data and other non-source assets
-- `running_notes.md`: current execution log so we stay organized
+- `unity_proof/Assets/StandaloneProof/`: live Quest-side Unity implementation.
+- `unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin/`: Android MediaCodec encoder plugin.
+- `laptop_receiver/`: laptop receiver, live pipeline, YOLO/SAM2 tracking, trajectory reconstruction, and stats.
+- `protocol/`: versioned metadata, live stream, and artifact contracts.
+- `models/`: ignored local model checkpoints and training outputs.
+- `third_party/sam2/`: repo-local SAM2 source; checkpoints and caches are ignored.
+- `data/`: ignored live sessions, experiments, validation clips, and generated artifacts.
+- `start_live_pipeline.ps1`: normal live-session launcher for the laptop.
 
-## Immediate Build Slice
+## Requirements
 
-We are starting with one disciplined first slice:
+- Windows laptop with PowerShell.
+- Python 3.10 or newer.
+- CUDA-capable PyTorch environment for SAM2.
+- Unity `6000.3.5f2` with Android/Quest build support.
+- Quest 3 connected to the laptop hotspot for live runs.
+- YOLO checkpoint at:
 
-- prove Quest-side local `H.264` encode at `1280 x 960 @ 30 FPS`
-- preserve timestamp and pose metadata cleanly
-- keep the repo structure ready for the later laptop and protocol pieces
+```text
+models/bowling_ball_yolo26s_img1280_lightaug_v3/weights/best.pt
+```
 
-## Current Milestone
+- SAM2 tiny checkpoint at:
 
-Milestone `1` is now proven in the clean Unity proof app:
+```text
+third_party/sam2/checkpoints/sam2.1_hiera_tiny.pt
+```
 
-- local Quest-side `H.264` proof capture works
-- a real `video.mp4` is written on-device
-- per-frame metadata is written to `frame_metadata.jsonl`
-- encoder surface binding and native blit path are working
-- `ptsUs` in metadata is now camera-derived and coherent with the shot span
-- laptop-side standalone artifact validation now works against a pulled proof clip
+The SAM2 checkpoint is downloaded by the laptop setup script.
 
-The clean next slice after Quest proof is now in place:
+## Laptop Setup
 
-- load `artifact_manifest.json`, sidecars, and `video.mp4` as one standalone artifact
-- validate decoded video frames against `frame_metadata.jsonl`
-- prove timestamp and metadata alignment before porting over more of the old laptop stack
-- run standalone causal YOLO seeding directly on a `LocalClipArtifact`
-- import one legacy `bowling_tests` run into the standalone artifact shape for real bowling-content validation
-- run offline batch SAM2 from the standalone `yolo_seed.json` contract
-- receive a live Quest `H.264` stream plus live metadata on the laptop
-- keep a live laptop-to-Quest result channel open for lane/replay payloads
-- make the landed live session decodable and loadable through the same analysis boundary as offline artifacts
+From the repo root:
 
-Current validation entry point:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\laptop_receiver\setup_laptop_env.ps1
+```
 
-- `powershell -ExecutionPolicy Bypass -File .\laptop_receiver\setup_laptop_env.ps1`
-- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact <artifact_dir>`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir>` uses the repo-local YOLO26s checkpoint when it is present
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir> --checkpoint <path-to-best.pt>` overrides the detector checkpoint
-- `.\.venv\Scripts\python.exe -m laptop_receiver.import_legacy_bowling_run <legacy_run_dir>`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>` runs the offline batch SAM2 check
-- `.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver`
-- `.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline`
+That script creates or updates `.venv`, installs `laptop_receiver/requirements-cuda.txt`, verifies CUDA, and downloads the SAM2 tiny checkpoint if it is missing.
 
-Live alley startup:
+## Build And Install Quest App
 
-- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1` stops stale live receiver/pipeline Python processes, starts the receiver, then runs the full `YOLO26s -> SAM2` live pipeline in the same terminal
-- `powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1 -NoSam2` runs receiver plus YOLO shot detection/tracking without SAM2
+Build the APK:
 
-Use the repo-local `.venv` for standalone work. The normal runtime path should not depend on the older experiment repo.
+```powershell
+$unity = "C:\Program Files\Unity\Hub\Editor\6000.3.5f2\Editor\Unity.exe"
+& $unity -batchmode -quit `
+  -projectPath "$PWD\unity_proof" `
+  -executeMethod QuestBowlingStandalone.Editor.StandaloneProofBuild.BuildAndroidProofApk `
+  -logFile "$PWD\unity_proof\standalone_proof_build.log"
+```
 
-Important note:
+Install it on the connected Quest:
 
-- the proof diagnostics still show many `passthrough_not_updated` skips
-- those skips are now understood as expected render-loop vs camera-source cadence mismatch
-- current proof runs show about `72 Hz` render polling against a `~30 FPS` camera source, which matches the observed skip ratio closely
+```powershell
+$adb = "C:\Program Files\Unity\Hub\Editor\6000.3.5f2\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe"
+& $adb devices
+& $adb install -r -d .\unity_proof\Builds\StandaloneProof.apk
+```
 
-Live transport note:
+The package name is:
 
-- the main direction is now live Quest-to-laptop streaming
-- Quest proof capture is being extended to stream encoded `H.264` media live while Unity sends frame metadata over a separate TCP side channel
-- latest milestone: a real hotspot run now lands as a decodable live `H.264` session on the laptop, with codec config persisted and the shared loader able to open the session as a `LocalClipArtifact`
-- lane lock is solved on the Quest: pinch/hold aligns the heads-region rectangle, release previews the full lane, and confirm sends the final lane geometry to the laptop
+```text
+com.student.questbowlingstandaloneproof
+```
 
-Lane-lock implementation note:
+## Bowling Alley Runbook
 
-- lane lock is the Quest-side heads-region placement flow in:
-  - [StandaloneQuestLaneLockStateCoordinator.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockStateCoordinator.cs)
-  - [StandaloneQuestLaneLockButton.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestLaneLockButton.cs)
-  - [StandaloneQuestFloorPlaneSource.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestFloorPlaneSource.cs)
-- there is no laptop-side lane solver in the live loop and no dev injection path
-- confirming the lane sends one `lane_lock_confirm` metadata event containing the complete `lane_lock_result`
-- the laptop receiver persists that result at `analysis_lane_lock/<requestId>/lane_lock_result.json`
-- YOLO shot gating, SAM2 tracking, and replay projection use that confirmed lane result directly
-- typed result contracts are in:
-  - [lane_lock_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_lock_types.py)
-- projection and lane-coordinate helpers are in:
-  - [lane_geometry.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/lane_geometry.py)
-- the session stream itself is now managed by:
-  - [StandaloneQuestSessionController.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestSessionController.cs)
-- that controller replaces the old short proof autorun behavior and keeps one live stream active for the session until we explicitly stop it
-- one live session is created per Quest app run; closing and reopening the Quest app creates a fresh `session_id`
-- live runs should first disable proximity sleep with `adb shell am broadcast -a com.oculus.vrpowermanager.prox_close`
-- if Quest/app/camera/encoder truly pause/restart from zero or the tracking origin relocalizes, the lane must be locked again
-- the live pipeline processes the latest live stream by default; old streams stay on disk and are used only when selected explicitly
-- the Quest app discovers the laptop at runtime over UDP `8765`, so the scene no longer needs a hardcoded laptop IP
-- the laptop receiver also owns the Quest-facing result channel:
-  - Quest listens as a client on `tcp://<laptop>:8769`
-  - laptop analysis stages publish strict result envelopes to `tcp://127.0.0.1:8770`
-  - forwarded results are persisted in `outbound_results.jsonl`
-- strict shot-boundary parsing is in:
-  - [live_shot_boundaries.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundaries.py)
-- automatic YOLO/lane-space shot-boundary detection is in:
-  - [live_shot_boundary_detector.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_boundary_detector.py)
-- lane-lock results can now be processed and forwarded to Quest through the same session channel instead of being only local files
-- shot boundaries are now generated after lane lock, with camera SAM2 ending each shot after tracking loss or the fixed live tracking window
-- live camera SAM2 tracking is in:
-  - [live_camera_sam2_tracker.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_camera_sam2_tracker.py)
-- windowed live shot tracking is in:
-  - [live_shot_tracking_stage.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/live_shot_tracking_stage.py)
-- strict shot result payloads are in:
-  - [shot_result_types.py](C:/Users/student/QuestBowlingStandalone/laptop_receiver/shot_result_types.py)
-- the live pipeline can now auto-detect shot starts with YOLO, seed camera SAM2 immediately, and build results only from that camera SAM2 track when configured with `--yolo-checkpoint --run-sam2`
-- `shot_result` messages require lane-space trajectory data from a user-confirmed lane lock; missing or invalidated lane confirmation is reported as a failed result, not guessed
-- automatic shot windows carry the confirmed `laneLockRequestId`, and shot tracking projects through that exact lane result
-- Quest-side replay rendering consumes successful `shot_result.trajectory` points through [StandaloneQuestShotReplayRenderer.cs](C:/Users/student/QuestBowlingStandalone/unity_proof/Assets/StandaloneProof/Runtime/StandaloneQuestShotReplayRenderer.cs)
-- the old desktop click harness was removed because those clicks were not physical foul-line endpoints
-- no automatic lane identity selection, view-center guess, or silent acceptance path remains in lane locking
+1. Start the laptop hotspot.
+2. Connect the Quest to the laptop hotspot.
+3. Disable Quest proximity sleep for the session:
 
-See [docs/IMPLEMENTATION_PLAN.md](C:/Users/student/QuestBowlingStandalone/docs/IMPLEMENTATION_PLAN.md) for the active build sequence.
-See [docs/PORTING_MAP.md](C:/Users/student/QuestBowlingStandalone/docs/PORTING_MAP.md) for the exact archive files we should mine and what to avoid copying.
+```powershell
+$adb = "C:\Program Files\Unity\Hub\Editor\6000.3.5f2\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe"
+& $adb shell am broadcast -a com.oculus.vrpowermanager.prox_close
+```
+
+4. Start the laptop live pipeline:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\start_live_pipeline.ps1
+```
+
+5. Launch the Quest app.
+6. Wait for the headset to connect to the laptop. If it is not connected, the status should block before lane placement.
+7. Use the headset lane flow:
+   - pinch and hold to place/align the lane overlay
+   - release to preview the lane
+   - confirm only when the lane is aligned
+8. Wait for `Shot Ready`.
+9. Throw the ball.
+10. Watch the MR replay and use the shot rail or Review panel after successful shots.
+
+`start_live_pipeline.ps1` stops stale receiver/pipeline Python processes, starts the live receiver, waits for receiver health, then runs the live YOLO/SAM2 pipeline in the same terminal. Press `Ctrl+C` to stop the pipeline and receiver.
+
+`start_live_pipeline.ps1 -NoSam2` is a debug mode. Normal replay requires SAM2.
+
+## Shot Ready Meaning
+
+The headset should show `Shot Ready` only when all of these are true:
+
+- Quest has an active live session.
+- H.264 media is streaming.
+- metadata is connected.
+- the Quest result channel is connected.
+- lane calibration is confirmed.
+- the laptop pipeline has published a ready `pipeline_status` for the current session/lane.
+
+If any gate is missing, the headset shows `Shot Not Ready` plus the first blocking reason.
+
+Common blocking labels:
+
+- `Laptop Connecting`: Quest does not have an active laptop-backed session yet.
+- `Media Stream Not Ready`: the encoder/media socket is not ready.
+- `Metadata Reconnecting`: the metadata socket is not connected.
+- `Results Reconnecting`: the Quest result socket is not connected.
+- `Pinch + Hold Lane`: lane placement is waiting for the bowler.
+- `Confirm Lane`: a lane candidate exists and needs confirmation.
+- `Laptop Preparing`: laptop has not yet armed the pipeline for the confirmed lane.
+- `Processing Shot`: a shot window is open or being analyzed.
+
+## Live Ports
+
+The default live ports are:
+
+- UDP `8765`: Quest laptop discovery.
+- TCP `8766`: H.264 media.
+- TCP `8767`: frame metadata and lane confirmations.
+- HTTP `8768`: receiver health.
+- TCP `8769`: laptop-to-Quest result channel.
+- TCP `8770`: laptop-local result publish endpoint.
+
+Receiver health check:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8768/health
+```
+
+## Live Data Outputs
+
+Live sessions are written under:
+
+```text
+data/incoming_live_streams/live_<sessionId>_<streamId>/
+```
+
+Important files in a live session:
+
+- `stream.h264`: raw H.264 media samples.
+- `codec_config.h264`: persisted codec config.
+- `media_samples.jsonl`: media sample timing and packet metadata.
+- `metadata_stream.jsonl`: frame metadata and Quest metadata events.
+- `lane_lock_confirms.jsonl`: lane confirmations from Quest.
+- `analysis_lane_lock/<requestId>/lane_lock_result.json`: persisted confirmed lane result.
+- `shot_boundaries.jsonl`: automatic shot start/end windows.
+- `analysis_camera_sam2/<windowId>/`: camera SAM2 tracking artifacts.
+- `analysis_live_shots/<windowId>/shot_result.json`: final shot result payload.
+- `outbound_results.jsonl`: result envelopes forwarded to Quest.
+- `session_state.json`: current receiver/pipeline state summary.
+- `session_start.json` and `session_end.json`: session lifecycle records.
+
+These outputs are ignored by Git.
+
+## Offline And Debug Commands
+
+Validate a landed artifact or live session directory:
+
+```powershell
+.\.venv\Scripts\python.exe -m laptop_receiver.validate_local_clip_artifact <artifact_or_live_session_dir>
+```
+
+Process one live session directory once without publishing results:
+
+```powershell
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline `
+  --session-dir <live_session_dir> `
+  --once `
+  --no-publish `
+  --yolo-checkpoint .\models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt `
+  --run-sam2
+```
+
+Run the live pipeline manually:
+
+```powershell
+.\.venv\Scripts\python.exe -m laptop_receiver.live_stream_receiver
+.\.venv\Scripts\python.exe -m laptop_receiver.run_live_session_pipeline `
+  --yolo-checkpoint .\models\bowling_ball_yolo26s_img1280_lightaug_v3\weights\best.pt `
+  --run-sam2
+```
+
+The repo still has offline YOLO and batch SAM2 CLIs for local artifact checks:
+
+```powershell
+.\.venv\Scripts\python.exe -m laptop_receiver.run_yolo_seed_on_artifact <artifact_dir>
+.\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>
+```
+
+## Core Runtime Invariants
+
+- One Quest app run creates one live session ID.
+- Closing and reopening the Quest app creates a fresh session.
+- Confirmed Quest lane geometry is the source of truth for shot gating, projection, stats, and replay.
+- Automatic shot windows carry the confirmed `laneLockRequestId`.
+- Quest replay rejects shot results that do not match the current confirmed lane request ID.
+- YOLO is used to find a lane-valid ball seed.
+- Camera SAM2 owns live tracking after the seed.
+- Trajectory points are reconstructed in lane space and smoothed before stats/replay.
+- Predicted terminal tail points are low confidence and should not be treated as measured ball observations.
+
+## Troubleshooting
+
+`Shot Not Ready / Laptop Connecting`
+
+- Start `start_live_pipeline.ps1`.
+- Make sure Quest is on the laptop hotspot.
+- Check that UDP `8765` and TCP `8766-8769` are not blocked.
+
+`Shot Not Ready / Media Stream Not Ready`
+
+- The Quest encoder/media connection is not healthy.
+- Restart the Quest app and the laptop pipeline if the media socket was interrupted.
+
+`Shot Not Ready / Laptop Preparing`
+
+- The laptop has not published ready pipeline status for the confirmed lane.
+- Check the terminal running `start_live_pipeline.ps1` for model load or lane confirmation errors.
+
+No replay after a throw
+
+- Check the pipeline terminal for `shot_result_failed`.
+- Common causes are `yolo_detection_failed`, `camera_sam2_track_missing`, track loss, or invalid lane projection.
+- Look in the latest live session under `analysis_camera_sam2/` and `analysis_live_shots/`.
+
+YOLO misses the ball
+
+- Check lighting first. The live H.264 frames are what YOLO sees, not the beautified headset passthrough view.
+- Inspect `stream.h264` or generated debug frames from the latest live session.
+
+Replay is spatially wrong
+
+- Relock the lane carefully.
+- Do not trust old replay geometry after a Quest/app/camera/encoder restart or tracking-origin discontinuity.
+
+## Current Limitations
+
+- This is a strong prototype, not a polished product.
+- Lane placement quality still matters.
+- Low light can break ball detection.
+- Stats are only as good as the reconstructed trajectory.
+- The live path is optimized for the bowling-alley workflow, not for arbitrary imported videos.
