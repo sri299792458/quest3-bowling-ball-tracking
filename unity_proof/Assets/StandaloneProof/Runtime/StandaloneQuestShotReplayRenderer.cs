@@ -16,8 +16,11 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private float lineWidthMeters = 0.035f;
         [SerializeField] private float markerRadiusMeters = 0.11f;
         [SerializeField] private float verticalOffsetMeters = 0.035f;
-        [SerializeField] private float calloutVerticalOffsetMeters = 0.34f;
-        [SerializeField] private float calloutCharacterSizeMeters = 0.055f;
+        [SerializeField] private float calloutVerticalOffsetMeters = 0.42f;
+        [SerializeField] private float calloutHorizontalOffsetMeters = 0.26f;
+        [SerializeField] private float calloutCharacterSizeMeters = 0.045f;
+        [SerializeField] private float calloutLeadSeconds = 0.10f;
+        [SerializeField] private float calloutHoldSeconds = 0.70f;
         [SerializeField] private float ghostLineWidthMeters = 0.018f;
         [SerializeField] private float minReplayDurationSeconds = 0.75f;
         [SerializeField] private float maxReplayDurationSeconds = 3.0f;
@@ -130,7 +133,10 @@ namespace QuestBowlingStandalone.QuestApp
             if (t >= 1.0f)
             {
                 _isReplaying = false;
-                UpdateCallout(1.0f);
+                if (_calloutObject != null)
+                {
+                    _calloutObject.SetActive(false);
+                }
                 SetStatus("shot_replay_complete");
             }
         }
@@ -661,8 +667,9 @@ namespace QuestBowlingStandalone.QuestApp
                 _calloutShadowText.characterSize = Mathf.Max(0.01f, calloutCharacterSizeMeters);
                 _calloutShadowText.color = calloutShadowColor;
             }
-            _calloutObject.transform.position = SampleTrajectory(milestone.normalizedReplayTime)
+            var calloutAnchor = SampleTrajectory(milestone.normalizedReplayTime)
                 + _laneUp * Mathf.Max(0.0f, calloutVerticalOffsetMeters);
+            _calloutObject.transform.position = calloutAnchor + ResolveCalloutHorizontalOffset(calloutAnchor);
             FaceCamera(_calloutObject.transform);
             _calloutObject.SetActive(true);
         }
@@ -670,8 +677,11 @@ namespace QuestBowlingStandalone.QuestApp
         private StandaloneShotStatMilestone ActiveMilestone(float normalizedTime)
         {
             StandaloneShotStatMilestone active = null;
-            var bestTime = -1.0f;
+            var bestDistance = float.MaxValue;
             var t = Mathf.Clamp01(normalizedTime);
+            var duration = Mathf.Max(0.001f, _replayDurationSeconds);
+            var lead = Mathf.Clamp01(Mathf.Max(0.0f, calloutLeadSeconds) / duration);
+            var hold = Mathf.Clamp01(Mathf.Max(0.0f, calloutHoldSeconds) / duration);
             for (var index = 0; index < _milestones.Length; index++)
             {
                 var milestone = _milestones[index];
@@ -681,14 +691,44 @@ namespace QuestBowlingStandalone.QuestApp
                 }
 
                 var milestoneTime = Mathf.Clamp01(milestone.normalizedReplayTime);
-                if (milestoneTime <= t + 0.025f && milestoneTime >= bestTime)
+                if (t + lead < milestoneTime || t > milestoneTime + hold)
                 {
-                    bestTime = milestoneTime;
+                    continue;
+                }
+
+                var distance = Mathf.Abs(t - milestoneTime);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
                     active = milestone;
                 }
             }
 
             return active;
+        }
+
+        private Vector3 ResolveCalloutHorizontalOffset(Vector3 anchor)
+        {
+            var distance = Mathf.Max(0.0f, calloutHorizontalOffsetMeters);
+            if (distance <= 0.0001f)
+            {
+                return Vector3.zero;
+            }
+
+            var camera = Camera.main;
+            if (camera == null)
+            {
+                return Vector3.zero;
+            }
+
+            var side = Vector3.ProjectOnPlane(camera.transform.right, _laneUp);
+            if (side.sqrMagnitude <= 0.0001f)
+            {
+                side = Vector3.ProjectOnPlane(anchor - camera.transform.position, _laneUp);
+                side = Vector3.Cross(_laneUp, side);
+            }
+
+            return side.sqrMagnitude <= 0.0001f ? Vector3.zero : side.normalized * distance;
         }
 
         private void FaceCamera(Transform target)

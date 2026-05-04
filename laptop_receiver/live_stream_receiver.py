@@ -70,6 +70,10 @@ MAX_CODEC_CONFIG_PACKET_BYTES = 256 * 1024
 MAX_SAMPLE_PACKET_BYTES = 4 * 1024 * 1024
 
 
+class StaleMediaConnectionError(RuntimeError):
+    pass
+
+
 def _json_dumps_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, indent=2).encode("utf-8")
 
@@ -186,6 +190,10 @@ class LiveStreamSession:
     last_pts_us: int | None = None
     codec_config_seen: bool = False
     codec_config_bytes: int = 0
+    media_connection_generation: int = 0
+    active_media_connection_generation: int = 0
+    dropped_stale_media_sample_count: int = 0
+    dropped_out_of_order_media_sample_count: int = 0
 
     def open(self, *, append_existing: bool = False) -> None:
         self.root_dir.mkdir(parents=True, exist_ok=True)
@@ -230,8 +238,21 @@ class LiveStreamSession:
             "session_end_seen": self.session_ended_payload is not None,
             "codec_config_seen": self.codec_config_seen,
             "codec_config_bytes": self.codec_config_bytes,
+            "media_connection_generation": self.media_connection_generation,
+            "active_media_connection_generation": self.active_media_connection_generation,
+            "dropped_stale_media_sample_count": self.dropped_stale_media_sample_count,
+            "dropped_out_of_order_media_sample_count": self.dropped_out_of_order_media_sample_count,
         }
         self.stream_receipt_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def begin_media_connection(self) -> int:
+        self.media_connection_generation += 1
+        self.active_media_connection_generation = self.media_connection_generation
+        self.persist_receipt()
+        return self.active_media_connection_generation
+
+    def is_current_media_connection(self, connection_generation: int) -> bool:
+        return int(connection_generation) == int(self.active_media_connection_generation)
 
     def write_session_start(self, payload: dict[str, Any]) -> None:
         self.session_started_payload = payload
@@ -257,9 +278,21 @@ class LiveStreamSession:
         )
         self.persist_receipt()
 
-    def append_sample(self, pts_us: int, flags: int, encoded_bytes: bytes) -> None:
+    def append_sample(self, pts_us: int, flags: int, encoded_bytes: bytes, *, connection_generation: int) -> bool:
+        if not self.is_current_media_connection(connection_generation):
+            self.dropped_stale_media_sample_count += 1
+            self.persist_receipt()
+            raise StaleMediaConnectionError(
+                "Ignoring stale media connection "
+                f"generation={connection_generation} active={self.active_media_connection_generation}."
+            )
         if self.media_file is None or self.media_samples_file is None:
             raise RuntimeError("Live stream session files are not open.")
+
+        if self.last_pts_us is not None and int(pts_us) <= int(self.last_pts_us):
+            self.dropped_out_of_order_media_sample_count += 1
+            self.persist_receipt()
+            return False
 
         self.media_file.write(encoded_bytes)
         self.media_file.flush()
@@ -297,8 +330,14 @@ class LiveStreamSession:
             )
             self._rearm_if_media_resumed()
         self.persist_receipt()
+        return True
 
-    def write_codec_config(self, codec_config_bytes: bytes) -> None:
+    def write_codec_config(self, codec_config_bytes: bytes, *, connection_generation: int) -> None:
+        if not self.is_current_media_connection(connection_generation):
+            raise StaleMediaConnectionError(
+                "Ignoring stale codec config "
+                f"generation={connection_generation} active={self.active_media_connection_generation}."
+            )
         if self.media_file is None:
             raise RuntimeError("Live stream session files are not open.")
 
@@ -786,6 +825,12 @@ class LiveStreamRegistry:
             last_pts_us=receipt.get("last_pts_us"),
             codec_config_seen=bool(receipt.get("codec_config_seen") or (root_dir / "codec_config.h264").exists()),
             codec_config_bytes=int(receipt.get("codec_config_bytes") or 0),
+            media_connection_generation=int(receipt.get("media_connection_generation") or 0),
+            active_media_connection_generation=int(receipt.get("active_media_connection_generation") or 0),
+            dropped_stale_media_sample_count=int(receipt.get("dropped_stale_media_sample_count") or 0),
+            dropped_out_of_order_media_sample_count=int(
+                receipt.get("dropped_out_of_order_media_sample_count") or 0
+            ),
         )
         session.open(append_existing=True)
         session.persist_receipt()
@@ -961,6 +1006,7 @@ async def _handle_media_connection(
 ) -> None:
     peer = writer.get_extra_info("peername")
     active_session: LiveStreamSession | None = None
+    media_connection_generation = 0
     disconnect_reason = "media_socket_closed"
     try:
         while True:
@@ -983,6 +1029,7 @@ async def _handle_media_connection(
                 session_id = str(session_payload["session_id"])
                 shot_id = str(session_payload["shot_id"])
                 active_session = registry.start_media_session(session_id, shot_id)
+                media_connection_generation = active_session.begin_media_connection()
                 active_session.write_session_start(session_payload)
                 continue
 
@@ -997,13 +1044,18 @@ async def _handle_media_connection(
                     raise RuntimeError(
                         f"Sample length mismatch. Declared {sample_size}, got {len(encoded_bytes)}."
                     )
-                active_session.append_sample(int(pts_us), int(flags), encoded_bytes)
+                active_session.append_sample(
+                    int(pts_us),
+                    int(flags),
+                    encoded_bytes,
+                    connection_generation=media_connection_generation,
+                )
                 continue
 
             if packet_type == PACKET_TYPE_CODEC_CONFIG:
                 if active_session is None:
                     raise RuntimeError("Received codec_config before session_start.")
-                active_session.write_codec_config(payload)
+                active_session.write_codec_config(payload, connection_generation=media_connection_generation)
                 continue
 
             if packet_type == PACKET_TYPE_SESSION_END:
@@ -1014,6 +1066,8 @@ async def _handle_media_connection(
                 continue
 
             raise RuntimeError(f"Unknown media packet type: {packet_type}")
+    except StaleMediaConnectionError as exc:
+        disconnect_reason = exc.__class__.__name__ + ": " + str(exc)
     except asyncio.IncompleteReadError as exc:
         disconnect_reason = "media_socket_closed"
         if active_session is not None:
@@ -1033,7 +1087,11 @@ async def _handle_media_connection(
         else:
             print(f"live media connection failed from {peer}: {disconnect_reason}", flush=True)
     finally:
-        if active_session is not None and active_session.session_ended_payload is None:
+        if (
+            active_session is not None
+            and active_session.session_ended_payload is None
+            and active_session.is_current_media_connection(media_connection_generation)
+        ):
             active_session.mark_media_disconnected(disconnect_reason)
         writer.close()
         await writer.wait_closed()

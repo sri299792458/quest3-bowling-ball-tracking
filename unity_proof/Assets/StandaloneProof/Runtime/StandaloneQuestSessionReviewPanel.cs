@@ -454,6 +454,11 @@ namespace QuestBowlingStandalone.QuestApp
                 EnsureSelectedShot();
             }
 
+            if (shotReplayList != null)
+            {
+                shotReplayList.SetReviewMode(visible);
+            }
+
             RefreshGhost();
             Refresh();
             SetStatus(visible ? "session_review_open" : "session_review_closed");

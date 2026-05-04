@@ -33,16 +33,24 @@ class _LiveStreamMetadataCache:
     root_path: Path
     stream_path: Path
     metadata_stream_path: Path
+    media_samples_path: Path
     session_start_path: Path
     byte_offset: int = 0
     pending_text: str = ""
+    media_sample_byte_offset: int = 0
+    media_sample_pending_text: str = ""
     session_start_payload: dict[str, Any] | None = None
     frame_metadata: list[dict[str, Any]] = field(default_factory=list)
+    media_samples: list[dict[str, Any]] = field(default_factory=list)
 
     def refresh(self) -> None:
         if not self.metadata_stream_path.exists():
             raise RuntimeError(f"Live stream directory is missing metadata_stream.jsonl: {self.metadata_stream_path}")
 
+        self._refresh_metadata_stream()
+        self._refresh_media_samples()
+
+    def _refresh_metadata_stream(self) -> None:
         current_size = self.metadata_stream_path.stat().st_size
         if current_size < self.byte_offset:
             self.byte_offset = 0
@@ -75,6 +83,40 @@ class _LiveStreamMetadataCache:
                 frame_payload = row.get("frame_metadata")
                 if isinstance(frame_payload, dict):
                     self.frame_metadata.append(frame_payload)
+
+    def _refresh_media_samples(self) -> None:
+        if not self.media_samples_path.exists():
+            self.media_sample_byte_offset = 0
+            self.media_sample_pending_text = ""
+            self.media_samples.clear()
+            return
+
+        current_size = self.media_samples_path.stat().st_size
+        if current_size < self.media_sample_byte_offset:
+            self.media_sample_byte_offset = 0
+            self.media_sample_pending_text = ""
+            self.media_samples.clear()
+
+        with self.media_samples_path.open("r", encoding="utf-8") as handle:
+            handle.seek(self.media_sample_byte_offset)
+            chunk = handle.read()
+            self.media_sample_byte_offset = handle.tell()
+
+        if not chunk:
+            return
+
+        text = self.media_sample_pending_text + chunk
+        self.media_sample_pending_text = ""
+        for line in text.splitlines(keepends=True):
+            if not line.endswith(("\n", "\r")):
+                self.media_sample_pending_text = line
+                continue
+            stripped = line.strip()
+            if not stripped:
+                continue
+            row = json.loads(stripped)
+            if isinstance(row, dict):
+                self.media_samples.append(row)
 
 
 _LIVE_STREAM_METADATA_CACHE_LOCK = threading.RLock()
@@ -115,6 +157,85 @@ def _fallback_video_info_from_session(
         frame_count=frame_count,
         duration_seconds=duration_seconds,
     )
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        if value in ("", None):
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _align_live_frame_metadata_to_media_samples(
+    frame_metadata: list[dict[str, Any]],
+    media_samples: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not media_samples:
+        return list(frame_metadata), {
+            "mode": "metadata_ordinal",
+            "rawFrameMetadataCount": len(frame_metadata),
+            "mediaSampleCount": 0,
+            "missingMetadataForSamples": 0,
+            "metadataWithoutMediaSamples": 0,
+        }
+
+    metadata_by_pts: dict[int, dict[str, Any]] = {}
+    duplicate_metadata_pts = 0
+    for metadata in frame_metadata:
+        pts_us = _int_or_none(metadata.get("ptsUs"))
+        if pts_us is None:
+            continue
+        if pts_us in metadata_by_pts:
+            duplicate_metadata_pts += 1
+            continue
+        metadata_by_pts[pts_us] = metadata
+
+    sample_pts_seen: set[int] = set()
+    aligned: list[dict[str, Any]] = []
+    missing_metadata_for_samples = 0
+    for sample_index, sample in enumerate(media_samples):
+        pts_us = _int_or_none(sample.get("pts_us"))
+        if pts_us is None:
+            pts_us = _int_or_none(sample.get("ptsUs"))
+
+        metadata = metadata_by_pts.get(pts_us) if pts_us is not None else None
+        if pts_us is not None:
+            sample_pts_seen.add(pts_us)
+
+        if metadata is None:
+            missing_metadata_for_samples += 1
+            aligned.append(
+                {
+                    "frameSeq": int(sample_index),
+                    "ptsUs": int(pts_us or 0),
+                    "_mediaSampleIndex": int(sample_index),
+                    "_mediaSamplePtsUs": int(pts_us or 0),
+                    "_mediaSampleMetadataMissing": True,
+                }
+            )
+            continue
+
+        aligned_metadata = dict(metadata)
+        aligned_metadata["_mediaSampleIndex"] = int(sample_index)
+        aligned_metadata["_mediaSamplePtsUs"] = int(pts_us or 0)
+        aligned.append(aligned_metadata)
+
+    metadata_without_samples = sum(
+        1
+        for metadata in frame_metadata
+        if (_int_or_none(metadata.get("ptsUs")) is not None and _int_or_none(metadata.get("ptsUs")) not in sample_pts_seen)
+    )
+    return aligned, {
+        "mode": "media_sample_pts",
+        "rawFrameMetadataCount": len(frame_metadata),
+        "mediaSampleCount": len(media_samples),
+        "alignedFrameMetadataCount": len(aligned),
+        "missingMetadataForSamples": int(missing_metadata_for_samples),
+        "metadataWithoutMediaSamples": int(metadata_without_samples),
+        "duplicateMetadataPts": int(duplicate_metadata_pts),
+    }
 
 
 @dataclass(frozen=True)
@@ -230,6 +351,7 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
     root_path = Path(root_dir).expanduser().resolve()
     stream_path = (root_path / "stream.h264").resolve()
     metadata_stream_path = (root_path / "metadata_stream.jsonl").resolve()
+    media_samples_path = (root_path / "media_samples.jsonl").resolve()
     session_start_path = (root_path / "session_start.json").resolve()
     if not stream_path.exists():
         raise RuntimeError(f"Live stream directory is missing stream.h264: {stream_path}")
@@ -238,11 +360,16 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
 
     with _LIVE_STREAM_METADATA_CACHE_LOCK:
         cache = _LIVE_STREAM_METADATA_CACHE.get(root_path)
-        if cache is None or cache.metadata_stream_path != metadata_stream_path:
+        if (
+            cache is None
+            or cache.metadata_stream_path != metadata_stream_path
+            or cache.media_samples_path != media_samples_path
+        ):
             cache = _LiveStreamMetadataCache(
                 root_path=root_path,
                 stream_path=stream_path,
                 metadata_stream_path=metadata_stream_path,
+                media_samples_path=media_samples_path,
                 session_start_path=session_start_path,
             )
             _LIVE_STREAM_METADATA_CACHE[root_path] = cache
@@ -250,7 +377,10 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
         if cache.session_start_payload is None:
             raise RuntimeError("Live stream metadata is missing a session_start payload.")
         session_start_payload = dict(cache.session_start_payload)
-        frame_metadata = list(cache.frame_metadata)
+        raw_frame_metadata = list(cache.frame_metadata)
+        media_samples = list(cache.media_samples)
+
+    frame_metadata, alignment = _align_live_frame_metadata_to_media_samples(raw_frame_metadata, media_samples)
 
     session_metadata = session_start_payload.get("session_metadata") or _load_json(session_start_path)
     lane_lock_metadata = session_start_payload.get("lane_lock_metadata") or {}
@@ -261,7 +391,9 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
         "mediaPath": "stream.h264",
         "metadataStreamPath": "metadata_stream.jsonl",
         "sessionStartPath": "session_start.json",
+        "mediaSamplesPath": "media_samples.jsonl",
         "frameCount": len(frame_metadata),
+        "frameMetadataAlignment": alignment,
     }
 
     video_info = _fallback_video_info_from_session(session_metadata, frame_metadata)

@@ -263,33 +263,6 @@ class LiveShotBoundaryDetector:
         if state.get("lastReason") == "lane_lock_confirm_missing":
             state["lastReason"] = "lane_lock_confirmed_waiting_for_ball"
 
-        shot_boundaries = load_shot_boundaries(root)
-        if shot_boundaries.errors:
-            raise RuntimeError(
-                "Refusing automatic shot-boundary detection because "
-                f"shot_boundaries.jsonl is invalid: {'; '.join(shot_boundaries.errors)}"
-            )
-
-        self._sync_state_with_boundaries(state, shot_boundaries.events, shot_boundaries.open_start)
-        latest_available_frame_index: int | None = None
-        latest_cursor = self._latest_frame_cursor(root)
-        if latest_cursor is not None:
-            latest_frame_index, latest_frame_seq = latest_cursor
-            if latest_frame_seq <= _int(state.get("lastScannedFrameSeq"), -1):
-                state["lastReason"] = "no_new_frames"
-                self._save_state(root, state)
-                return self._result(
-                    root,
-                    state_path,
-                    state,
-                    status=str(state.get("mode") or "idle"),
-                    reason="no_new_frames",
-                    confirmed_lane_lock_request_id=lane_lock.request_id,
-                )
-            state["latestAvailableFrameIndex"] = int(latest_frame_index)
-            state["latestAvailableFrameSeq"] = int(latest_frame_seq)
-            latest_available_frame_index = int(latest_frame_index)
-
         artifact = load_local_clip_artifact(root)
         if not artifact.frame_metadata:
             self._save_state(root, state)
@@ -301,6 +274,31 @@ class LiveShotBoundaryDetector:
                 reason="frame_metadata_missing",
                 confirmed_lane_lock_request_id=lane_lock.request_id,
             )
+
+        shot_boundaries = load_shot_boundaries(root)
+        if shot_boundaries.errors:
+            raise RuntimeError(
+                "Refusing automatic shot-boundary detection because "
+                f"shot_boundaries.jsonl is invalid: {'; '.join(shot_boundaries.errors)}"
+            )
+
+        self._sync_state_with_boundaries(state, shot_boundaries.events, shot_boundaries.open_start, artifact)
+        latest_available_frame_index: int | None = len(artifact.frame_metadata) - 1
+        latest_metadata = artifact.frame_metadata[latest_available_frame_index]
+        latest_frame_seq = self._frame_seq(latest_metadata, latest_available_frame_index)
+        if latest_frame_seq <= _int(state.get("lastScannedFrameSeq"), -1):
+            state["lastReason"] = "no_new_frames"
+            self._save_state(root, state)
+            return self._result(
+                root,
+                state_path,
+                state,
+                status=str(state.get("mode") or "idle"),
+                reason="no_new_frames",
+                confirmed_lane_lock_request_id=lane_lock.request_id,
+            )
+        state["latestAvailableFrameIndex"] = int(latest_available_frame_index)
+        state["latestAvailableFrameSeq"] = int(latest_frame_seq)
 
         session_id, stream_shot_id = self._session_identity(artifact)
         intrinsics = CameraIntrinsics.from_session_metadata(artifact.session_metadata)
@@ -840,15 +838,21 @@ class LiveShotBoundaryDetector:
         state: dict[str, Any],
         events: list[ShotBoundaryEvent],
         open_start: ShotBoundaryEvent | None,
+        artifact: LocalClipArtifact,
     ) -> None:
         if events:
             max_boundary_frame_seq = max(int(event.frame_seq) for event in events)
             if _int(state.get("lastScannedFrameSeq"), -1) < max_boundary_frame_seq:
-                state["lastScannedFrameSeq"] = int(max_boundary_frame_seq)
-                state["lastScannedFrameIndex"] = max(
-                    _int(state.get("lastScannedFrameIndex"), -1),
-                    int(max_boundary_frame_seq),
+                boundary_frame_index = self._frame_index_at_or_before_frame_seq(
+                    artifact.frame_metadata,
+                    max_boundary_frame_seq,
                 )
+                state["lastScannedFrameSeq"] = int(max_boundary_frame_seq)
+                if boundary_frame_index is not None:
+                    state["lastScannedFrameIndex"] = max(
+                        _int(state.get("lastScannedFrameIndex"), -1),
+                        int(boundary_frame_index),
+                    )
 
         if open_start is not None:
             active_shot = state.get("activeShot")
@@ -918,22 +922,11 @@ class LiveShotBoundaryDetector:
         return state
 
     def _latest_frame_cursor(self, root: Path) -> tuple[int, int] | None:
-        session_state_path = root / "session_state.json"
-        if session_state_path.exists():
-            try:
-                session_state = json.loads(session_state_path.read_text(encoding="utf-8"))
-                transport = session_state.get("transport") if isinstance(session_state, Mapping) else None
-                if isinstance(transport, Mapping):
-                    latest_frame_seq = _int(transport.get("lastFrameSeq"), -1)
-                    if latest_frame_seq >= 0:
-                        return latest_frame_seq, latest_frame_seq
-            except Exception:
-                pass
-
         metadata_stream_path = root / "metadata_stream.jsonl"
         if not metadata_stream_path.exists():
             return None
 
+        frame_seq_by_pts: dict[int, int] = {}
         latest_frame_index = -1
         latest_frame_seq = -1
         for line in metadata_stream_path.read_text(encoding="utf-8").splitlines():
@@ -951,6 +944,29 @@ class LiveShotBoundaryDetector:
                 continue
             latest_frame_index += 1
             latest_frame_seq = self._frame_seq(frame_metadata, latest_frame_index)
+            pts_us = _int(frame_metadata.get("ptsUs"), -1)
+            if pts_us >= 0:
+                frame_seq_by_pts[pts_us] = latest_frame_seq
+
+        media_samples_path = root / "media_samples.jsonl"
+        if media_samples_path.exists():
+            latest_sample_index = -1
+            latest_sample_frame_seq = -1
+            for line in media_samples_path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    sample = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                latest_sample_index += 1
+                pts_us = _int(sample.get("pts_us"), _int(sample.get("ptsUs"), -1))
+                latest_sample_frame_seq = frame_seq_by_pts.get(pts_us, latest_sample_frame_seq)
+            if latest_sample_index >= 0:
+                if latest_sample_frame_seq < 0:
+                    latest_sample_frame_seq = latest_sample_index
+                return latest_sample_index, latest_sample_frame_seq
 
         if latest_frame_index < 0:
             return None
@@ -1049,6 +1065,17 @@ class LiveShotBoundaryDetector:
             if self._frame_seq(metadata, -1) >= int(target_frame_seq):
                 return metadata
         return frame_metadata[-1] if frame_metadata else None
+
+    def _frame_index_at_or_before_frame_seq(
+        self,
+        frame_metadata: list[dict[str, Any]],
+        target_frame_seq: int,
+    ) -> int | None:
+        best_index: int | None = None
+        for index, metadata in enumerate(frame_metadata):
+            if self._frame_seq(metadata, index) <= int(target_frame_seq):
+                best_index = index
+        return best_index
 
     def _frame_seq(self, metadata: Mapping[str, Any], fallback: int) -> int:
         return _int(metadata.get("frameSeq"), int(fallback))

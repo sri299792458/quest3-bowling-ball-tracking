@@ -21,6 +21,8 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Vector2 shotButtonSize = new Vector2(164.0f, 96.0f);
         [SerializeField] private float shotButtonSpacing = 10.0f;
         [SerializeField] private float shotButtonRowYOffset = 40.0f;
+        [SerializeField] private Vector2 normalAnchoredPosition = new Vector2(300.0f, -38.0f);
+        [SerializeField] private Vector2 reviewAnchoredPosition = new Vector2(300.0f, -252.0f);
         [SerializeField] private float transientFailureMessageSeconds = 2.75f;
         [SerializeField] private string emptyText = string.Empty;
         [SerializeField] private string shotLabelPrefix = "Shot ";
@@ -39,6 +41,7 @@ namespace QuestBowlingStandalone.QuestApp
         private string _transientMessage = string.Empty;
         private float _transientMessageUntil;
         private bool _experienceVisible = true;
+        private bool _reviewMode;
 
         public event Action ShotsChanged;
         public event Action<int, StandaloneShotResult> ShotSelected;
@@ -261,6 +264,17 @@ namespace QuestBowlingStandalone.QuestApp
             RefreshList();
         }
 
+        public void SetReviewMode(bool reviewMode)
+        {
+            if (_reviewMode == reviewMode)
+            {
+                return;
+            }
+
+            _reviewMode = reviewMode;
+            RefreshList();
+        }
+
         public void ClearShots(string reason)
         {
             _shots.Clear();
@@ -352,6 +366,7 @@ namespace QuestBowlingStandalone.QuestApp
         private void RefreshList()
         {
             EnsureUiObjects();
+            ApplyLayoutMode();
 
             var visibleCount = Mathf.Min(Mathf.Max(1, maxVisibleShots), _shots.Count);
             var visibleStart = Mathf.Max(0, _shots.Count - visibleCount);
@@ -389,6 +404,17 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             RefreshSessionSummary();
+        }
+
+        private void ApplyLayoutMode()
+        {
+            var rectTransform = GetComponent<RectTransform>();
+            if (rectTransform == null)
+            {
+                return;
+            }
+
+            rectTransform.anchoredPosition = _reviewMode ? reviewAnchoredPosition : normalAnchoredPosition;
         }
 
         private void EnsureButtonCount(int count)

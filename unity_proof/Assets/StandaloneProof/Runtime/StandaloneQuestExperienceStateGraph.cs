@@ -145,6 +145,7 @@ namespace QuestBowlingStandalone.QuestApp
                     "review_open",
                     "Review Open",
                     hasShots,
+                    showShotRail: true,
                     showReviewButton: true);
             }
 
@@ -155,6 +156,7 @@ namespace QuestBowlingStandalone.QuestApp
                     "replay_playing",
                     "Replay Playing",
                     hasShots,
+                    showShotRail: true,
                     showReviewButton: true);
             }
 

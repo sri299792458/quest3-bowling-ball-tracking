@@ -169,7 +169,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b23e5ea465f74f2dbf480be2369cfd71, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayList
   liveResultReceiver: {fileID: 1545997011}
   shotReplayRenderer: {fileID: 1545997014}
@@ -183,8 +183,10 @@ MonoBehaviour:
   shotButtonSize: {x: 164, y: 96}
   shotButtonSpacing: 10
   shotButtonRowYOffset: 40
+  normalAnchoredPosition: {x: 300, y: -38}
+  reviewAnchoredPosition: {x: 300, y: -252}
   transientFailureMessageSeconds: 2.75
-  emptyText:
+  emptyText: 
   shotLabelPrefix: 'Shot '
   panelColor: {r: 0.02, g: 0.045, b: 0.05, a: 0.72}
   buttonColor: {r: 0.08, g: 0.17, b: 0.18, a: 0.94}
@@ -203,7 +205,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.02, g: 0.045, b: 0.05, a: 0.72}
@@ -259,7 +261,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8f1a9a1d119a5944aacfb87d1ec283a2, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Oculus.VR::UnityEngine.EventSystems.OVRInputModule
   m_SendPointerHoverToParent: 1
   rayTransform: {fileID: 2009445122}
@@ -291,7 +293,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 76c392e42b5098c458856cdf6ecaaaa1, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.EventSystems.EventSystem
   m_FirstSelected: {fileID: 0}
   m_sendNavigationEvents: 1
@@ -362,7 +364,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6f47296d40e24974f9bcb7daf7d886ad, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockButton
   laneLockCoordinator: {fileID: 1545997017}
   actionKind: 1
@@ -394,7 +396,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
   m_Navigation:
     m_Mode: 3
@@ -438,7 +440,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.18, g: 0.11, b: 0.1, a: 0.94}
@@ -513,7 +515,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 0.96, g: 0.98, b: 1, a: 1}
@@ -592,7 +594,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 0.94, g: 1, b: 1, a: 1}
@@ -615,7 +617,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 0.9
-  m_Text:
+  m_Text: 
 --- !u!222 &551431083
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -673,7 +675,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c56360627b71423d8e813ff780c32f93, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestExperienceStatusStrip
   sessionController: {fileID: 1545997005}
   laneLockCoordinator: {fileID: 1545997017}
@@ -698,7 +700,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.015, g: 0.035, b: 0.04, a: 0.62}
@@ -786,7 +788,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 0.72, g: 0.84, b: 0.84, a: 1}
@@ -809,7 +811,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 0.9
-  m_Text:
+  m_Text: 
 --- !u!222 &704247708
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -886,7 +888,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2d4d99b8ad8849cb9abbb1e03275c0f0, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestSessionReviewPanel
   shotReplayList: {fileID: 259532596}
   shotReplayRenderer: {fileID: 1545997014}
@@ -936,7 +938,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.015, g: 0.035, b: 0.04, a: 0.88}
@@ -1044,7 +1046,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
   m_Navigation:
     m_Mode: 3
@@ -1088,7 +1090,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.08, g: 0.17, b: 0.18, a: 0.94}
@@ -1205,13 +1207,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ef9a7893e57c04c0db4114c70954b915, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: meta.xr.mrutilitykit::Meta.XR.PassthroughCameraAccess
   CameraPosition: 0
   RequestedResolution: {x: 1280, y: 960}
   _maxFramerate: 60
   TargetMaterial: {fileID: 0}
-  _texturePropertyName:
+  _texturePropertyName: 
 --- !u!4 &1216884246
 Transform:
   m_ObjectHideFlags: 0
@@ -1278,7 +1280,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6f47296d40e24974f9bcb7daf7d886ad, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockButton
   laneLockCoordinator: {fileID: 1545997017}
   actionKind: 0
@@ -1298,7 +1300,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4e29b1a8efbd4b44bb3f3716e73f07ff, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Button
   m_Navigation:
     m_Mode: 3
@@ -1342,7 +1344,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0.09, g: 0.13, b: 0.19, a: 0.94}
@@ -1429,7 +1431,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 1, g: 0.86, b: 0.48, a: 1}
@@ -1541,7 +1543,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 0.96, g: 0.98, b: 1, a: 1}
@@ -1611,7 +1613,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 77da95374aa98114984fbd60f1296588, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestProofRenderCoordinator
   frameSource: {fileID: 1545997002}
   proofCapture: {fileID: 1545997001}
@@ -1628,7 +1630,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5d7c676f062bf5c4b99b0f2ea67fc07a, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLocalProofCapture
   sessionContext: {fileID: 1545997010}
   cameraAccess: {fileID: 1216884245}
@@ -1660,7 +1662,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: d14a0e5c8eb56934082dfb1f50d994d5, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestFrameSource
   cameraAccess: {fileID: 1216884245}
   cameraPosition: 0
@@ -1696,9 +1698,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 11cb39b7c7b76004cb3f8921cc9a83bf, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveMetadataSender
-  host:
+  host: 
   port: 8767
   connectTimeoutMs: 1000
   enabledForAutoRun: 1
@@ -1713,7 +1715,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4240c4066f085914b8d7dd6006fb8490, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestSessionController
   proofCapture: {fileID: 1545997001}
   liveMetadataSender: {fileID: 1545997004}
@@ -1727,7 +1729,7 @@ MonoBehaviour:
   enableLiveStreaming: 1
   requireLaptopDiscovery: 1
   abortSessionOnApplicationPause: 0
-  liveStreamHost:
+  liveStreamHost: 
   liveMediaPort: 8766
   mediaWatchdogIntervalSeconds: 0.5
   mediaReconnectIntervalSeconds: 1
@@ -1743,7 +1745,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 27080c14766738445bea3c4b0521be5d, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestFloorPlaneSource
   floorReference: {fileID: 1642275085}
   verboseLogging: 1
@@ -1757,7 +1759,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 8f87e4708e5c5184e958a0dc23b4e04c, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestSessionContext
   verboseLogging: 1
 --- !u!114 &1545997011
@@ -1770,9 +1772,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c8f0a1d3e27a4bdc9f1a5a3e5d8f7b21, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver
-  host:
+  host: 
   port: 8769
   connectTimeoutMs: 1000
   reconnectDelayMs: 1000
@@ -1788,7 +1790,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e27f18c7b39d41ce90280c72827b12da, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer
   liveResultReceiver: {fileID: 1545997011}
   laneLockCoordinator: {fileID: 1545997017}
@@ -1796,8 +1798,11 @@ MonoBehaviour:
   lineWidthMeters: 0.035
   markerRadiusMeters: 0.11
   verticalOffsetMeters: 0.035
-  calloutVerticalOffsetMeters: 0.34
-  calloutCharacterSizeMeters: 0.055
+  calloutVerticalOffsetMeters: 0.42
+  calloutHorizontalOffsetMeters: 0.26
+  calloutCharacterSizeMeters: 0.045
+  calloutLeadSeconds: 0.1
+  calloutHoldSeconds: 0.7
   ghostLineWidthMeters: 0.018
   minReplayDurationSeconds: 0.75
   maxReplayDurationSeconds: 3
@@ -1820,7 +1825,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7cf14dcba98f4ba583243c27df602e57, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockResultRenderer
   visualizationRoot: {fileID: 0}
   renderVisibleDownlaneOnly: 0
@@ -1846,7 +1851,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 9d2b3b9e0a2543c4bb3b8c9b4a2b6f10, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaptopDiscovery
   enabledForAutoRun: 1
   discoveryPort: 8765
@@ -1863,7 +1868,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 94e7c1e0e8e2e894085d645a275a24ef, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator
   floorPlaneSource: {fileID: 1545997009}
   proofCapture: {fileID: 1545997001}
@@ -1948,7 +1953,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 114428879332287356, guid: 835e735ca71bf78459fb2cababd74112, type: 3}
       propertyPath: RayHelper
-      value:
+      value: 
       objectReference: {fileID: 2009445123}
     - target: {fileID: 114567484643301796, guid: 835e735ca71bf78459fb2cababd74112, type: 3}
       propertyPath: _skeletonType
@@ -1980,8 +1985,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: cb7623a8f0b49cf4dbaa40aea4d4be64, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1 &1641333507
 GameObject:
   m_ObjectHideFlags: 0
@@ -2036,7 +2041,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7aaf960227867044282d921171d2d7ac, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Oculus.VR::OVRRaycaster
   m_IgnoreReversedGraphics: 1
   m_BlockingObjects: 0
@@ -2055,7 +2060,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.CanvasScaler
   m_UiScaleMode: 0
   m_ReferencePixelsPerUnit: 100
@@ -2306,7 +2311,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 5f7201a12d95ffc409449d95f23cf332, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Text
   m_Material: {fileID: 0}
   m_Color: {r: 0.94, g: 1, b: 1, a: 1}
@@ -2365,7 +2370,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 555725d48e9051a4bb6b8d45178c2fdd, type: 3}
-  m_Name:
+  m_Name: 
   m_EditorClassIdentifier: Oculus.VR::OVRPassthroughLayer
   projectionSurfaceType: 0
   overlayType: 1
@@ -2543,8 +2548,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 639f740ebcad32e4880a3e22eea9095c, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -942,8 +942,11 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("lineWidthMeters").floatValue = 0.035f;
             serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.11f;
             serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.035f;
-            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.34f;
-            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.055f;
+            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.42f;
+            serializedObject.FindProperty("calloutHorizontalOffsetMeters").floatValue = 0.26f;
+            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.045f;
+            serializedObject.FindProperty("calloutLeadSeconds").floatValue = 0.10f;
+            serializedObject.FindProperty("calloutHoldSeconds").floatValue = 0.70f;
             serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.018f;
             serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
             serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
@@ -1277,6 +1280,8 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(164.0f, 96.0f);
             serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
             serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 40.0f;
+            serializedObject.FindProperty("normalAnchoredPosition").vector2Value = new Vector2(300.0f, -38.0f);
+            serializedObject.FindProperty("reviewAnchoredPosition").vector2Value = new Vector2(300.0f, -252.0f);
             serializedObject.FindProperty("transientFailureMessageSeconds").floatValue = 2.75f;
             serializedObject.FindProperty("emptyText").stringValue = string.Empty;
             serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
