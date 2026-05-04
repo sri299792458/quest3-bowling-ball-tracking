@@ -30,13 +30,13 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Text trendLabel;
 
         [Header("Presentation")]
-        [SerializeField] private string hiddenToggleText = "Review";
+        [SerializeField] private string hiddenToggleText = "Shots";
         [SerializeField] private string visibleToggleText = "Hide";
-        [SerializeField] private Color panelColor = new Color(0.015f, 0.035f, 0.04f, 0.88f);
-        [SerializeField] private Color buttonColor = new Color(0.08f, 0.17f, 0.18f, 0.94f);
-        [SerializeField] private Color selectedButtonColor = new Color(0.16f, 0.44f, 0.48f, 1.0f);
+        [SerializeField] private Color panelColor = new Color(0.055f, 0.066f, 0.072f, 0.86f);
+        [SerializeField] private Color buttonColor = new Color(0.075f, 0.095f, 0.11f, 0.92f);
+        [SerializeField] private Color selectedButtonColor = new Color(0.03f, 0.46f, 0.68f, 0.98f);
         [SerializeField] private Color labelColor = new Color(0.94f, 1.0f, 1.0f, 1.0f);
-        [SerializeField] private Color mutedLabelColor = new Color(0.70f, 0.82f, 0.84f, 1.0f);
+        [SerializeField] private Color mutedLabelColor = new Color(0.70f, 0.78f, 0.82f, 1.0f);
         [SerializeField] private bool verboseLogging;
 
         private bool _visible;
@@ -190,15 +190,15 @@ namespace QuestBowlingStandalone.QuestApp
                 parent,
                 "SessionReviewButton",
                 hiddenToggleText,
-                new Vector2(650.0f, 116.0f),
-                new Vector2(150.0f, 62.0f));
+                new Vector2(560.0f, 116.0f),
+                new Vector2(132.0f, 58.0f));
 
-            titleLabel = EnsureText(titleLabel, transform, "Title", "Session Review", TextAnchor.MiddleLeft, 24);
-            consistencyLabel = EnsureText(consistencyLabel, transform, "Consistency", string.Empty, TextAnchor.UpperLeft, 17);
-            selectedShotLabel = EnsureText(selectedShotLabel, transform, "SelectedShot", string.Empty, TextAnchor.UpperLeft, 18);
-            comparisonLabel = EnsureText(comparisonLabel, transform, "Comparison", string.Empty, TextAnchor.UpperLeft, 17);
-            bestShotLabel = EnsureText(bestShotLabel, transform, "BestShot", string.Empty, TextAnchor.UpperLeft, 17);
-            trendLabel = EnsureText(trendLabel, transform, "Trend", string.Empty, TextAnchor.UpperLeft, 16);
+            titleLabel = EnsureText(titleLabel, transform, "Title", "Session", TextAnchor.MiddleLeft, 24);
+            consistencyLabel = EnsureText(consistencyLabel, transform, "Consistency", string.Empty, TextAnchor.UpperLeft, 16);
+            selectedShotLabel = EnsureText(selectedShotLabel, transform, "SelectedShot", string.Empty, TextAnchor.UpperLeft, 17);
+            comparisonLabel = EnsureText(comparisonLabel, transform, "Comparison", string.Empty, TextAnchor.UpperLeft, 16);
+            bestShotLabel = EnsureText(bestShotLabel, transform, "BestShot", string.Empty, TextAnchor.UpperLeft, 16);
+            trendLabel = EnsureText(trendLabel, transform, "Trend", string.Empty, TextAnchor.UpperLeft, 15);
 
             previousButton = EnsureButton(
                 previousButton,
@@ -206,31 +206,31 @@ namespace QuestBowlingStandalone.QuestApp
                 transform,
                 "PreviousShotButton",
                 "Prev",
-                new Vector2(-106.0f, -118.0f),
-                new Vector2(100.0f, 48.0f));
+                new Vector2(-114.0f, -118.0f),
+                new Vector2(96.0f, 46.0f));
             nextButton = EnsureButton(
                 nextButton,
                 ref nextButtonLabel,
                 transform,
                 "NextShotButton",
                 "Next",
-                new Vector2(10.0f, -118.0f),
-                new Vector2(100.0f, 48.0f));
+                new Vector2(-8.0f, -118.0f),
+                new Vector2(96.0f, 46.0f));
             closeButton = EnsureButton(
                 closeButton,
                 ref closeButtonLabel,
                 transform,
                 "CloseButton",
                 "Close",
-                new Vector2(314.0f, 112.0f),
-                new Vector2(110.0f, 48.0f));
+                new Vector2(318.0f, 112.0f),
+                new Vector2(104.0f, 46.0f));
 
-            ConfigureRect(titleLabel, new Vector2(0.04f, 0.82f), new Vector2(0.48f, 0.98f));
-            ConfigureRect(consistencyLabel, new Vector2(0.04f, 0.16f), new Vector2(0.47f, 0.82f));
-            ConfigureRect(selectedShotLabel, new Vector2(0.50f, 0.62f), new Vector2(0.96f, 0.82f));
-            ConfigureRect(comparisonLabel, new Vector2(0.50f, 0.42f), new Vector2(0.96f, 0.62f));
-            ConfigureRect(bestShotLabel, new Vector2(0.50f, 0.22f), new Vector2(0.96f, 0.42f));
-            ConfigureRect(trendLabel, new Vector2(0.50f, 0.04f), new Vector2(0.96f, 0.22f));
+            ConfigureRect(titleLabel, new Vector2(0.04f, 0.82f), new Vector2(0.46f, 0.98f));
+            ConfigureRect(consistencyLabel, new Vector2(0.04f, 0.18f), new Vector2(0.45f, 0.82f));
+            ConfigureRect(selectedShotLabel, new Vector2(0.49f, 0.60f), new Vector2(0.96f, 0.82f));
+            ConfigureRect(comparisonLabel, new Vector2(0.49f, 0.40f), new Vector2(0.96f, 0.60f));
+            ConfigureRect(bestShotLabel, new Vector2(0.49f, 0.22f), new Vector2(0.96f, 0.40f));
+            ConfigureRect(trendLabel, new Vector2(0.49f, 0.04f), new Vector2(0.96f, 0.22f));
         }
 
         private Text EnsureText(Text text, Transform parent, string objectName, string value, TextAnchor anchor, int fontSize)
@@ -256,10 +256,12 @@ namespace QuestBowlingStandalone.QuestApp
             text.text = value;
             text.alignment = anchor;
             text.fontSize = fontSize;
-            text.resizeTextForBestFit = false;
+            text.resizeTextForBestFit = true;
+            text.resizeTextMinSize = Mathf.Max(10, fontSize - 4);
+            text.resizeTextMaxSize = fontSize;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;
             text.verticalOverflow = VerticalWrapMode.Truncate;
-            text.lineSpacing = 0.88f;
+            text.lineSpacing = 0.84f;
             text.color = anchor == TextAnchor.UpperLeft ? mutedLabelColor : labelColor;
             text.raycastTarget = false;
             return text;
@@ -338,8 +340,10 @@ namespace QuestBowlingStandalone.QuestApp
             label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.text = text;
             label.alignment = TextAnchor.MiddleCenter;
-            label.fontSize = 20;
-            label.resizeTextForBestFit = false;
+            label.fontSize = 18;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 12;
+            label.resizeTextMaxSize = 18;
             label.horizontalOverflow = HorizontalWrapMode.Wrap;
             label.verticalOverflow = VerticalWrapMode.Truncate;
             label.color = labelColor;
@@ -687,8 +691,8 @@ namespace QuestBowlingStandalone.QuestApp
         {
             var lines = new List<string>
             {
-                "Consistency",
-                "Shots           " + shotCount.ToString(CultureInfo.InvariantCulture),
+                "CONSISTENCY",
+                "Shots  " + shotCount.ToString(CultureInfo.InvariantCulture),
             };
 
             AddAverageAndSpread(lines, "Speed Avg", "Speed Spread", aggregate.Speed, " mph", " mph");
@@ -699,8 +703,8 @@ namespace QuestBowlingStandalone.QuestApp
                 var distance = aggregate.BreakpointDistance.Count > 0
                     ? " @ " + aggregate.BreakpointDistance.Mean.ToString("0", CultureInfo.InvariantCulture) + " ft"
                     : string.Empty;
-                lines.Add("Breakpoint     " + aggregate.BreakpointBoard.Mean.ToString("0.0", CultureInfo.InvariantCulture) + distance);
-                lines.Add("Bkpt Spread    +/- " + aggregate.BreakpointBoard.StdDev.ToString("0.0", CultureInfo.InvariantCulture) + " boards");
+                lines.Add("Bkpt  " + aggregate.BreakpointBoard.Mean.ToString("0.0", CultureInfo.InvariantCulture) + distance);
+                lines.Add("Bkpt +/-  " + aggregate.BreakpointBoard.StdDev.ToString("0.0", CultureInfo.InvariantCulture) + " boards");
             }
 
             return string.Join("\n", lines.ToArray());
@@ -719,8 +723,8 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            lines.Add(averageLabel.PadRight(16) + values.Mean.ToString("0.0", CultureInfo.InvariantCulture) + averageSuffix);
-            lines.Add(spreadLabel.PadRight(16) + "+/- " + values.StdDev.ToString("0.0", CultureInfo.InvariantCulture) + spreadSuffix);
+            lines.Add(averageLabel + "  " + values.Mean.ToString("0.0", CultureInfo.InvariantCulture) + averageSuffix);
+            lines.Add(spreadLabel + " +/-  " + values.StdDev.ToString("0.0", CultureInfo.InvariantCulture) + spreadSuffix);
         }
 
         private string BuildSelectedShotText(int selectedIndex, StandaloneShotResult shot)
@@ -728,13 +732,13 @@ namespace QuestBowlingStandalone.QuestApp
             var stats = shot != null ? shot.shotStats : null;
             var lines = new List<string>
             {
-                "Selected Shot " + (selectedIndex + 1).ToString(CultureInfo.InvariantCulture) + " of " + (shotReplayList != null ? shotReplayList.ShotCount : 0).ToString(CultureInfo.InvariantCulture),
+                "SHOT " + (selectedIndex + 1).ToString(CultureInfo.InvariantCulture) + " OF " + (shotReplayList != null ? shotReplayList.ShotCount : 0).ToString(CultureInfo.InvariantCulture),
             };
 
             var values = new List<string>();
             if (stats != null && TryAverageSpeed(stats, out var speed))
             {
-                values.Add(speed.ToString("0.0", CultureInfo.InvariantCulture) + " mph");
+                values.Add("Speed " + speed.ToString("0.0", CultureInfo.InvariantCulture) + " mph");
             }
 
             if (stats != null && TryEntryBoard(stats, out var entry))
@@ -744,7 +748,7 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (stats != null && TryEntryAngle(stats, out var angle))
             {
-                values.Add(angle.ToString("0.0", CultureInfo.InvariantCulture) + " deg");
+                values.Add("Angle " + angle.ToString("0.0", CultureInfo.InvariantCulture) + " deg");
             }
 
             if (stats != null && TryBreakpoint(stats, out var breakpointBoard, out var breakpointDistance))
@@ -752,7 +756,7 @@ namespace QuestBowlingStandalone.QuestApp
                 values.Add("Bkpt " + breakpointBoard.ToString("0.0", CultureInfo.InvariantCulture) + " @ " + breakpointDistance.ToString("0", CultureInfo.InvariantCulture) + " ft");
             }
 
-            lines.Add(values.Count > 0 ? string.Join("   ", values.ToArray()) : "Stats unavailable");
+            lines.Add(values.Count > 0 ? string.Join("\n", values.ToArray()) : "Stats unavailable");
             return string.Join("\n", lines.ToArray());
         }
 
@@ -760,14 +764,14 @@ namespace QuestBowlingStandalone.QuestApp
         {
             if (selectedIndex <= 0 || selectedIndex >= shots.Length)
             {
-                return "Vs Previous\nSelect a later shot for comparison.";
+                return "VS PREVIOUS\nSelect a later shot.";
             }
 
             var current = shots[selectedIndex] != null ? shots[selectedIndex].shotStats : null;
             var previous = shots[selectedIndex - 1] != null ? shots[selectedIndex - 1].shotStats : null;
             if (current == null || previous == null)
             {
-                return "Vs Previous\nComparison unavailable.";
+                return "VS PREVIOUS\nComparison unavailable.";
             }
 
             var values = new List<string>();
@@ -791,7 +795,7 @@ namespace QuestBowlingStandalone.QuestApp
                 AddDelta(values, "Bkpt", currentBreakpoint - previousBreakpoint, " boards");
             }
 
-            return "Vs Previous\n" + (values.Count > 0 ? string.Join("   ", values.ToArray()) : "Comparison unavailable.");
+            return "VS PREVIOUS\n" + (values.Count > 0 ? string.Join("\n", values.ToArray()) : "Comparison unavailable.");
         }
 
         private void AddDelta(List<string> values, string label, float delta, string suffix)
@@ -823,7 +827,7 @@ namespace QuestBowlingStandalone.QuestApp
                 parts.Add("Entry " + entry.ToString("0.0", CultureInfo.InvariantCulture));
             }
 
-            return "Most Repeatable\n" + string.Join("   ", parts.ToArray());
+            return "MOST REPEATABLE\n" + string.Join("\n", parts.ToArray());
         }
 
         private string BuildTrendText(StandaloneShotResult[] shots)
@@ -842,9 +846,9 @@ namespace QuestBowlingStandalone.QuestApp
                     : "--");
             }
 
-            return "Last " + speedValues.Count.ToString(CultureInfo.InvariantCulture) + "\n"
-                + "Speed " + string.Join(" -> ", speedValues.ToArray()) + "\n"
-                + "Entry " + string.Join(" -> ", entryValues.ToArray());
+            return "LAST " + speedValues.Count.ToString(CultureInfo.InvariantCulture) + "\n"
+                + "Speed " + string.Join(" / ", speedValues.ToArray()) + "\n"
+                + "Entry " + string.Join(" / ", entryValues.ToArray());
         }
 
         private bool TryAverageSpeed(StandaloneShotStats stats, out float value)

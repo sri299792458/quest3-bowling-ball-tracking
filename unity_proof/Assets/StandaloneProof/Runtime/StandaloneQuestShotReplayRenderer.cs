@@ -13,15 +13,15 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Transform replayRoot;
 
         [Header("Replay Shape")]
-        [SerializeField] private float lineWidthMeters = 0.035f;
-        [SerializeField] private float markerRadiusMeters = 0.11f;
+        [SerializeField] private float lineWidthMeters = 0.03f;
+        [SerializeField] private float markerRadiusMeters = 0.10f;
         [SerializeField] private float verticalOffsetMeters = 0.035f;
-        [SerializeField] private float calloutVerticalOffsetMeters = 0.42f;
-        [SerializeField] private float calloutHorizontalOffsetMeters = 0.26f;
-        [SerializeField] private float calloutCharacterSizeMeters = 0.045f;
+        [SerializeField] private float calloutVerticalOffsetMeters = 0.50f;
+        [SerializeField] private float calloutHorizontalOffsetMeters = 0.34f;
+        [SerializeField] private float calloutCharacterSizeMeters = 0.040f;
         [SerializeField] private float calloutLeadSeconds = 0.10f;
-        [SerializeField] private float calloutHoldSeconds = 0.70f;
-        [SerializeField] private float ghostLineWidthMeters = 0.018f;
+        [SerializeField] private float calloutHoldSeconds = 0.55f;
+        [SerializeField] private float ghostLineWidthMeters = 0.016f;
         [SerializeField] private float minReplayDurationSeconds = 0.75f;
         [SerializeField] private float maxReplayDurationSeconds = 3.0f;
         [SerializeField, Range(0.0f, 1.0f)] private float minAverageProjectionConfidence = 0.20f;
@@ -29,9 +29,9 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private bool clearOnFailedShotResult;
 
         [Header("Colors")]
-        [SerializeField] private Color trajectoryColor = new Color(0.05f, 0.9f, 1.0f, 1.0f);
+        [SerializeField] private Color trajectoryColor = new Color(0.02f, 0.82f, 1.0f, 1.0f);
         [SerializeField] private Color markerColor = new Color(1.0f, 0.74f, 0.16f, 1.0f);
-        [SerializeField] private Color ghostTrajectoryColor = new Color(0.56f, 0.68f, 0.72f, 0.42f);
+        [SerializeField] private Color ghostTrajectoryColor = new Color(0.78f, 0.84f, 0.88f, 0.32f);
         [SerializeField] private Color calloutTextColor = new Color(0.96f, 1.0f, 1.0f, 1.0f);
         [SerializeField] private Color calloutShadowColor = new Color(0.0f, 0.0f, 0.0f, 0.92f);
 

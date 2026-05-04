@@ -18,20 +18,20 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private Text emptyLabel;
         [SerializeField] private Text sessionSummaryLabel;
         [SerializeField] private int maxVisibleShots = 4;
-        [SerializeField] private Vector2 shotButtonSize = new Vector2(164.0f, 96.0f);
-        [SerializeField] private float shotButtonSpacing = 10.0f;
-        [SerializeField] private float shotButtonRowYOffset = 40.0f;
-        [SerializeField] private Vector2 normalAnchoredPosition = new Vector2(300.0f, -38.0f);
-        [SerializeField] private Vector2 reviewAnchoredPosition = new Vector2(300.0f, -252.0f);
+        [SerializeField] private Vector2 shotButtonSize = new Vector2(138.0f, 82.0f);
+        [SerializeField] private float shotButtonSpacing = 8.0f;
+        [SerializeField] private float shotButtonRowYOffset = 20.0f;
+        [SerializeField] private Vector2 normalAnchoredPosition = new Vector2(270.0f, -58.0f);
+        [SerializeField] private Vector2 reviewAnchoredPosition = new Vector2(270.0f, -252.0f);
         [SerializeField] private float transientFailureMessageSeconds = 2.75f;
         [SerializeField] private string emptyText = string.Empty;
         [SerializeField] private string shotLabelPrefix = "Shot ";
-        [SerializeField] private Color panelColor = new Color(0.02f, 0.045f, 0.05f, 0.72f);
-        [SerializeField] private Color buttonColor = new Color(0.08f, 0.17f, 0.18f, 0.94f);
-        [SerializeField] private Color selectedButtonColor = new Color(0.16f, 0.44f, 0.48f, 1.0f);
-        [SerializeField] private Color disabledButtonColor = new Color(0.13f, 0.15f, 0.15f, 0.70f);
+        [SerializeField] private Color panelColor = new Color(0.055f, 0.066f, 0.072f, 0.62f);
+        [SerializeField] private Color buttonColor = new Color(0.075f, 0.095f, 0.11f, 0.92f);
+        [SerializeField] private Color selectedButtonColor = new Color(0.03f, 0.46f, 0.68f, 0.98f);
+        [SerializeField] private Color disabledButtonColor = new Color(0.12f, 0.13f, 0.14f, 0.62f);
         [SerializeField] private Color labelColor = new Color(0.94f, 1.0f, 1.0f, 1.0f);
-        [SerializeField] private Color mutedLabelColor = new Color(0.72f, 0.84f, 0.84f, 1.0f);
+        [SerializeField] private Color mutedLabelColor = new Color(0.70f, 0.78f, 0.82f, 1.0f);
         [SerializeField] private bool verboseLogging;
 
         private readonly List<ShotRecord> _shots = new List<ShotRecord>();
@@ -353,12 +353,12 @@ namespace QuestBowlingStandalone.QuestApp
                 sessionSummaryLabel = summaryObject.GetComponent<Text>();
             }
 
-            ConfigureText(sessionSummaryLabel, string.Empty, 14, 18);
+            ConfigureText(sessionSummaryLabel, string.Empty, 13, 16);
             sessionSummaryLabel.alignment = TextAnchor.MiddleCenter;
             sessionSummaryLabel.color = mutedLabelColor;
             var summaryRect = sessionSummaryLabel.GetComponent<RectTransform>();
-            summaryRect.anchorMin = new Vector2(0.03f, 0.02f);
-            summaryRect.anchorMax = new Vector2(0.97f, 0.40f);
+            summaryRect.anchorMin = new Vector2(0.04f, 0.02f);
+            summaryRect.anchorMax = new Vector2(0.96f, 0.34f);
             summaryRect.offsetMin = Vector2.zero;
             summaryRect.offsetMax = Vector2.zero;
         }
@@ -435,7 +435,7 @@ namespace QuestBowlingStandalone.QuestApp
             labelObject.transform.SetParent(buttonObject.transform, false);
             labelObject.layer = gameObject.layer;
             var label = labelObject.GetComponent<Text>();
-            ConfigureText(label, string.Empty, 16, 18);
+            ConfigureText(label, string.Empty, 13, 16);
             var labelRect = label.GetComponent<RectTransform>();
             labelRect.anchorMin = Vector2.zero;
             labelRect.anchorMax = Vector2.one;
@@ -500,14 +500,14 @@ namespace QuestBowlingStandalone.QuestApp
                 : "-- mph";
 
             var entry = stats.positions != null && stats.positions.hasEntryBoard
-                ? "Entry " + stats.positions.entryBoard.ToString("0.0", CultureInfo.InvariantCulture)
-                : "Entry --";
+                ? "E " + stats.positions.entryBoard.ToString("0.0", CultureInfo.InvariantCulture)
+                : "E --";
 
-            var angle = stats.angles != null && stats.angles.hasEntryAngle
-                ? stats.angles.entryAngleDegrees.ToString("0.0", CultureInfo.InvariantCulture) + " deg"
-                : "-- deg";
+            var breakpoint = stats.positions != null && stats.positions.hasBreakpoint
+                ? "B " + stats.positions.breakpointBoard.ToString("0.0", CultureInfo.InvariantCulture)
+                : "B --";
 
-            return shotLabelPrefix + record.DisplayIndex + "\n" + speed + "\n" + entry + "  " + angle;
+            return "SHOT " + record.DisplayIndex + "\n" + speed + "\n" + entry + "   " + breakpoint;
         }
 
         private void PositionShotButton(RectTransform rectTransform, int visibleIndex, int visibleCount)
@@ -660,7 +660,7 @@ namespace QuestBowlingStandalone.QuestApp
             text.text = value;
             text.alignment = TextAnchor.MiddleCenter;
             text.fontSize = Mathf.Max(1, maxSize);
-            text.resizeTextForBestFit = false;
+            text.resizeTextForBestFit = true;
             text.resizeTextMinSize = minSize;
             text.resizeTextMaxSize = maxSize;
             text.horizontalOverflow = HorizontalWrapMode.Wrap;

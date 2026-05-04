@@ -93,18 +93,18 @@ namespace QuestBowlingStandalone.Editor
                 lockLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary,
-                new Vector2(-255.0f, 64.0f),
-                new Vector2(300.0f, 104.0f),
+                new Vector2(-210.0f, 64.0f),
+                new Vector2(260.0f, 92.0f),
                 "Place Lane",
-                new Color(0.09f, 0.13f, 0.19f, 0.94f));
+                new Color(0.055f, 0.18f, 0.23f, 0.94f));
             ConfigureLaneActionButton(
                 retryLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Secondary,
-                new Vector2(-20.0f, 64.0f),
-                new Vector2(180.0f, 104.0f),
+                new Vector2(42.0f, 64.0f),
+                new Vector2(150.0f, 92.0f),
                 "Retry",
-                new Color(0.18f, 0.11f, 0.10f, 0.94f));
+                new Color(0.12f, 0.095f, 0.075f, 0.92f));
             ConfigureReplayShotList(
                 replayShotList,
                 liveResultReceiver,
@@ -939,23 +939,23 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
             serializedObject.FindProperty("replayRoot").objectReferenceValue = null;
-            serializedObject.FindProperty("lineWidthMeters").floatValue = 0.035f;
-            serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.11f;
+            serializedObject.FindProperty("lineWidthMeters").floatValue = 0.03f;
+            serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.10f;
             serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.035f;
-            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.42f;
-            serializedObject.FindProperty("calloutHorizontalOffsetMeters").floatValue = 0.26f;
-            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.045f;
+            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.50f;
+            serializedObject.FindProperty("calloutHorizontalOffsetMeters").floatValue = 0.34f;
+            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.040f;
             serializedObject.FindProperty("calloutLeadSeconds").floatValue = 0.10f;
-            serializedObject.FindProperty("calloutHoldSeconds").floatValue = 0.70f;
-            serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.018f;
+            serializedObject.FindProperty("calloutHoldSeconds").floatValue = 0.55f;
+            serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.016f;
             serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
             serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
             serializedObject.FindProperty("minAverageProjectionConfidence").floatValue = 0.20f;
             serializedObject.FindProperty("minOnLanePointFraction").floatValue = 0.80f;
             serializedObject.FindProperty("clearOnFailedShotResult").boolValue = false;
-            serializedObject.FindProperty("trajectoryColor").colorValue = new Color(0.05f, 0.9f, 1.0f, 1.0f);
+            serializedObject.FindProperty("trajectoryColor").colorValue = new Color(0.02f, 0.82f, 1.0f, 1.0f);
             serializedObject.FindProperty("markerColor").colorValue = new Color(1.0f, 0.74f, 0.16f, 1.0f);
-            serializedObject.FindProperty("ghostTrajectoryColor").colorValue = new Color(0.56f, 0.68f, 0.72f, 0.42f);
+            serializedObject.FindProperty("ghostTrajectoryColor").colorValue = new Color(0.78f, 0.84f, 0.88f, 0.32f);
             serializedObject.FindProperty("calloutTextColor").colorValue = new Color(0.96f, 1.0f, 1.0f, 1.0f);
             serializedObject.FindProperty("calloutShadowColor").colorValue = new Color(0.0f, 0.0f, 0.0f, 0.92f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
@@ -1035,7 +1035,7 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.sizeDelta = new Vector2(1320.0f, 320.0f);
+            rectTransform.sizeDelta = new Vector2(1320.0f, 720.0f);
 
             canvas.renderMode = RenderMode.WorldSpace;
             canvas.worldCamera = eventCamera;
@@ -1088,9 +1088,9 @@ namespace QuestBowlingStandalone.Editor
 
             var colors = button.colors;
             colors.normalColor = normalColor;
-            colors.highlightedColor = new Color(0.19f, 0.30f, 0.46f, 0.98f);
-            colors.pressedColor = new Color(0.28f, 0.42f, 0.62f, 1.0f);
-            colors.disabledColor = new Color(0.16f, 0.16f, 0.16f, 0.70f);
+            colors.highlightedColor = new Color(0.03f, 0.46f, 0.68f, 0.98f);
+            colors.pressedColor = new Color(0.08f, 0.58f, 0.80f, 1.0f);
+            colors.disabledColor = new Color(0.12f, 0.13f, 0.14f, 0.62f);
             colors.fadeDuration = 0.05f;
             button.transition = Selectable.Transition.ColorTint;
             button.targetGraphic = image;
@@ -1130,8 +1130,10 @@ namespace QuestBowlingStandalone.Editor
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 label.text = initialText;
                 label.alignment = TextAnchor.MiddleCenter;
-                label.fontSize = 40;
-                label.resizeTextForBestFit = false;
+                label.fontSize = 32;
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 18;
+                label.resizeTextMaxSize = 32;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
                 label.lineSpacing = 0.9f;
@@ -1177,12 +1179,12 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = new Vector2(300.0f, -38.0f);
+            rectTransform.anchoredPosition = new Vector2(270.0f, -58.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(760.0f, 188.0f);
+            rectTransform.sizeDelta = new Vector2(720.0f, 156.0f);
 
-            panelImage.color = new Color(0.02f, 0.045f, 0.05f, 0.72f);
+            panelImage.color = new Color(0.055f, 0.066f, 0.072f, 0.62f);
             panelImage.raycastTarget = false;
 
             var labelTransform = replayShotList.transform.Find("EmptyLabel");
@@ -1216,11 +1218,13 @@ namespace QuestBowlingStandalone.Editor
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 label.text = string.Empty;
                 label.alignment = TextAnchor.MiddleCenter;
-                label.fontSize = 32;
-                label.resizeTextForBestFit = false;
+                label.fontSize = 23;
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 15;
+                label.resizeTextMaxSize = 23;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
-                label.lineSpacing = 0.9f;
+                label.lineSpacing = 0.84f;
                 label.color = new Color(0.94f, 1.0f, 1.0f, 1.0f);
                 label.raycastTarget = false;
                 EditorUtility.SetDirty(label);
@@ -1250,19 +1254,21 @@ namespace QuestBowlingStandalone.Editor
             if (summaryLabel != null)
             {
                 var summaryRect = summaryLabel.GetComponent<RectTransform>();
-                summaryRect.anchorMin = new Vector2(0.03f, 0.02f);
-                summaryRect.anchorMax = new Vector2(0.97f, 0.40f);
+                summaryRect.anchorMin = new Vector2(0.04f, 0.02f);
+                summaryRect.anchorMax = new Vector2(0.96f, 0.34f);
                 summaryRect.offsetMin = Vector2.zero;
                 summaryRect.offsetMax = Vector2.zero;
                 summaryLabel.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
                 summaryLabel.text = string.Empty;
                 summaryLabel.alignment = TextAnchor.MiddleCenter;
-                summaryLabel.fontSize = 18;
-                summaryLabel.resizeTextForBestFit = false;
+                summaryLabel.fontSize = 16;
+                summaryLabel.resizeTextForBestFit = true;
+                summaryLabel.resizeTextMinSize = 13;
+                summaryLabel.resizeTextMaxSize = 16;
                 summaryLabel.horizontalOverflow = HorizontalWrapMode.Wrap;
                 summaryLabel.verticalOverflow = VerticalWrapMode.Truncate;
-                summaryLabel.lineSpacing = 0.9f;
-                summaryLabel.color = new Color(0.72f, 0.84f, 0.84f, 1.0f);
+                summaryLabel.lineSpacing = 0.84f;
+                summaryLabel.color = new Color(0.70f, 0.78f, 0.82f, 1.0f);
                 summaryLabel.raycastTarget = false;
                 EditorUtility.SetDirty(summaryLabel);
             }
@@ -1277,20 +1283,20 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("emptyLabel").objectReferenceValue = label;
             serializedObject.FindProperty("sessionSummaryLabel").objectReferenceValue = summaryLabel;
             serializedObject.FindProperty("maxVisibleShots").intValue = 4;
-            serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(164.0f, 96.0f);
-            serializedObject.FindProperty("shotButtonSpacing").floatValue = 10.0f;
-            serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 40.0f;
-            serializedObject.FindProperty("normalAnchoredPosition").vector2Value = new Vector2(300.0f, -38.0f);
-            serializedObject.FindProperty("reviewAnchoredPosition").vector2Value = new Vector2(300.0f, -252.0f);
+            serializedObject.FindProperty("shotButtonSize").vector2Value = new Vector2(138.0f, 82.0f);
+            serializedObject.FindProperty("shotButtonSpacing").floatValue = 8.0f;
+            serializedObject.FindProperty("shotButtonRowYOffset").floatValue = 20.0f;
+            serializedObject.FindProperty("normalAnchoredPosition").vector2Value = new Vector2(270.0f, -58.0f);
+            serializedObject.FindProperty("reviewAnchoredPosition").vector2Value = new Vector2(270.0f, -252.0f);
             serializedObject.FindProperty("transientFailureMessageSeconds").floatValue = 2.75f;
             serializedObject.FindProperty("emptyText").stringValue = string.Empty;
             serializedObject.FindProperty("shotLabelPrefix").stringValue = "Shot ";
-            serializedObject.FindProperty("panelColor").colorValue = new Color(0.02f, 0.045f, 0.05f, 0.72f);
-            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
-            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.16f, 0.44f, 0.48f, 1.0f);
-            serializedObject.FindProperty("disabledButtonColor").colorValue = new Color(0.13f, 0.15f, 0.15f, 0.70f);
+            serializedObject.FindProperty("panelColor").colorValue = new Color(0.055f, 0.066f, 0.072f, 0.62f);
+            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.075f, 0.095f, 0.11f, 0.92f);
+            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.03f, 0.46f, 0.68f, 0.98f);
+            serializedObject.FindProperty("disabledButtonColor").colorValue = new Color(0.12f, 0.13f, 0.14f, 0.62f);
             serializedObject.FindProperty("labelColor").colorValue = new Color(0.94f, 1.0f, 1.0f, 1.0f);
-            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.72f, 0.84f, 0.84f, 1.0f);
+            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.70f, 0.78f, 0.82f, 1.0f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(replayList);
@@ -1318,12 +1324,12 @@ namespace QuestBowlingStandalone.Editor
             panelRect.anchorMin = new Vector2(0.5f, 0.5f);
             panelRect.anchorMax = new Vector2(0.5f, 0.5f);
             panelRect.pivot = new Vector2(0.5f, 0.5f);
-            panelRect.anchoredPosition = new Vector2(300.0f, 8.0f);
+            panelRect.anchoredPosition = new Vector2(270.0f, 8.0f);
             panelRect.localRotation = Quaternion.identity;
             panelRect.localScale = Vector3.one;
             panelRect.sizeDelta = new Vector2(760.0f, 292.0f);
 
-            panelImage.color = new Color(0.015f, 0.035f, 0.04f, 0.88f);
+            panelImage.color = new Color(0.055f, 0.066f, 0.072f, 0.86f);
             panelImage.raycastTarget = false;
             panelCanvasGroup.alpha = 0.0f;
             panelCanvasGroup.interactable = false;
@@ -1336,15 +1342,15 @@ namespace QuestBowlingStandalone.Editor
             buttonRect.anchorMin = new Vector2(0.5f, 0.5f);
             buttonRect.anchorMax = new Vector2(0.5f, 0.5f);
             buttonRect.pivot = new Vector2(0.5f, 0.5f);
-            buttonRect.anchoredPosition = new Vector2(650.0f, 116.0f);
+            buttonRect.anchoredPosition = new Vector2(560.0f, 116.0f);
             buttonRect.localRotation = Quaternion.identity;
             buttonRect.localScale = Vector3.one;
-            buttonRect.sizeDelta = new Vector2(150.0f, 62.0f);
-            buttonImage.color = new Color(0.08f, 0.17f, 0.18f, 0.94f);
+            buttonRect.sizeDelta = new Vector2(132.0f, 58.0f);
+            buttonImage.color = new Color(0.075f, 0.095f, 0.11f, 0.92f);
             buttonImage.raycastTarget = true;
             button.targetGraphic = buttonImage;
 
-            var label = EnsureTextChild(sessionReviewButton.transform, "Label", "Review", 20, TextAnchor.MiddleCenter);
+            var label = EnsureTextChild(sessionReviewButton.transform, "Label", "Shots", 18, TextAnchor.MiddleCenter);
             var labelRect = label.GetComponent<RectTransform>();
             labelRect.anchorMin = Vector2.zero;
             labelRect.anchorMax = Vector2.one;
@@ -1358,13 +1364,13 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("panelBackground").objectReferenceValue = panelImage;
             serializedObject.FindProperty("toggleButton").objectReferenceValue = button;
             serializedObject.FindProperty("toggleButtonLabel").objectReferenceValue = label;
-            serializedObject.FindProperty("hiddenToggleText").stringValue = "Review";
+            serializedObject.FindProperty("hiddenToggleText").stringValue = "Shots";
             serializedObject.FindProperty("visibleToggleText").stringValue = "Hide";
-            serializedObject.FindProperty("panelColor").colorValue = new Color(0.015f, 0.035f, 0.04f, 0.88f);
-            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.08f, 0.17f, 0.18f, 0.94f);
-            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.16f, 0.44f, 0.48f, 1.0f);
+            serializedObject.FindProperty("panelColor").colorValue = new Color(0.055f, 0.066f, 0.072f, 0.86f);
+            serializedObject.FindProperty("buttonColor").colorValue = new Color(0.075f, 0.095f, 0.11f, 0.92f);
+            serializedObject.FindProperty("selectedButtonColor").colorValue = new Color(0.03f, 0.46f, 0.68f, 0.98f);
             serializedObject.FindProperty("labelColor").colorValue = new Color(0.94f, 1.0f, 1.0f, 1.0f);
-            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.70f, 0.82f, 0.84f, 1.0f);
+            serializedObject.FindProperty("mutedLabelColor").colorValue = new Color(0.70f, 0.78f, 0.82f, 1.0f);
             serializedObject.FindProperty("verboseLogging").boolValue = true;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
@@ -1411,9 +1417,12 @@ namespace QuestBowlingStandalone.Editor
             label.text = text;
             label.alignment = alignment;
             label.fontSize = fontSize;
-            label.resizeTextForBestFit = false;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = Mathf.Max(10, fontSize - 6);
+            label.resizeTextMaxSize = fontSize;
             label.horizontalOverflow = HorizontalWrapMode.Wrap;
             label.verticalOverflow = VerticalWrapMode.Truncate;
+            label.lineSpacing = 0.84f;
             label.color = new Color(0.94f, 1.0f, 1.0f, 1.0f);
             label.raycastTarget = false;
             return label;
@@ -1442,12 +1451,12 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = new Vector2(-300.0f, -76.0f);
+            rectTransform.anchoredPosition = new Vector2(-330.0f, -100.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
-            rectTransform.sizeDelta = new Vector2(320.0f, 112.0f);
+            rectTransform.sizeDelta = new Vector2(300.0f, 86.0f);
 
-            background.color = new Color(0.015f, 0.035f, 0.04f, 0.62f);
+            background.color = new Color(0.055f, 0.066f, 0.072f, 0.58f);
             background.raycastTarget = false;
 
             var labelTransform = statusStrip.transform.Find("StatusLabel");
@@ -1476,17 +1485,19 @@ namespace QuestBowlingStandalone.Editor
                 var labelRect = label.GetComponent<RectTransform>();
                 labelRect.anchorMin = Vector2.zero;
                 labelRect.anchorMax = Vector2.one;
-                labelRect.offsetMin = new Vector2(16.0f, 6.0f);
-                labelRect.offsetMax = new Vector2(-16.0f, -6.0f);
+                labelRect.offsetMin = new Vector2(18.0f, 8.0f);
+                labelRect.offsetMax = new Vector2(-18.0f, -8.0f);
                 label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-                label.text = "Shot Not Ready\nLaptop Connecting";
+                label.text = "NOT READY\nLaptop Connecting";
                 label.alignment = TextAnchor.MiddleCenter;
-                label.fontSize = 26;
-                label.resizeTextForBestFit = false;
+                label.fontSize = 23;
+                label.resizeTextForBestFit = true;
+                label.resizeTextMinSize = 15;
+                label.resizeTextMaxSize = 23;
                 label.horizontalOverflow = HorizontalWrapMode.Wrap;
                 label.verticalOverflow = VerticalWrapMode.Truncate;
-                label.lineSpacing = 0.9f;
-                label.color = new Color(1.0f, 0.86f, 0.48f, 1.0f);
+                label.lineSpacing = 0.82f;
+                label.color = new Color(1.0f, 0.86f, 0.50f, 1.0f);
                 label.raycastTarget = false;
                 EditorUtility.SetDirty(label);
             }
@@ -1501,9 +1512,12 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("sessionReviewPanel").objectReferenceValue = sessionReviewPanel;
             serializedObject.FindProperty("background").objectReferenceValue = background;
             serializedObject.FindProperty("label").objectReferenceValue = label;
-            serializedObject.FindProperty("backgroundColor").colorValue = new Color(0.015f, 0.035f, 0.04f, 0.62f);
-            serializedObject.FindProperty("readyColor").colorValue = new Color(0.82f, 1.0f, 0.92f, 1.0f);
-            serializedObject.FindProperty("attentionColor").colorValue = new Color(1.0f, 0.86f, 0.48f, 1.0f);
+            serializedObject.FindProperty("backgroundColor").colorValue = new Color(0.055f, 0.066f, 0.072f, 0.58f);
+            serializedObject.FindProperty("readyBackgroundColor").colorValue = new Color(0.035f, 0.15f, 0.10f, 0.70f);
+            serializedObject.FindProperty("blockedBackgroundColor").colorValue = new Color(0.12f, 0.095f, 0.045f, 0.70f);
+            serializedObject.FindProperty("reviewBackgroundColor").colorValue = new Color(0.055f, 0.075f, 0.12f, 0.70f);
+            serializedObject.FindProperty("readyColor").colorValue = new Color(0.78f, 1.0f, 0.88f, 1.0f);
+            serializedObject.FindProperty("attentionColor").colorValue = new Color(1.0f, 0.86f, 0.50f, 1.0f);
             serializedObject.FindProperty("refreshIntervalSeconds").floatValue = 0.20f;
             serializedObject.ApplyModifiedPropertiesWithoutUndo();
 

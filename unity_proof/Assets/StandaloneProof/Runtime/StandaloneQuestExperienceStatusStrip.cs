@@ -15,9 +15,12 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private StandaloneQuestSessionReviewPanel sessionReviewPanel;
         [SerializeField] private Image background;
         [SerializeField] private Text label;
-        [SerializeField] private Color backgroundColor = new Color(0.015f, 0.035f, 0.04f, 0.62f);
-        [SerializeField] private Color readyColor = new Color(0.82f, 1.0f, 0.92f, 1.0f);
-        [SerializeField] private Color attentionColor = new Color(1.0f, 0.86f, 0.48f, 1.0f);
+        [SerializeField] private Color backgroundColor = new Color(0.055f, 0.066f, 0.072f, 0.58f);
+        [SerializeField] private Color readyBackgroundColor = new Color(0.035f, 0.15f, 0.10f, 0.70f);
+        [SerializeField] private Color blockedBackgroundColor = new Color(0.12f, 0.095f, 0.045f, 0.70f);
+        [SerializeField] private Color reviewBackgroundColor = new Color(0.055f, 0.075f, 0.12f, 0.70f);
+        [SerializeField] private Color readyColor = new Color(0.78f, 1.0f, 0.88f, 1.0f);
+        [SerializeField] private Color attentionColor = new Color(1.0f, 0.86f, 0.50f, 1.0f);
         [SerializeField] private float refreshIntervalSeconds = 0.20f;
 
         private float _nextRefreshAt;
@@ -117,16 +120,18 @@ namespace QuestBowlingStandalone.QuestApp
             var rect = label.GetComponent<RectTransform>();
             rect.anchorMin = Vector2.zero;
             rect.anchorMax = Vector2.one;
-            rect.offsetMin = new Vector2(16.0f, 6.0f);
-            rect.offsetMax = new Vector2(-16.0f, -6.0f);
+            rect.offsetMin = new Vector2(18.0f, 8.0f);
+            rect.offsetMax = new Vector2(-18.0f, -8.0f);
 
             label.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             label.alignment = TextAnchor.MiddleCenter;
-            label.fontSize = 26;
-            label.resizeTextForBestFit = false;
+            label.fontSize = 23;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 15;
+            label.resizeTextMaxSize = 23;
             label.horizontalOverflow = HorizontalWrapMode.Wrap;
             label.verticalOverflow = VerticalWrapMode.Truncate;
-            label.lineSpacing = 0.9f;
+            label.lineSpacing = 0.82f;
             label.raycastTarget = false;
         }
 
@@ -146,9 +151,36 @@ namespace QuestBowlingStandalone.QuestApp
             IsShotReady = state.ShotReady;
             LastReadinessReason = state.ReasonCode;
             LastDisplayText = state.DisplayText;
-            label.text = state.DisplayText;
+            label.text = FormatStatusText(state);
             label.color = state.ShotReady ? readyColor : attentionColor;
+            background.color = ResolveBackgroundColor(state);
             ApplySurfaceVisibility(state);
+        }
+
+        private string FormatStatusText(StandaloneQuestExperienceState state)
+        {
+            if (state.ShotReady)
+            {
+                return "SHOT READY";
+            }
+
+            var labelText = string.IsNullOrWhiteSpace(state.BlockerLabel)
+                ? "Preparing"
+                : state.BlockerLabel.Trim();
+            return "NOT READY\n" + labelText;
+        }
+
+        private Color ResolveBackgroundColor(StandaloneQuestExperienceState state)
+        {
+            if (state.ShotReady)
+            {
+                return readyBackgroundColor;
+            }
+
+            return state.Blocker == StandaloneQuestExperienceBlocker.ReviewOpen
+                || state.Blocker == StandaloneQuestExperienceBlocker.ReplayPlaying
+                ? reviewBackgroundColor
+                : blockedBackgroundColor;
         }
 
         private void ApplySurfaceVisibility(StandaloneQuestExperienceState state)
