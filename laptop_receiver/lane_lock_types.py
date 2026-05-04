@@ -125,15 +125,23 @@ class CameraIntrinsics:
         cy = _float(session_metadata.get("cy"))
 
         if width > 0 and height > 0 and sensor_width > 0 and sensor_height > 0:
-            x_scale = float(width) / float(sensor_width)
-            y_scale = float(height) / float(sensor_height)
-            fx *= x_scale
-            fy *= y_scale
-            cx *= x_scale
-            # Quest encodes the full passthrough camera texture into the full output
-            # texture with Graphics.Blit. Meta's intrinsics use a bottom-left image
-            # Y axis; decoded OpenCV frames use top-left image coordinates.
-            cy = float(height) - cy * y_scale
+            scale_x = float(width) / float(sensor_width)
+            scale_y = float(height) / float(sensor_height)
+            crop_scale = max(scale_x, scale_y)
+            if crop_scale > 0.0:
+                crop_width = float(width) / crop_scale
+                crop_height = float(height) / crop_scale
+                crop_x = (float(sensor_width) - crop_width) * 0.5
+                crop_y = (float(sensor_height) - crop_height) * 0.5
+                if crop_width > 0.0 and crop_height > 0.0:
+                    x_scale = float(width) / crop_width
+                    y_scale = float(height) / crop_height
+                    fx *= x_scale
+                    fy *= y_scale
+                    cx = (cx - crop_x) * x_scale
+                    # Meta's passthrough intrinsics use a bottom-left sensor Y axis.
+                    # Decoded OpenCV frames use top-left image coordinates.
+                    cy = float(height) - (cy - crop_y) * y_scale
 
         return cls(
             fx=fx,

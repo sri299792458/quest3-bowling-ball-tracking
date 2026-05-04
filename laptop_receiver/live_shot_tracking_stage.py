@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from laptop_receiver.lane_lock_types import LaneLockResult, SourceFrameRange
-from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveCameraSam2TrackResult
+from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Config, LiveCameraSam2TrackResult, LiveCameraSam2Tracker
 from laptop_receiver.live_lane_lock_results import load_lane_lock_result_for_request
 from laptop_receiver.live_shot_boundaries import CompletedShotWindow
 from laptop_receiver.shot_result_types import SHOT_RESULT_SCHEMA_VERSION, ShotResult, ShotTrackingSummary
@@ -179,14 +179,103 @@ def _load_camera_sam2_result_for_window(
     return None
 
 
-def _seed_result_from_camera_sam2(
-    sam2_result: LiveCameraSam2TrackResult | None,
-) -> LiveShotSeedResult:
-    if sam2_result is None:
-        return LiveShotSeedResult(success=False, failure_reason="camera_sam2_track_missing", seed=None)
-    if not isinstance(sam2_result.seed, dict):
-        return LiveShotSeedResult(success=False, failure_reason="camera_sam2_seed_missing", seed=None)
-    return LiveShotSeedResult(success=True, failure_reason="", seed=dict(sam2_result.seed))
+def _yolo_seed_path_for_window(session_dir: Path, window: CompletedShotWindow) -> Path:
+    return session_dir / "analysis_live_pipeline" / "yolo_seeds" / f"shot_{window.frame_seq_start}" / "seed.json"
+
+
+def _load_yolo_seed_for_window(session_dir: Path, window: CompletedShotWindow) -> dict[str, Any] | None:
+    path = _yolo_seed_path_for_window(session_dir, window)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _seed_result_from_yolo_seed(seed: dict[str, Any] | None) -> LiveShotSeedResult:
+    if seed is None:
+        return LiveShotSeedResult(success=False, failure_reason="live_yolo_seed_missing", seed=None)
+    if "box" not in seed:
+        return LiveShotSeedResult(success=False, failure_reason="live_yolo_seed_box_missing", seed=dict(seed))
+    return LiveShotSeedResult(success=True, failure_reason="", seed=dict(seed))
+
+
+def _seed_frame_index(seed: Mapping[str, Any]) -> int:
+    for key in ("frameIndex", "frame_idx", "source_frame_idx"):
+        if seed.get(key) is not None:
+            return int(seed[key])
+    raise RuntimeError("Live YOLO seed is missing frameIndex.")
+
+
+def _seed_frame_seq(seed: Mapping[str, Any], default: int) -> int:
+    for key in ("frameSeq", "frame_seq"):
+        if seed.get(key) is not None:
+            return int(seed[key])
+    return int(default)
+
+
+def _run_camera_sam2_for_window(
+    *,
+    artifact: Any,
+    window: CompletedShotWindow,
+    seed: dict[str, Any] | None,
+    config: LiveShotTrackingStageConfig,
+    tracker: LiveCameraSam2Tracker | None = None,
+) -> LiveCameraSam2TrackResult | None:
+    if seed is None:
+        return None
+    if tracker is None:
+        sam2_config = config.sam2_config or LiveCameraSam2Config()
+        tracker = LiveCameraSam2Tracker(sam2_config)
+    tracker.warm()
+
+    seed_index = _seed_frame_index(seed)
+    seed_seq = _seed_frame_seq(seed, seed_index)
+    _frame_idx_start, frame_idx_end = _frame_index_bounds_for_window(artifact.frame_metadata, window)
+    if seed_index > frame_idx_end:
+        raise RuntimeError(
+            f"Live YOLO seed frame {seed_index} is after shot window end frame index {frame_idx_end}."
+        )
+
+    output_dir = artifact.root_dir / "analysis_live_pipeline" / "camera_sam2" / window.window_id
+    started = False
+    last_frame_index = seed_index
+    for decoded_frame in artifact.iter_frames(start_frame_index=seed_index):
+        frame_index = int(decoded_frame.frame_index)
+        if frame_index > frame_idx_end:
+            break
+        frame_metadata = decoded_frame.metadata or {}
+        frame_seq = int(frame_metadata.get("frameSeq", frame_index))
+        if not started:
+            tracker.start_from_seed(
+                frame_index=frame_index,
+                frame_seq=seed_seq,
+                image_bgr=decoded_frame.image_bgr,
+                seed=seed,
+                metadata=frame_metadata,
+            )
+            started = True
+        else:
+            tracker.track_frame(
+                frame_index=frame_index,
+                frame_seq=frame_seq,
+                image_bgr=decoded_frame.image_bgr,
+                metadata=frame_metadata,
+            )
+        last_frame_index = frame_index
+        stop_reason = tracker.stop_reason(fps=float(artifact.video_info.fps or 30.0))
+        if stop_reason:
+            return tracker.finish(
+                output_dir=output_dir,
+                stop_reason=stop_reason,
+                source_frame_idx_end=frame_index,
+            )
+
+    if not started:
+        raise RuntimeError(f"Could not read live YOLO seed frame {seed_index} from {artifact.video_path}.")
+    return tracker.finish(
+        output_dir=output_dir,
+        stop_reason="camera_sam2_window_end",
+        source_frame_idx_end=last_frame_index,
+    )
 
 
 def run_live_shot_tracking_stage(
@@ -194,6 +283,7 @@ def run_live_shot_tracking_stage(
     window: CompletedShotWindow,
     config: LiveShotTrackingStageConfig,
     output_dir: Path | None = None,
+    sam2_tracker: LiveCameraSam2Tracker | None = None,
 ) -> LiveShotTrackingStageOutput:
     from laptop_receiver.local_clip_artifact import load_local_clip_artifact
 
@@ -214,8 +304,17 @@ def run_live_shot_tracking_stage(
     if not bool(config.run_sam2):
         raise RuntimeError("Live shot tracking requires camera SAM2; YOLO-only shot results are disabled.")
 
+    seed = _load_yolo_seed_for_window(artifact.root_dir, window)
+    yolo_result = _seed_result_from_yolo_seed(seed)
     sam2_result = _load_camera_sam2_result_for_window(artifact.root_dir, window)
-    yolo_result = _seed_result_from_camera_sam2(sam2_result)
+    if sam2_result is None and yolo_result.success:
+        sam2_result = _run_camera_sam2_for_window(
+            artifact=artifact,
+            window=window,
+            seed=seed,
+            config=config,
+            tracker=sam2_tracker,
+        )
 
     shot_result = _build_shot_result(
         artifact=artifact,

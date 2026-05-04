@@ -596,9 +596,9 @@ namespace QuestBowlingStandalone.QuestApp
                     continue;
                 }
 
-                if (stats.speed != null && stats.speed.hasAverageSpeed)
+                if (TryAverageSpeed(stats, out var displaySpeed))
                 {
-                    aggregate.Speed.Add(stats.speed.averageMph);
+                    aggregate.Speed.Add(displaySpeed);
                 }
 
                 if (stats.positions != null)
@@ -845,13 +845,31 @@ namespace QuestBowlingStandalone.QuestApp
         private bool TryAverageSpeed(StandaloneShotStats stats, out float value)
         {
             value = 0.0f;
-            if (stats == null || stats.speed == null || !stats.speed.hasAverageSpeed)
+            var speed = stats != null ? stats.speed : null;
+            if (speed == null)
             {
                 return false;
             }
 
-            value = stats.speed.averageMph;
-            return true;
+            if (speed.hasEntrySpeed)
+            {
+                value = speed.entryMph;
+                return true;
+            }
+
+            if (speed.hasAverageSpeed)
+            {
+                value = speed.averageMph;
+                return true;
+            }
+
+            if (speed.hasEarlySpeed)
+            {
+                value = speed.earlyMph;
+                return true;
+            }
+
+            return false;
         }
 
         private bool TryEntryBoard(StandaloneShotStats stats, out float value)

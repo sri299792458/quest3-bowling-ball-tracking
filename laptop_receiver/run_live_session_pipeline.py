@@ -87,7 +87,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-sam2",
         action="store_true",
-        help="Enable live camera SAM2 tracking after the YOLO seed. This is required for shot results.",
+        help="Enable SAM2 shot-result generation from live YOLO shot windows.",
     )
     parser.add_argument("--sam2-root", type=Path, default=DEFAULT_SAM2_ROOT)
     parser.add_argument("--sam2-checkpoint", type=Path, default=DEFAULT_SAM2_CHECKPOINT)
@@ -95,6 +95,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam2-model-cfg", default="configs/sam2.1/sam2.1_hiera_t.yaml")
     parser.add_argument("--sam2-track-seconds", type=float, default=5.0)
     parser.add_argument("--sam2-lost-grace-frames", type=int, default=5)
+    parser.add_argument("--live-tail-seconds", type=float, default=2.0)
     return parser
 
 
@@ -153,8 +154,8 @@ def main() -> int:
             yolo_start_conf=float(args.yolo_seed_conf),
             yolo_min_box_size=float(args.yolo_min_box_size),
             scan_stride_frames=max(int(args.yolo_scan_stride), 1),
-            sam2_config=sam2_config,
-            require_sam2_tracking=bool(args.run_sam2),
+            shot_window_seconds=float(args.sam2_track_seconds),
+            max_live_idle_backlog_seconds=float(args.live_tail_seconds),
         )
 
     pipeline = build_pipeline_from_paths(

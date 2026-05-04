@@ -704,13 +704,15 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            var toCamera = camera.transform.position - target.position;
-            if (toCamera.sqrMagnitude <= 0.0001f)
+            var awayFromCamera = target.position - camera.transform.position;
+            if (awayFromCamera.sqrMagnitude <= 0.0001f)
             {
                 return;
             }
 
-            target.rotation = Quaternion.LookRotation(toCamera.normalized, Vector3.up);
+            // TextMesh reads from its local -Z side. Point local +Z away from the camera
+            // so the user sees the front face instead of the mirrored back face.
+            target.rotation = Quaternion.LookRotation(awayFromCamera.normalized, Vector3.up);
         }
 
         private Vector3 ResolveLaneUp()

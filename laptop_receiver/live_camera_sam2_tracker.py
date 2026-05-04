@@ -219,6 +219,8 @@ class LiveCameraSam2Tracker:
         assert self._predictor is not None
         init_start = time.perf_counter()
         with self._torch.inference_mode(), self._torch.autocast("cuda", dtype=self._torch.bfloat16):
+            if hasattr(self._predictor, "frame_idx"):
+                self._predictor.frame_idx = 0
             self._predictor.load_first_frame(image_bgr)
             _frame_idx, obj_ids, mask_logits = self._predictor.add_new_prompt(
                 frame_idx=0,

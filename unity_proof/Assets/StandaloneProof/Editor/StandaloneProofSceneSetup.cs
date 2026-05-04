@@ -93,7 +93,7 @@ namespace QuestBowlingStandalone.Editor
                 lockLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Primary,
-                new Vector2(-495.0f, 64.0f),
+                new Vector2(-255.0f, 64.0f),
                 new Vector2(300.0f, 104.0f),
                 "Place Lane",
                 new Color(0.09f, 0.13f, 0.19f, 0.94f));
@@ -101,7 +101,7 @@ namespace QuestBowlingStandalone.Editor
                 retryLaneButton,
                 laneLockStateCoordinator,
                 QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockActionKind.Secondary,
-                new Vector2(-260.0f, 64.0f),
+                new Vector2(-20.0f, 64.0f),
                 new Vector2(180.0f, 104.0f),
                 "Retry",
                 new Color(0.18f, 0.11f, 0.10f, 0.94f));
@@ -1437,7 +1437,7 @@ namespace QuestBowlingStandalone.Editor
             rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
             rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
             rectTransform.pivot = new Vector2(0.5f, 0.5f);
-            rectTransform.anchoredPosition = new Vector2(-500.0f, -76.0f);
+            rectTransform.anchoredPosition = new Vector2(-300.0f, -76.0f);
             rectTransform.localRotation = Quaternion.identity;
             rectTransform.localScale = Vector3.one;
             rectTransform.sizeDelta = new Vector2(320.0f, 112.0f);

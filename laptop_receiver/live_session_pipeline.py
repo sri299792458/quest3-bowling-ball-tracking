@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
@@ -14,6 +15,7 @@ from laptop_receiver.laptop_result_types import (
 )
 from laptop_receiver.live_shot_boundary_detector import LiveShotBoundaryDetector, LiveShotBoundaryDetectorConfig
 from laptop_receiver.live_shot_boundaries import load_shot_boundaries
+from laptop_receiver.live_camera_sam2_tracker import LiveCameraSam2Tracker
 from laptop_receiver.live_shot_tracking_stage import LiveShotTrackingStageConfig, run_live_shot_tracking_stage
 from laptop_receiver.live_stream_receiver import DEFAULT_INCOMING_ROOT
 from laptop_receiver.session_state import (
@@ -71,6 +73,8 @@ class PipelineProcessSummary:
     shot_boundary_events_seen: int = 0
     completed_shot_windows_seen: int = 0
     completed_shot_windows_processed: int = 0
+    completed_shot_windows_processing: int = 0
+    completed_shot_windows_submitted: int = 0
     completed_shot_windows_skipped: int = 0
     open_shot_windows_seen: int = 0
     errors: list[str] = field(default_factory=list)
@@ -84,6 +88,8 @@ class PipelineProcessSummary:
             "shotBoundaryEventsSeen": self.shot_boundary_events_seen,
             "completedShotWindowsSeen": self.completed_shot_windows_seen,
             "completedShotWindowsProcessed": self.completed_shot_windows_processed,
+            "completedShotWindowsProcessing": self.completed_shot_windows_processing,
+            "completedShotWindowsSubmitted": self.completed_shot_windows_submitted,
             "completedShotWindowsSkipped": self.completed_shot_windows_skipped,
             "openShotWindowsSeen": self.open_shot_windows_seen,
             "errors": list(self.errors),
@@ -98,6 +104,9 @@ class LiveSessionPipeline:
             if config.shot_boundary_detector_config is not None
             else None
         )
+        self._shot_executor = ThreadPoolExecutor(max_workers=1) if config.shot_tracking_config is not None else None
+        self._active_shot_jobs: dict[tuple[str, str], tuple[Any, Future[Any]]] = {}
+        self._shot_sam2_tracker: LiveCameraSam2Tracker | None = None
 
     def discover_session_dirs(self) -> list[Path]:
         if self.config.session_dir is not None:
@@ -136,6 +145,7 @@ class LiveSessionPipeline:
             did_work = (
                 summary.auto_shot_boundary_events_emitted > 0
                 or summary.completed_shot_windows_processed > 0
+                or summary.completed_shot_windows_submitted > 0
                 or bool(summary.errors)
             )
             if did_work:
@@ -190,9 +200,18 @@ class LiveSessionPipeline:
             if not isinstance(processed_windows, dict):
                 raise RuntimeError("pipeline_state processedShotWindows must be an object.")
 
+            self._collect_finished_shot_jobs(session_dir, processed_windows, summary)
+            self._save_pipeline_state(session_dir, state)
+
             for window in shot_boundaries.completed_windows:
                 if window.window_id in processed_windows:
                     summary.completed_shot_windows_skipped += 1
+                    continue
+                if self._shot_job_key(session_dir, window.window_id) in self._active_shot_jobs:
+                    summary.completed_shot_windows_processing += 1
+                    continue
+                if self._has_active_shot_job(session_dir):
+                    summary.completed_shot_windows_processing += 1
                     continue
 
                 mark_shot(
@@ -206,23 +225,28 @@ class LiveSessionPipeline:
                     completedWindowCount=len(shot_boundaries.completed_windows),
                     lastReason=window.end.reason,
                 )
-                publish_status = self._process_shot_window(session_dir, window, processed_windows)
-                summary.completed_shot_windows_processed += 1
-                if publish_status == PUBLISH_FAILED_UNKNOWN_STREAM:
-                    processed_windows.pop(window.window_id, None)
-                    summary.errors.append(f"{session_dir}: shot_result publish failed: unknown active stream")
+                self._submit_shot_window(session_dir, window)
+                summary.completed_shot_windows_submitted += 1
                 self._save_pipeline_state(session_dir, state)
 
         self._publish_armed_status_if_idle(session_dir, shot_boundaries, media_ready)
 
-    def _process_shot_window(
+    def _shot_job_key(self, session_dir: Path, window_id: str) -> tuple[str, str]:
+        return str(session_dir.expanduser().resolve()), str(window_id)
+
+    def _has_active_shot_job(self, session_dir: Path) -> bool:
+        session_key = str(session_dir.expanduser().resolve())
+        return any(key[0] == session_key for key in self._active_shot_jobs)
+
+    def _submit_shot_window(
         self,
         session_dir: Path,
         window: Any,
-        processed_windows: dict[str, Any],
-    ) -> str:
+    ) -> None:
         if self.config.shot_tracking_config is None:
             raise RuntimeError("Shot tracking config is required to process shot windows.")
+        if self._shot_executor is None:
+            raise RuntimeError("Shot executor is not configured.")
 
         mark_shot(
             session_dir,
@@ -242,11 +266,58 @@ class LiveSessionPipeline:
             reason="shot_tracking_started",
             window_id=window.window_id,
         )
-        stage_output = run_live_shot_tracking_stage(
+        future = self._shot_executor.submit(
+            self._run_shot_tracking_job,
+            session_dir,
+            window,
+        )
+        self._active_shot_jobs[self._shot_job_key(session_dir, window.window_id)] = (window, future)
+
+    def _run_shot_tracking_job(self, session_dir: Path, window: Any) -> Any:
+        if self.config.shot_tracking_config is None:
+            raise RuntimeError("Shot tracking config is required to process shot windows.")
+        sam2_tracker = None
+        if bool(self.config.shot_tracking_config.run_sam2):
+            if self._shot_sam2_tracker is None:
+                self._shot_sam2_tracker = LiveCameraSam2Tracker(self.config.shot_tracking_config.sam2_config)
+                self._shot_sam2_tracker.warm()
+            sam2_tracker = self._shot_sam2_tracker
+        return run_live_shot_tracking_stage(
             session_dir,
             window=window,
             config=self.config.shot_tracking_config,
+            sam2_tracker=sam2_tracker,
         )
+
+    def _collect_finished_shot_jobs(
+        self,
+        session_dir: Path,
+        processed_windows: dict[str, Any],
+        summary: PipelineProcessSummary,
+    ) -> None:
+        session_key = str(session_dir.expanduser().resolve())
+        for key, (window, future) in list(self._active_shot_jobs.items()):
+            if key[0] != session_key or not future.done():
+                continue
+            self._active_shot_jobs.pop(key, None)
+            try:
+                stage_output = future.result()
+            except Exception as exc:
+                summary.errors.append(f"{session_dir}: shot_result job failed for {window.window_id}: {exc}")
+                continue
+
+            publish_status = self._finish_shot_window(session_dir, window, stage_output, processed_windows)
+            summary.completed_shot_windows_processed += 1
+            if publish_status == PUBLISH_FAILED_UNKNOWN_STREAM:
+                summary.errors.append(f"{session_dir}: shot_result publish failed: unknown active stream")
+
+    def _finish_shot_window(
+        self,
+        session_dir: Path,
+        window: Any,
+        stage_output: Any,
+        processed_windows: dict[str, Any],
+    ) -> str:
         sam2_result = stage_output.sam2_result
         published = False
         publish_status = "not_configured"

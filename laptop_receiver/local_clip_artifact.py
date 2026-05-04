@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import threading
 from typing import Any, Iterator
 
 import cv2
@@ -25,6 +26,59 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 def _resolve_artifact_path(root_dir: Path, manifest: dict[str, Any], manifest_key: str, default_name: str) -> Path:
     relative_path = manifest.get(manifest_key) or default_name
     return (root_dir / relative_path).resolve()
+
+
+@dataclass
+class _LiveStreamMetadataCache:
+    root_path: Path
+    stream_path: Path
+    metadata_stream_path: Path
+    session_start_path: Path
+    byte_offset: int = 0
+    pending_text: str = ""
+    session_start_payload: dict[str, Any] | None = None
+    frame_metadata: list[dict[str, Any]] = field(default_factory=list)
+
+    def refresh(self) -> None:
+        if not self.metadata_stream_path.exists():
+            raise RuntimeError(f"Live stream directory is missing metadata_stream.jsonl: {self.metadata_stream_path}")
+
+        current_size = self.metadata_stream_path.stat().st_size
+        if current_size < self.byte_offset:
+            self.byte_offset = 0
+            self.pending_text = ""
+            self.session_start_payload = None
+            self.frame_metadata.clear()
+
+        with self.metadata_stream_path.open("r", encoding="utf-8") as handle:
+            handle.seek(self.byte_offset)
+            chunk = handle.read()
+            self.byte_offset = handle.tell()
+
+        if not chunk:
+            return
+
+        text = self.pending_text + chunk
+        self.pending_text = ""
+        for line in text.splitlines(keepends=True):
+            if not line.endswith(("\n", "\r")):
+                self.pending_text = line
+                continue
+            stripped = line.strip()
+            if not stripped:
+                continue
+            row = json.loads(stripped)
+            kind = row.get("kind")
+            if kind == "session_start" and self.session_start_payload is None:
+                self.session_start_payload = row
+            elif kind == "frame_metadata":
+                frame_payload = row.get("frame_metadata")
+                if isinstance(frame_payload, dict):
+                    self.frame_metadata.append(frame_payload)
+
+
+_LIVE_STREAM_METADATA_CACHE_LOCK = threading.RLock()
+_LIVE_STREAM_METADATA_CACHE: dict[Path, _LiveStreamMetadataCache] = {}
 
 
 def _extract_live_stream_payloads(metadata_stream_rows: list[dict[str, Any]]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -182,8 +236,22 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
     if not metadata_stream_path.exists():
         raise RuntimeError(f"Live stream directory is missing metadata_stream.jsonl: {metadata_stream_path}")
 
-    metadata_stream_rows = _load_jsonl(metadata_stream_path)
-    session_start_payload, frame_metadata = _extract_live_stream_payloads(metadata_stream_rows)
+    with _LIVE_STREAM_METADATA_CACHE_LOCK:
+        cache = _LIVE_STREAM_METADATA_CACHE.get(root_path)
+        if cache is None or cache.metadata_stream_path != metadata_stream_path:
+            cache = _LiveStreamMetadataCache(
+                root_path=root_path,
+                stream_path=stream_path,
+                metadata_stream_path=metadata_stream_path,
+                session_start_path=session_start_path,
+            )
+            _LIVE_STREAM_METADATA_CACHE[root_path] = cache
+        cache.refresh()
+        if cache.session_start_payload is None:
+            raise RuntimeError("Live stream metadata is missing a session_start payload.")
+        session_start_payload = dict(cache.session_start_payload)
+        frame_metadata = list(cache.frame_metadata)
+
     session_metadata = session_start_payload.get("session_metadata") or _load_json(session_start_path)
     lane_lock_metadata = session_start_payload.get("lane_lock_metadata") or {}
     shot_metadata = session_start_payload.get("shot_metadata") or {}
@@ -196,31 +264,7 @@ def load_live_stream_artifact(root_dir: Path | str) -> LocalClipArtifact:
         "frameCount": len(frame_metadata),
     }
 
-    fallback_video_info = _fallback_video_info_from_session(session_metadata, frame_metadata)
-    try:
-        probed_video_info = probe_video(stream_path)
-    except Exception:
-        probed_video_info = fallback_video_info
-
-    probed_fps = float(probed_video_info.fps or 0.0)
-    requested_fps = float(fallback_video_info.fps or 0.0)
-    should_prefer_fallback = (
-        probed_video_info.width <= 0
-        or probed_video_info.height <= 0
-        or probed_video_info.frame_count <= 0
-        or requested_fps <= 0.0
-        or abs(probed_fps - requested_fps) > 0.5
-    )
-    if should_prefer_fallback:
-        video_info = VideoStreamInfo(
-            width=probed_video_info.width if probed_video_info.width > 0 else fallback_video_info.width,
-            height=probed_video_info.height if probed_video_info.height > 0 else fallback_video_info.height,
-            fps=fallback_video_info.fps,
-            frame_count=fallback_video_info.frame_count,
-            duration_seconds=fallback_video_info.duration_seconds,
-        )
-    else:
-        video_info = probed_video_info
+    video_info = _fallback_video_info_from_session(session_metadata, frame_metadata)
 
     return LocalClipArtifact(
         root_dir=root_path,

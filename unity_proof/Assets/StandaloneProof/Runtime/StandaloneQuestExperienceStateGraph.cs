@@ -108,8 +108,7 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.SessionNotActive,
                     "session_not_active",
                     "Laptop Connecting",
-                    hasShots,
-                    showShotSurfaces: false);
+                    hasShots);
             }
 
             if (!input.MediaReady)
@@ -118,8 +117,7 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.MediaNotReady,
                     CleanReason(input.MediaReason, "media_not_ready"),
                     "Media Stream Not Ready",
-                    hasShots,
-                    showShotSurfaces: false);
+                    hasShots);
             }
 
             if (!input.MetadataConnected)
@@ -128,8 +126,7 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.MetadataDisconnected,
                     "metadata_not_connected",
                     "Metadata Reconnecting",
-                    hasShots,
-                    showShotSurfaces: false);
+                    hasShots);
             }
 
             if (!input.ResultsConnected)
@@ -138,8 +135,7 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.ResultsDisconnected,
                     "results_not_connected",
                     "Results Reconnecting",
-                    hasShots,
-                    showShotSurfaces: false);
+                    hasShots);
             }
 
             if (input.ReviewOpen)
@@ -148,7 +144,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.ReviewOpen,
                     "review_open",
                     "Review Open",
-                    hasShots);
+                    hasShots,
+                    showReviewButton: true);
             }
 
             if (input.ReplayPlaying)
@@ -157,7 +154,8 @@ namespace QuestBowlingStandalone.QuestApp
                     StandaloneQuestExperienceBlocker.ReplayPlaying,
                     "replay_playing",
                     "Replay Playing",
-                    hasShots);
+                    hasShots,
+                    showReviewButton: true);
             }
 
             if (!input.LaneCoordinatorPresent)
@@ -196,7 +194,7 @@ namespace QuestBowlingStandalone.QuestApp
                 blockerLabel: string.Empty,
                 blocker: StandaloneQuestExperienceBlocker.None,
                 hasSuccessfulShots: hasShots,
-                shotRailVisible: hasShots,
+                shotRailVisible: false,
                 reviewButtonVisible: hasShots);
         }
 
@@ -225,12 +223,6 @@ namespace QuestBowlingStandalone.QuestApp
             if (!state.ShotReady && !state.DisplayText.StartsWith(ShotNotReadyHeader))
             {
                 error = "blocked_state_display_mismatch";
-                return false;
-            }
-
-            if (state.ShotRailVisible != state.ReviewButtonVisible)
-            {
-                error = "shot_surfaces_visibility_mismatch";
                 return false;
             }
 
@@ -292,10 +284,10 @@ namespace QuestBowlingStandalone.QuestApp
             string reasonCode,
             string blockerLabel,
             bool hasShots,
-            bool showShotSurfaces = true)
+            bool showShotRail = false,
+            bool showReviewButton = false)
         {
             var label = CleanLabel(blockerLabel, "Not Ready");
-            var surfacesVisible = hasShots && showShotSurfaces;
             return new StandaloneQuestExperienceState(
                 shotReady: false,
                 displayText: ShotNotReadyHeader + "\n" + label,
@@ -303,8 +295,8 @@ namespace QuestBowlingStandalone.QuestApp
                 blockerLabel: label,
                 blocker: blocker,
                 hasSuccessfulShots: hasShots,
-                shotRailVisible: surfacesVisible,
-                reviewButtonVisible: surfacesVisible);
+                shotRailVisible: hasShots && showShotRail,
+                reviewButtonVisible: hasShots && showReviewButton);
         }
 
         private static string PipelineBlockerLabel(string reason)

@@ -469,8 +469,8 @@ namespace QuestBowlingStandalone.QuestApp
                 return shotLabelPrefix + record.DisplayIndex;
             }
 
-            var speed = stats.speed != null && stats.speed.hasAverageSpeed
-                ? stats.speed.averageMph.ToString("0.0", CultureInfo.InvariantCulture) + " mph"
+            var speed = TryDisplaySpeed(stats, out var displaySpeed)
+                ? displaySpeed.ToString("0.0", CultureInfo.InvariantCulture) + " mph"
                 : "-- mph";
 
             var entry = stats.positions != null && stats.positions.hasEntryBoard
@@ -537,9 +537,9 @@ namespace QuestBowlingStandalone.QuestApp
                     continue;
                 }
 
-                if (stats.speed != null && stats.speed.hasAverageSpeed)
+                if (TryDisplaySpeed(stats, out var displaySpeed))
                 {
-                    speedValues.Add(stats.speed.averageMph);
+                    speedValues.Add(displaySpeed);
                 }
 
                 if (stats.positions != null)
@@ -651,6 +651,36 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 emptyLabel.text = string.IsNullOrWhiteSpace(value) ? emptyText : value;
             }
+        }
+
+        private static bool TryDisplaySpeed(StandaloneShotStats stats, out float value)
+        {
+            value = 0.0f;
+            var speed = stats != null ? stats.speed : null;
+            if (speed == null)
+            {
+                return false;
+            }
+
+            if (speed.hasEntrySpeed)
+            {
+                value = speed.entryMph;
+                return true;
+            }
+
+            if (speed.hasAverageSpeed)
+            {
+                value = speed.averageMph;
+                return true;
+            }
+
+            if (speed.hasEarlySpeed)
+            {
+                value = speed.earlyMph;
+                return true;
+            }
+
+            return false;
         }
 
         private void ShowTransientMessage(string value)

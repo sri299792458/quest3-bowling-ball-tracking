@@ -426,7 +426,13 @@ def _speed_mph(samples: Sequence[_Sample]) -> float | None:
     dt = float(samples[-1].t) - float(samples[0].t)
     if dt <= 1e-4:
         return None
-    return (_path_distance_meters(samples) / dt) * MPS_TO_MPH
+    # Ball speed should be the downlane speed. Using full 2D arc length here
+    # lets small lateral/projection wiggle inflate the number enough to look
+    # like km/h while being labelled mph.
+    downlane_distance = max(0.0, float(samples[-1].s) - float(samples[0].s))
+    if downlane_distance <= 1e-6:
+        return None
+    return (downlane_distance / dt) * MPS_TO_MPH
 
 
 def _slice_between_s(samples: Sequence[_Sample], start_s: float, end_s: float) -> list[_Sample]:
@@ -531,12 +537,13 @@ def build_shot_stats(
     )
 
     milestones: list[ShotStatMilestone] = []
-    speed_sample = samples[min(1, len(samples) - 1)]
-    speed_value = early_mph if early_mph is not None else average_mph
+    use_entry_speed = entry is not None and entry_mph is not None
+    speed_sample = entry if use_entry_speed else samples[min(1, len(samples) - 1)]
+    speed_value = entry_mph if use_entry_speed else average_mph
     if speed_value is not None:
         milestones.append(
             ShotStatMilestone(
-                kind="early_speed",
+                kind="entry_speed" if use_entry_speed else "average_speed",
                 label="Speed",
                 frame_seq=int(speed_sample.point.frame_seq),
                 s_meters=float(speed_sample.s),
@@ -588,7 +595,8 @@ def build_shot_stats(
                 primary_value=f"{entry_board:.1f} board, {abs(entry_angle):.1f} deg",
             )
         )
-    summary_parts = [_format_mph(average_mph)]
+    display_speed_mph = entry_mph if entry_mph is not None else average_mph
+    summary_parts = [_format_mph(display_speed_mph)]
     if entry_board is not None and entry_angle is not None:
         summary_parts.append(f"Entry {entry_board:.1f}, {abs(entry_angle):.1f} deg")
     else:
