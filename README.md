@@ -140,6 +140,7 @@ Common blocking labels:
 - `Pinch + Hold Lane`: lane placement is waiting for the bowler.
 - `Confirm Lane`: a lane candidate exists and needs confirmation.
 - `Laptop Preparing`: laptop has not yet armed the pipeline for the confirmed lane.
+- `Laptop Catching Up`: the laptop detector is behind the live stream and is catching up without skipping frames.
 - `Processing Shot`: a shot window is open or being analyzed.
 
 ## Live Ports

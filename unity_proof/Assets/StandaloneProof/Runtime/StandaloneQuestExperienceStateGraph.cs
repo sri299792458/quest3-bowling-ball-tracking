@@ -304,9 +304,17 @@ namespace QuestBowlingStandalone.QuestApp
         private static string PipelineBlockerLabel(string reason)
         {
             var cleanReason = CleanReason(reason, "pipeline_busy");
-            return cleanReason == "pipeline_status_missing" || cleanReason == "pipeline_starting"
-                ? "Laptop Preparing"
-                : "Processing Shot";
+            if (cleanReason == "pipeline_status_missing" || cleanReason == "pipeline_starting")
+            {
+                return "Laptop Preparing";
+            }
+
+            if (cleanReason == "detector_catching_up")
+            {
+                return "Laptop Catching Up";
+            }
+
+            return "Processing Shot";
         }
 
         private static string CleanLabel(string value, string fallback)

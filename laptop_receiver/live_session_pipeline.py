@@ -40,6 +40,8 @@ from laptop_receiver.session_state import (
 PIPELINE_STATE_SCHEMA_VERSION = "live_session_pipeline_state"
 PUBLISH_FAILED_UNKNOWN_STREAM = "failed_unknown_active_stream"
 MEDIA_FRESH_TIMEOUT_SECONDS = 2.0
+DETECTOR_READY_BACKLOG_FRAMES = 15
+DETECTOR_NOT_READY_BACKLOG_FRAMES = 60
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -443,14 +445,18 @@ class LiveSessionPipeline:
             return
 
         detector_backlog_frames = int(getattr(detector_result, "backlog_frames", 0) or 0) if detector_result else 0
-        if detector_backlog_frames > 0:
+        if detector_backlog_frames > DETECTOR_NOT_READY_BACKLOG_FRAMES:
             status_state = "shot_detection_catching_up"
             ready = False
             reason = "detector_catching_up"
-        else:
+        elif detector_backlog_frames <= DETECTOR_READY_BACKLOG_FRAMES:
             status_state = "shot_detection_armed"
             ready = True
             reason = "confirmed_lane_armed"
+        else:
+            ready = bool(state.get("lastPublishedPipelineReady", False))
+            status_state = "shot_detection_armed" if ready else "shot_detection_catching_up"
+            reason = "confirmed_lane_armed" if ready else "detector_catching_up"
 
         status_key = f"{request_id}:{status_state}:{ready}:{reason}"
         if state.get("lastPublishedPipelineStatusKey") == status_key:
@@ -464,6 +470,7 @@ class LiveSessionPipeline:
         )
         if published:
             state["lastPublishedPipelineStatusKey"] = status_key
+            state["lastPublishedPipelineReady"] = bool(ready)
             if ready:
                 state["lastPublishedArmedLaneLockRequestId"] = request_id
         state["lastArmedStatusPublished"] = bool(published)
