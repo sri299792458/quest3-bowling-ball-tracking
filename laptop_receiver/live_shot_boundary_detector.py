@@ -46,9 +46,11 @@ class LiveShotBoundaryDetectorConfig:
     yolo_start_conf: float = 0.8
     yolo_track_conf: float = 0.25
     yolo_min_box_size: float = 10.0
-    scan_stride_frames: int = 5
+    scan_stride_frames: int = 3
     warm_models_on_start: bool = True
     shot_window_seconds: float = 5.0
+    catchup_fast_forward_backlog_frames: int = 60
+    catchup_tail_frames: int = 45
     pre_roll_seconds: float = 0.5
     start_confirm_seconds: float = 0.8
     min_confirm_downlane_delta_meters: float = 0.10
@@ -76,6 +78,7 @@ class LiveShotBoundaryDetectorResult:
     latest_scanned_frame_seq: int
     latest_available_frame_seq: int
     backlog_frames: int
+    fast_forwarded_frames: int
     detector_mode: str
     confirmed_lane_lock_request_id: str
     pending_frame_seq: int | None
@@ -95,6 +98,7 @@ class LiveShotBoundaryDetectorResult:
             "latestScannedFrameSeq": self.latest_scanned_frame_seq,
             "latestAvailableFrameSeq": self.latest_available_frame_seq,
             "backlogFrames": self.backlog_frames,
+            "fastForwardedFrames": self.fast_forwarded_frames,
             "detectorMode": self.detector_mode,
             "confirmedLaneLockRequestId": self.confirmed_lane_lock_request_id,
             "pendingFrameSeq": self.pending_frame_seq,
@@ -314,6 +318,24 @@ class LiveShotBoundaryDetector:
         last_reason = "no_new_frames"
 
         start_frame_index = max(_int(state.get("lastScannedFrameIndex"), -1) + 1, 0)
+        original_backlog_frames = max(0, int(latest_available_frame_index) - int(start_frame_index) + 1)
+        fast_forwarded_frames = 0
+        if str(state.get("mode") or "idle") == "idle":
+            catchup_threshold = max(int(self.config.catchup_fast_forward_backlog_frames), 0)
+            catchup_tail_frames = max(int(self.config.catchup_tail_frames), 1)
+            if catchup_threshold > 0 and original_backlog_frames > catchup_threshold:
+                target_frame_index = max(int(latest_available_frame_index) - catchup_tail_frames + 1, int(start_frame_index))
+                fast_forwarded_frames = max(0, int(target_frame_index) - int(start_frame_index))
+                if fast_forwarded_frames > 0:
+                    state["lastReason"] = "detector_catching_up"
+                    state["lastFastForward"] = {
+                        "fromFrameIndex": int(start_frame_index),
+                        "toFrameIndex": int(target_frame_index),
+                        "latestAvailableFrameIndex": int(latest_available_frame_index),
+                        "fastForwardedFrames": int(fast_forwarded_frames),
+                        "tailFrames": int(catchup_tail_frames),
+                    }
+                    start_frame_index = int(target_frame_index)
         max_frames_this_poll = max(int(self.config.max_frames_per_poll), 1)
         save_interval = max(int(self.config.state_save_interval_frames), 1)
         for decoded_frame in self._frame_reader.iter_frames(
@@ -396,7 +418,11 @@ class LiveShotBoundaryDetector:
             end_events_emitted=int(end_events_emitted),
             latest_scanned_frame_seq=_int(state.get("lastScannedFrameSeq"), -1),
             latest_available_frame_seq=int(latest_frame_seq),
-            backlog_frames=max(0, int(latest_available_frame_index) - _int(state.get("lastScannedFrameIndex"), -1)),
+            backlog_frames=max(
+                int(fast_forwarded_frames),
+                max(0, int(latest_available_frame_index) - _int(state.get("lastScannedFrameIndex"), -1)),
+            ),
+            fast_forwarded_frames=int(fast_forwarded_frames),
             detector_mode=str(state.get("mode") or "idle"),
             confirmed_lane_lock_request_id=str(lane_lock.request_id),
             pending_frame_seq=self._pending_frame_seq(state),
@@ -963,6 +989,7 @@ class LiveShotBoundaryDetector:
                 _int(state.get("latestAvailableFrameIndex"), _int(state.get("lastScannedFrameIndex"), -1))
                 - _int(state.get("lastScannedFrameIndex"), -1),
             ),
+            fast_forwarded_frames=0,
             detector_mode=str(state.get("mode") or "idle"),
             confirmed_lane_lock_request_id=confirmed_lane_lock_request_id,
             pending_frame_seq=self._pending_frame_seq(state),

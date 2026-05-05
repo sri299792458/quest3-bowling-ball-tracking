@@ -83,7 +83,9 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yolo-det-conf", type=float, default=0.05)
     parser.add_argument("--yolo-seed-conf", type=float, default=0.8)
     parser.add_argument("--yolo-min-box-size", type=float, default=10.0)
-    parser.add_argument("--yolo-scan-stride", type=int, default=5)
+    parser.add_argument("--yolo-scan-stride", type=int, default=3)
+    parser.add_argument("--catchup-fast-forward-backlog-frames", type=int, default=60)
+    parser.add_argument("--catchup-tail-frames", type=int, default=45)
     parser.add_argument(
         "--run-sam2",
         action="store_true",
@@ -154,6 +156,8 @@ def main() -> int:
             yolo_min_box_size=float(args.yolo_min_box_size),
             scan_stride_frames=max(int(args.yolo_scan_stride), 1),
             shot_window_seconds=float(args.sam2_track_seconds),
+            catchup_fast_forward_backlog_frames=max(int(args.catchup_fast_forward_backlog_frames), 0),
+            catchup_tail_frames=max(int(args.catchup_tail_frames), 1),
         )
 
     pipeline = build_pipeline_from_paths(

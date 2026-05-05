@@ -445,7 +445,10 @@ class LiveSessionPipeline:
             return
 
         detector_backlog_frames = int(getattr(detector_result, "backlog_frames", 0) or 0) if detector_result else 0
-        if detector_backlog_frames > DETECTOR_NOT_READY_BACKLOG_FRAMES:
+        detector_fast_forwarded_frames = (
+            int(getattr(detector_result, "fast_forwarded_frames", 0) or 0) if detector_result else 0
+        )
+        if detector_fast_forwarded_frames > 0 or detector_backlog_frames > DETECTOR_NOT_READY_BACKLOG_FRAMES:
             status_state = "shot_detection_catching_up"
             ready = False
             reason = "detector_catching_up"

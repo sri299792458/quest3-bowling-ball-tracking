@@ -5,7 +5,7 @@ namespace QuestBowlingStandalone.QuestApp
 {
     public sealed class StandaloneQuestShotReplayRenderer : MonoBehaviour
     {
-        private const string ExpectedPointDefinition = "camera_sam2_mask_measurement_kalman_rts";
+        private const string ExpectedPointDefinition = "camera_sam2_mask_measurement_spline_l14";
 
         [Header("Result Source")]
         [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;

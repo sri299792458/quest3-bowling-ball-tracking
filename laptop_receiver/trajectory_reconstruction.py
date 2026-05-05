@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+from scipy.interpolate import make_smoothing_spline
 
 from laptop_receiver.lane_geometry import (
     is_lane_point_plausible,
@@ -24,20 +25,24 @@ from laptop_receiver.lane_lock_types import (
 )
 
 
-FINAL_TRAJECTORY_POINT_DEFINITION = "camera_sam2_mask_measurement_kalman_rts"
+FINAL_TRAJECTORY_POINT_DEFINITION = "camera_sam2_mask_measurement_spline_l14"
+METERS_TO_FEET = 3.280839895013123
+BOWLING_BOARD_COUNT = 39.0
 
 
 @dataclass(frozen=True)
 class TrajectoryReconstructionConfig:
-    base_sigma_x_meters: float = 0.035
-    base_sigma_s_meters: float = 0.090
-    far_sigma_s_meters: float = 0.85
-    low_quality_sigma_x_meters: float = 0.070
-    low_quality_sigma_s_meters: float = 0.450
-    accel_sigma_x_mps2: float = 0.75
-    accel_sigma_s_mps2: float = 1.35
-    velocity_sigma_x_mps: float = 0.65
-    velocity_sigma_s_mps: float = 4.50
+    spline_lambda: float = 14.0
+    spline_min_points: int = 6
+    spline_robust_iterations: int = 4
+    spline_robust_cutoff_boards: float = 1.15
+    spline_near_weight_max_extra: float = 1.50
+    spline_near_weight_full_distance_meters: float = 10.668
+    spline_near_weight_falloff_meters: float = 9.144
+    spline_tail_downweight_start_meters: float = 16.764
+    spline_tail_downweight_multiplier: float = 0.65
+    spline_tail_heavy_downweight_start_meters: float = 17.6784
+    spline_tail_heavy_downweight_multiplier: float = 0.35
     max_terminal_frames: int = 8
     terminal_speed_cap_m_per_frame: float = 0.55
     terminal_confidence_scale: float = 0.55
@@ -223,167 +228,158 @@ def load_mask_track_measurements(
     return measurements
 
 
-def _time_seconds(measurements: Sequence[LaneSpaceTrajectoryMeasurement]) -> np.ndarray:
-    if not measurements:
-        return np.empty(0, dtype=np.float64)
-    pts_values = np.asarray([float(measurement.pts_us) for measurement in measurements], dtype=np.float64)
-    if np.all(np.isfinite(pts_values)) and np.max(pts_values) > np.min(pts_values):
-        return (pts_values - pts_values[0]) / 1_000_000.0
-    frame_values = np.asarray([float(measurement.frame_seq) for measurement in measurements], dtype=np.float64)
-    return (frame_values - frame_values[0]) / 30.0
+def _board_from_x_meters(x_meters: float, lane_lock: LaneLockResult) -> float:
+    board_width = max(float(lane_lock.lane_width_meters) / BOWLING_BOARD_COUNT, 1e-6)
+    return (float(lane_lock.lane_width_meters) * 0.5 - float(x_meters)) / board_width + 0.5
 
 
-def _initial_velocity(values: np.ndarray, times: np.ndarray, *, default: float) -> float:
-    if len(values) < 2:
-        return float(default)
-    count = min(len(values), 8)
-    velocities: list[float] = []
-    for index in range(count - 1):
-        dt = max(float(times[index + 1] - times[index]), 1e-3)
-        velocity = float(values[index + 1] - values[index]) / dt
-        if math.isfinite(velocity):
-            velocities.append(velocity)
-    if not velocities:
-        return float(default)
-    return float(np.median(np.asarray(velocities, dtype=np.float64)))
+def _x_meters_from_board(board: float, lane_lock: LaneLockResult) -> float:
+    board_width = max(float(lane_lock.lane_width_meters) / BOWLING_BOARD_COUNT, 1e-6)
+    return float(lane_lock.lane_width_meters) * 0.5 - (float(board) - 0.5) * board_width
 
 
-def _process_noise(dt: float, config: TrajectoryReconstructionConfig) -> np.ndarray:
-    dt = max(float(dt), 1e-3)
-    qx = float(config.accel_sigma_x_mps2) ** 2
-    qs = float(config.accel_sigma_s_mps2) ** 2
-    return np.asarray(
-        [
-            [0.25 * dt**4 * qx, 0.0, 0.5 * dt**3 * qx, 0.0],
-            [0.0, 0.25 * dt**4 * qs, 0.0, 0.5 * dt**3 * qs],
-            [0.5 * dt**3 * qx, 0.0, dt**2 * qx, 0.0],
-            [0.0, 0.5 * dt**3 * qs, 0.0, dt**2 * qs],
-        ],
-        dtype=np.float64,
-    )
+def _spline_lateral_board_limits(lane_lock: LaneLockResult, config: TrajectoryReconstructionConfig) -> tuple[float, float]:
+    x_limit = max(0.01, float(lane_lock.lane_width_meters) * 0.5 + float(config.smoothing_lateral_margin_meters))
+    left_limit_board = _board_from_x_meters(-x_limit, lane_lock)
+    right_limit_board = _board_from_x_meters(x_limit, lane_lock)
+    return min(left_limit_board, right_limit_board), max(left_limit_board, right_limit_board)
 
 
-def _measurement_noise(
+def _spline_measurement_weight(
     measurement: LaneSpaceTrajectoryMeasurement,
-    lane_lock: LaneLockResult,
+    *,
+    s_meters: float,
     config: TrajectoryReconstructionConfig,
-) -> np.ndarray:
-    lane_length = max(float(lane_lock.lane_length_meters), 1.0)
-    s_norm = max(0.0, min(1.25, float(measurement.s_meters) / lane_length))
-    mask_quality = max(0.05, min(1.0, float(measurement.mask_quality)))
+) -> float:
     confidence = max(0.05, min(1.0, float(measurement.confidence)))
-    sigma_x = (
-        float(config.base_sigma_x_meters)
-        + 0.03 * s_norm
-        + float(config.low_quality_sigma_x_meters) * (1.0 - mask_quality)
-    )
-    sigma_s = (
-        float(config.base_sigma_s_meters)
-        + float(config.far_sigma_s_meters) * (s_norm**2)
-        + float(config.low_quality_sigma_s_meters) * (1.0 - mask_quality)
-    )
-    confidence_scale = 1.0 / math.sqrt(confidence)
-    sigma_x *= confidence_scale
-    sigma_s *= confidence_scale
-    return np.diag([sigma_x**2, sigma_s**2])
+    near_fraction = (
+        float(config.spline_near_weight_full_distance_meters) - float(s_meters)
+    ) / max(float(config.spline_near_weight_falloff_meters), 1e-6)
+    near_multiplier = 1.0 + float(config.spline_near_weight_max_extra) * max(0.0, min(1.0, near_fraction))
+
+    tail_multiplier = 1.0
+    if float(s_meters) >= float(config.spline_tail_downweight_start_meters):
+        tail_multiplier *= float(config.spline_tail_downweight_multiplier)
+    if float(s_meters) >= float(config.spline_tail_heavy_downweight_start_meters):
+        tail_multiplier *= float(config.spline_tail_heavy_downweight_multiplier)
+
+    return max(1e-3, confidence * near_multiplier * tail_multiplier)
 
 
-def _kalman_rts_smooth(
+def _consolidate_spline_samples(
+    s_feet: np.ndarray,
+    boards: np.ndarray,
+    weights: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    buckets: dict[float, tuple[float, float]] = {}
+    for s_value, board_value, weight_value in zip(s_feet, boards, weights):
+        if not _finite(float(s_value), float(board_value), float(weight_value)):
+            continue
+        key = round(float(s_value), 4)
+        total_weight, weighted_board_sum = buckets.get(key, (0.0, 0.0))
+        weight = max(float(weight_value), 1e-6)
+        buckets[key] = (total_weight + weight, weighted_board_sum + float(board_value) * weight)
+
+    sorted_keys = sorted(buckets)
+    consolidated_s: list[float] = []
+    consolidated_boards: list[float] = []
+    consolidated_weights: list[float] = []
+    previous_s: float | None = None
+    for key in sorted_keys:
+        total_weight, weighted_board_sum = buckets[key]
+        if previous_s is not None and key <= previous_s:
+            continue
+        consolidated_s.append(float(key))
+        consolidated_boards.append(float(weighted_board_sum) / max(float(total_weight), 1e-6))
+        consolidated_weights.append(max(float(total_weight), 1e-6))
+        previous_s = float(key)
+
+    return (
+        np.asarray(consolidated_s, dtype=np.float64),
+        np.asarray(consolidated_boards, dtype=np.float64),
+        np.asarray(consolidated_weights, dtype=np.float64),
+    )
+
+
+def _fit_robust_board_spline(
+    s_feet: np.ndarray,
+    boards: np.ndarray,
+    weights: np.ndarray,
+    *,
+    config: TrajectoryReconstructionConfig,
+) -> Any:
+    current_weights = np.asarray(weights, dtype=np.float64).copy()
+    spline = None
+    iterations = max(int(config.spline_robust_iterations), 1)
+    cutoff = max(float(config.spline_robust_cutoff_boards), 1e-3)
+    for _ in range(iterations):
+        spline = make_smoothing_spline(
+            s_feet,
+            boards,
+            w=np.maximum(current_weights, 1e-6),
+            lam=max(float(config.spline_lambda), 0.0),
+        )
+        residuals = np.asarray(spline(s_feet), dtype=np.float64) - boards
+        abs_residuals = np.abs(residuals)
+        robust_weights = np.ones_like(current_weights)
+        outlier_mask = abs_residuals > cutoff
+        robust_weights[outlier_mask] = cutoff / np.maximum(abs_residuals[outlier_mask], 1e-6)
+        current_weights = np.maximum(weights * robust_weights, 1e-6)
+    return spline
+
+
+def _spline_smooth_positions(
     measurements: Sequence[LaneSpaceTrajectoryMeasurement],
     lane_lock: LaneLockResult,
     config: TrajectoryReconstructionConfig,
 ) -> np.ndarray:
     if not measurements:
-        return np.empty((0, 4), dtype=np.float64)
+        return np.empty((0, 2), dtype=np.float64)
 
-    x_values = np.asarray([measurement.x_meters for measurement in measurements], dtype=np.float64)
-    s_values = np.asarray([measurement.s_meters for measurement in measurements], dtype=np.float64)
-    times = _time_seconds(measurements)
-    n = len(measurements)
+    lane_length = max(float(lane_lock.lane_length_meters), 0.0)
+    output_s_meters = np.asarray([float(measurement.s_meters) for measurement in measurements], dtype=np.float64)
+    output_s_meters = np.clip(output_s_meters, 0.0, lane_length)
+    output_s_meters = np.maximum.accumulate(output_s_meters)
 
-    states_filter = np.zeros((n, 4), dtype=np.float64)
-    states_predict = np.zeros((n, 4), dtype=np.float64)
-    cov_filter = np.zeros((n, 4, 4), dtype=np.float64)
-    cov_predict = np.zeros((n, 4, 4), dtype=np.float64)
-    transitions = np.zeros((n, 4, 4), dtype=np.float64)
-
-    state = np.asarray(
+    raw_boards = np.asarray(
+        [_board_from_x_meters(float(measurement.x_meters), lane_lock) for measurement in measurements],
+        dtype=np.float64,
+    )
+    raw_weights = np.asarray(
         [
-            float(x_values[0]),
-            float(s_values[0]),
-            _initial_velocity(x_values, times, default=0.0),
-            max(0.0, _initial_velocity(s_values, times, default=5.0)),
+            _spline_measurement_weight(measurement, s_meters=float(output_s_meters[index]), config=config)
+            for index, measurement in enumerate(measurements)
         ],
         dtype=np.float64,
     )
-    cov = np.diag(
-        [
-            float(config.base_sigma_x_meters) ** 2,
-            float(config.base_sigma_s_meters) ** 2,
-            float(config.velocity_sigma_x_mps) ** 2,
-            float(config.velocity_sigma_s_mps) ** 2,
-        ]
+
+    board_min, board_max = _spline_lateral_board_limits(lane_lock, config)
+    raw_boards = np.clip(raw_boards, board_min, board_max)
+    output_x_meters = np.asarray(
+        [_x_meters_from_board(float(board), lane_lock) for board in raw_boards],
+        dtype=np.float64,
     )
-    h_matrix = np.asarray([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float64)
-    identity = np.eye(4, dtype=np.float64)
+    if len(measurements) < max(int(config.spline_min_points), 2):
+        return np.column_stack([output_x_meters, output_s_meters])
 
-    for index, measurement in enumerate(measurements):
-        if index == 0:
-            transition = identity.copy()
-            predicted_state = state.copy()
-            predicted_cov = cov.copy()
-        else:
-            dt = max(float(times[index] - times[index - 1]), 1e-3)
-            transition = np.asarray(
-                [
-                    [1.0, 0.0, dt, 0.0],
-                    [0.0, 1.0, 0.0, dt],
-                    [0.0, 0.0, 1.0, 0.0],
-                    [0.0, 0.0, 0.0, 1.0],
-                ],
-                dtype=np.float64,
-            )
-            predicted_state = transition @ state
-            predicted_state[3] = max(0.0, float(predicted_state[3]))
-            predicted_cov = transition @ cov @ transition.T + _process_noise(dt, config)
+    fit_s_feet, fit_boards, fit_weights = _consolidate_spline_samples(
+        output_s_meters * METERS_TO_FEET,
+        raw_boards,
+        raw_weights,
+    )
+    if len(fit_s_feet) < max(int(config.spline_min_points), 2):
+        return np.column_stack([output_x_meters, output_s_meters])
 
-        z_value = np.asarray([measurement.x_meters, measurement.s_meters], dtype=np.float64)
-        r_matrix = _measurement_noise(measurement, lane_lock, config)
-        innovation = z_value - h_matrix @ predicted_state
-        if abs(float(innovation[0])) > 0.60 or abs(float(innovation[1])) > 2.50:
-            r_matrix = r_matrix * 8.0
-
-        residual_cov = h_matrix @ predicted_cov @ h_matrix.T + r_matrix
-        kalman_gain = predicted_cov @ h_matrix.T @ np.linalg.inv(residual_cov)
-        state = predicted_state + kalman_gain @ innovation
-        state[3] = max(0.0, float(state[3]))
-        cov = (identity - kalman_gain @ h_matrix) @ predicted_cov
-
-        transitions[index] = transition
-        states_predict[index] = predicted_state
-        cov_predict[index] = predicted_cov
-        states_filter[index] = state
-        cov_filter[index] = cov
-
-    states_smooth = states_filter.copy()
-    cov_smooth = cov_filter.copy()
-    for index in range(n - 2, -1, -1):
-        transition = transitions[index + 1]
-        smoother_gain = cov_filter[index] @ transition.T @ np.linalg.inv(cov_predict[index + 1])
-        states_smooth[index] = states_filter[index] + smoother_gain @ (
-            states_smooth[index + 1] - states_predict[index + 1]
-        )
-        cov_smooth[index] = cov_filter[index] + smoother_gain @ (
-            cov_smooth[index + 1] - cov_predict[index + 1]
-        ) @ smoother_gain.T
-
-    lane_length = float(lane_lock.lane_length_meters)
+    spline = _fit_robust_board_spline(fit_s_feet, fit_boards, fit_weights, config=config)
+    smoothed_boards = np.asarray(spline(output_s_meters * METERS_TO_FEET), dtype=np.float64)
+    smoothed_boards = np.clip(smoothed_boards, board_min, board_max)
+    smoothed_x_meters = np.asarray(
+        [_x_meters_from_board(float(board), lane_lock) for board in smoothed_boards],
+        dtype=np.float64,
+    )
     lateral_limit = max(0.01, float(lane_lock.lane_width_meters) * 0.5 + float(config.smoothing_lateral_margin_meters))
-    states_smooth[:, 0] = np.clip(states_smooth[:, 0], -lateral_limit, lateral_limit)
-    states_smooth[:, 1] = np.clip(states_smooth[:, 1], 0.0, lane_length)
-    states_smooth[:, 1] = np.maximum.accumulate(states_smooth[:, 1])
-    states_smooth[:, 3] = np.maximum(states_smooth[:, 3], 0.0)
-    return states_smooth
+    smoothed_x_meters = np.clip(smoothed_x_meters, -lateral_limit, lateral_limit)
+    return np.column_stack([smoothed_x_meters, output_s_meters])
 
 
 def _frame_timing_by_seq(frame_metadata: list[dict[str, Any]]) -> dict[int, tuple[int, int]]:
@@ -540,12 +536,12 @@ def reconstruct_lane_space_trajectory(
     if not ordered:
         return []
 
-    states = _kalman_rts_smooth(ordered, lane_lock, resolved_config)
+    smoothed_positions = _spline_smooth_positions(ordered, lane_lock, resolved_config)
     points = [
         _build_lane_space_point(
             measurement=measurement,
-            x_meters=float(states[index, 0]),
-            s_meters=float(states[index, 1]),
+            x_meters=float(smoothed_positions[index, 0]),
+            s_meters=float(smoothed_positions[index, 1]),
             lane_lock=lane_lock,
         )
         for index, measurement in enumerate(ordered)
