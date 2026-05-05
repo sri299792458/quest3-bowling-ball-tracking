@@ -160,6 +160,7 @@ class LiveSessionPipeline:
 
     def _process_session_dir(self, session_dir: Path, summary: PipelineProcessSummary) -> None:
         media_ready = self._mark_media_freshness(session_dir)
+        detector_result = None
 
         if self._shot_boundary_detector is not None and media_ready:
             detector_result = self._shot_boundary_detector.process_session_dir(session_dir)
@@ -229,7 +230,7 @@ class LiveSessionPipeline:
                 summary.completed_shot_windows_submitted += 1
                 self._save_pipeline_state(session_dir, state)
 
-        self._publish_armed_status_if_idle(session_dir, shot_boundaries, media_ready)
+        self._publish_armed_status_if_idle(session_dir, shot_boundaries, media_ready, detector_result)
 
     def _shot_job_key(self, session_dir: Path, window_id: str) -> tuple[str, str]:
         return str(session_dir.expanduser().resolve()), str(window_id)
@@ -407,7 +408,13 @@ class LiveSessionPipeline:
                 return False, PUBLISH_FAILED_UNKNOWN_STREAM, str(exc)
             raise
 
-    def _publish_armed_status_if_idle(self, session_dir: Path, shot_boundaries: Any, media_ready: bool) -> None:
+    def _publish_armed_status_if_idle(
+        self,
+        session_dir: Path,
+        shot_boundaries: Any,
+        media_ready: bool,
+        detector_result: Any | None,
+    ) -> None:
         if not media_ready:
             return
 
@@ -435,17 +442,30 @@ class LiveSessionPipeline:
         if not request_id:
             return
 
-        if state.get("lastPublishedArmedLaneLockRequestId") == request_id:
+        detector_backlog_frames = int(getattr(detector_result, "backlog_frames", 0) or 0) if detector_result else 0
+        if detector_backlog_frames > 0:
+            status_state = "shot_detection_catching_up"
+            ready = False
+            reason = "detector_catching_up"
+        else:
+            status_state = "shot_detection_armed"
+            ready = True
+            reason = "confirmed_lane_armed"
+
+        status_key = f"{request_id}:{status_state}:{ready}:{reason}"
+        if state.get("lastPublishedPipelineStatusKey") == status_key:
             return
 
         published, publish_status, publish_error = self._publish_pipeline_status(
             session_dir,
-            state="shot_detection_armed",
-            ready=True,
-            reason="confirmed_lane_armed",
+            state=status_state,
+            ready=ready,
+            reason=reason,
         )
         if published:
-            state["lastPublishedArmedLaneLockRequestId"] = request_id
+            state["lastPublishedPipelineStatusKey"] = status_key
+            if ready:
+                state["lastPublishedArmedLaneLockRequestId"] = request_id
         state["lastArmedStatusPublished"] = bool(published)
         state["lastArmedStatusPublishStatus"] = publish_status
         state["lastArmedStatusPublishError"] = publish_error

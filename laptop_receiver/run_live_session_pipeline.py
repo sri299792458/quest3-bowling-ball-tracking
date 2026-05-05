@@ -83,7 +83,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--yolo-det-conf", type=float, default=0.05)
     parser.add_argument("--yolo-seed-conf", type=float, default=0.8)
     parser.add_argument("--yolo-min-box-size", type=float, default=10.0)
-    parser.add_argument("--yolo-scan-stride", type=int, default=2)
+    parser.add_argument("--yolo-scan-stride", type=int, default=5)
     parser.add_argument(
         "--run-sam2",
         action="store_true",
@@ -95,7 +95,6 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam2-model-cfg", default="configs/sam2.1/sam2.1_hiera_t.yaml")
     parser.add_argument("--sam2-track-seconds", type=float, default=5.0)
     parser.add_argument("--sam2-lost-grace-frames", type=int, default=5)
-    parser.add_argument("--live-tail-seconds", type=float, default=2.0)
     return parser
 
 
@@ -155,7 +154,6 @@ def main() -> int:
             yolo_min_box_size=float(args.yolo_min_box_size),
             scan_stride_frames=max(int(args.yolo_scan_stride), 1),
             shot_window_seconds=float(args.sam2_track_seconds),
-            max_live_idle_backlog_seconds=float(args.live_tail_seconds),
         )
 
     pipeline = build_pipeline_from_paths(

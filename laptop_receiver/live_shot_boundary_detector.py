@@ -46,10 +46,9 @@ class LiveShotBoundaryDetectorConfig:
     yolo_start_conf: float = 0.8
     yolo_track_conf: float = 0.25
     yolo_min_box_size: float = 10.0
-    scan_stride_frames: int = 2
+    scan_stride_frames: int = 5
     warm_models_on_start: bool = True
     shot_window_seconds: float = 5.0
-    max_live_idle_backlog_seconds: float = 2.0
     pre_roll_seconds: float = 0.5
     start_confirm_seconds: float = 0.8
     min_confirm_downlane_delta_meters: float = 0.10
@@ -75,6 +74,8 @@ class LiveShotBoundaryDetectorResult:
     start_events_emitted: int
     end_events_emitted: int
     latest_scanned_frame_seq: int
+    latest_available_frame_seq: int
+    backlog_frames: int
     detector_mode: str
     confirmed_lane_lock_request_id: str
     pending_frame_seq: int | None
@@ -92,6 +93,8 @@ class LiveShotBoundaryDetectorResult:
             "startEventsEmitted": self.start_events_emitted,
             "endEventsEmitted": self.end_events_emitted,
             "latestScannedFrameSeq": self.latest_scanned_frame_seq,
+            "latestAvailableFrameSeq": self.latest_available_frame_seq,
+            "backlogFrames": self.backlog_frames,
             "detectorMode": self.detector_mode,
             "confirmedLaneLockRequestId": self.confirmed_lane_lock_request_id,
             "pendingFrameSeq": self.pending_frame_seq,
@@ -311,15 +314,6 @@ class LiveShotBoundaryDetector:
         last_reason = "no_new_frames"
 
         start_frame_index = max(_int(state.get("lastScannedFrameIndex"), -1) + 1, 0)
-        if latest_available_frame_index is not None:
-            start_frame_index = self._apply_idle_live_tail_catchup(
-                root=root,
-                state=state,
-                artifact=artifact,
-                fps=fps,
-                start_frame_index=start_frame_index,
-                latest_available_frame_index=latest_available_frame_index,
-            )
         max_frames_this_poll = max(int(self.config.max_frames_per_poll), 1)
         save_interval = max(int(self.config.state_save_interval_frames), 1)
         for decoded_frame in self._frame_reader.iter_frames(
@@ -401,6 +395,8 @@ class LiveShotBoundaryDetector:
             start_events_emitted=int(start_events_emitted),
             end_events_emitted=int(end_events_emitted),
             latest_scanned_frame_seq=_int(state.get("lastScannedFrameSeq"), -1),
+            latest_available_frame_seq=int(latest_frame_seq),
+            backlog_frames=max(0, int(latest_available_frame_index) - _int(state.get("lastScannedFrameIndex"), -1)),
             detector_mode=str(state.get("mode") or "idle"),
             confirmed_lane_lock_request_id=str(lane_lock.request_id),
             pending_frame_seq=self._pending_frame_seq(state),
@@ -761,51 +757,6 @@ class LiveShotBoundaryDetector:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(dict(event), separators=(",", ":")) + "\n")
 
-    def _apply_idle_live_tail_catchup(
-        self,
-        *,
-        root: Path,
-        state: dict[str, Any],
-        artifact: LocalClipArtifact,
-        fps: float,
-        start_frame_index: int,
-        latest_available_frame_index: int,
-    ) -> int:
-        if str(state.get("mode") or "idle") != "idle":
-            return int(start_frame_index)
-
-        max_backlog_seconds = max(float(self.config.max_live_idle_backlog_seconds), 0.0)
-        if max_backlog_seconds <= 0.0:
-            return int(start_frame_index)
-
-        tail_frames = max(int(round(max_backlog_seconds * max(float(fps), 1.0))), 1)
-        backlog_frames = int(latest_available_frame_index) - int(start_frame_index) + 1
-        if backlog_frames <= tail_frames + max(int(self.config.max_frames_per_poll), 1):
-            return int(start_frame_index)
-
-        target_index = max(int(latest_available_frame_index) - tail_frames + 1, 0)
-        if target_index <= int(start_frame_index):
-            return int(start_frame_index)
-
-        previous_index = max(target_index - 1, 0)
-        if previous_index < len(artifact.frame_metadata):
-            previous_metadata = artifact.frame_metadata[previous_index]
-        else:
-            previous_metadata = {"frameSeq": previous_index}
-
-        state["lastScannedFrameIndex"] = int(previous_index)
-        state["lastScannedFrameSeq"] = self._frame_seq(previous_metadata, previous_index)
-        state["lastReason"] = "idle_live_tail_catchup"
-        state["lastLiveTailCatchup"] = {
-            "fromFrameIndex": int(start_frame_index),
-            "toFrameIndex": int(target_index),
-            "latestAvailableFrameIndex": int(latest_available_frame_index),
-            "skippedFrames": int(target_index) - int(start_frame_index),
-            "tailFrames": int(tail_frames),
-        }
-        self._frame_reader.invalidate_for_root(root)
-        return int(target_index)
-
     def _write_yolo_seed(self, root: Path, *, start_event: Mapping[str, Any], active_shot: Mapping[str, Any]) -> None:
         seed_candidate = active_shot.get("seedCandidate")
         if not isinstance(seed_candidate, Mapping):
@@ -1003,6 +954,15 @@ class LiveShotBoundaryDetector:
             start_events_emitted=0,
             end_events_emitted=0,
             latest_scanned_frame_seq=_int(state.get("lastScannedFrameSeq"), -1),
+            latest_available_frame_seq=_int(
+                state.get("latestAvailableFrameSeq"),
+                _int(state.get("lastScannedFrameSeq"), -1),
+            ),
+            backlog_frames=max(
+                0,
+                _int(state.get("latestAvailableFrameIndex"), _int(state.get("lastScannedFrameIndex"), -1))
+                - _int(state.get("lastScannedFrameIndex"), -1),
+            ),
             detector_mode=str(state.get("mode") or "idle"),
             confirmed_lane_lock_request_id=confirmed_lane_lock_request_id,
             pending_frame_seq=self._pending_frame_seq(state),
