@@ -6,9 +6,9 @@ The documentation rule for this repo is simple: this README describes what the c
 
 ## Demo Video
 
-<video src="docs/media/quest_bowling_demo_1min.mp4" controls width="720"></video>
+[![Quest Bowling one-minute field demo](docs/media/quest_bowling_demo_1min_poster.jpg)](https://github.com/sri299792458/QuestBowlingStandalone/raw/master/docs/media/quest_bowling_demo_1min.mp4)
 
-[Watch the one-minute field demo](docs/media/quest_bowling_demo_1min.mp4).
+[Watch the one-minute field demo](https://github.com/sri299792458/QuestBowlingStandalone/raw/master/docs/media/quest_bowling_demo_1min.mp4).
 
 The clip is recreated from a recorded Quest session and shows lane placement, live ball tracking, trajectory replay, and shot stats.
 
