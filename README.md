@@ -25,7 +25,7 @@ There is no laptop-side lane guessing in the normal live path. Replayable shot r
 - `unity_proof/Assets/Plugins/Android/StandaloneVideoEncoderPlugin/`: Android MediaCodec encoder plugin.
 - `laptop_receiver/`: laptop receiver, live pipeline, YOLO/SAM2 tracking, trajectory reconstruction, and stats.
 - `protocol/`: versioned metadata, live stream, and artifact contracts.
-- `models/`: ignored local model checkpoints and training outputs.
+- `models/`: ignored local model checkpoints and training outputs. The published YOLO training dataset is on Hugging Face: `https://huggingface.co/datasets/sri299792458/quest-bowling-ball-yolo`.
 - `third_party/sam2/`: repo-local SAM2 source; checkpoints and caches are ignored.
 - `data/`: ignored live sessions, experiments, validation clips, and generated artifacts.
 - `start_live_pipeline.ps1`: normal live-session launcher for the laptop.

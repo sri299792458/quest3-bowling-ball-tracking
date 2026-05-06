@@ -24,7 +24,13 @@ The checkpoint is a local/downloaded artifact and is ignored by Git. The laptop 
 
 ## Dataset Artifact
 
-The checkpoint and image/label dataset used for training are intentionally not committed directly. See `dataset/README.md` for the shared Google Drive bundle and expected download/extract layout.
+The checkpoint and image/label dataset used for training are intentionally not committed directly. See `dataset/README.md` for the public Hugging Face dataset, the shared Google Drive bundle, and the expected download/extract layout.
+
+Public dataset:
+
+```text
+https://huggingface.co/datasets/sri299792458/quest-bowling-ball-yolo
+```
 
 Shared bundle:
 

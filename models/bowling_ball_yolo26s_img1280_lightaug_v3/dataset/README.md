@@ -2,11 +2,21 @@
 
 The training dataset and checkpoint are shared external artifacts instead of Git-tracked files.
 
+Public Hugging Face dataset:
+
+```text
+https://huggingface.co/datasets/sri299792458/quest-bowling-ball-yolo
+```
+
+The Hugging Face repo contains the YOLO images/labels, split metadata, export summary, and training notes. It does not include the runtime checkpoint.
+
 Google Drive bundle:
 
 ```text
 https://drive.google.com/file/d/1NC0y6ds9-QXV-j-rVcolQ3ij5DCxdgBl/view?usp=sharing
 ```
+
+The Drive bundle includes both the dataset and `weights/best.pt`.
 
 When you download `bowling_ball_yolo26s_training_bundle.zip`, extract it into:
 
