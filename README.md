@@ -4,6 +4,14 @@ Quest Bowling Standalone is a Quest 3 mixed-reality bowling replay prototype. Th
 
 The documentation rule for this repo is simple: this README describes what the current code does. Protocol files under `protocol/` are the wire contracts. Old planning docs and speculative design notes should not be treated as product truth.
 
+## Demo Video
+
+<video src="docs/media/quest_bowling_demo_1min.mp4" controls width="720"></video>
+
+[Watch the one-minute field demo](docs/media/quest_bowling_demo_1min.mp4).
+
+The clip is recreated from a recorded Quest session and shows lane placement, live ball tracking, trajectory replay, and shot stats.
+
 ## Current Pipeline
 
 1. The laptop starts `live_stream_receiver` and advertises itself over UDP discovery.
