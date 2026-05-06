@@ -220,6 +220,33 @@ The repo still has offline YOLO and batch SAM2 CLIs for local artifact checks:
 .\.venv\Scripts\python.exe -m laptop_receiver.run_sam2_on_artifact <artifact_dir>
 ```
 
+### Recreate A Quest Recording From Live Logs
+
+The Unity editor has an offline recorded-session video exporter. It takes a completed live session directory, decodes `stream.h264`, replays the recorded camera poses, lane lock, shot results, trajectory renderer, callouts, shot rail, and review UI through the same Unity scene, then writes a presentation video under `Temp/`.
+
+This is useful when the headset recording contains distracting UI, or when we need a reproducible demo video that matches what the live app would have rendered from the saved logs.
+
+```powershell
+$unity = "C:\Program Files\Unity\Hub\Editor\6000.3.5f2\Editor\Unity.exe"
+& $unity -batchmode -quit `
+  -projectPath "$PWD\unity_proof" `
+  -executeMethod QuestBowlingStandalone.Editor.StandaloneRecordedSessionVideoExporter.ExportLatest `
+  -sessionDir "$PWD\data\incoming_live_streams\<live_session_dir>" `
+  -output "$PWD\Temp\recorded_session_replay.mp4" `
+  -questRecordingLook true `
+  -fps 30 `
+  -frameStep 1 `
+  -logFile "$PWD\Temp\recorded_session_replay.log"
+```
+
+The exporter uses `outbound_results.jsonl` timestamps, so trajectory overlays appear when the laptop actually published each shot result, not immediately after the throw.
+
+Reference presentation video:
+
+```text
+https://drive.google.com/file/d/1YwJZX4GWMRNxbYpMebWoycnXdIwR00Dp/view?usp=sharing
+```
+
 ## Core Runtime Invariants
 
 - One Quest app run creates one live session ID.

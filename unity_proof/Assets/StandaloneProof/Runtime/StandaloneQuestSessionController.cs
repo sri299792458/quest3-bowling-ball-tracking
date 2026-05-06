@@ -42,13 +42,68 @@ namespace QuestBowlingStandalone.QuestApp
         private float _lastMediaProgressAt;
         private long _lastLiveMediaSampleCount = -1L;
 
-        public bool IsSessionActive => _sessionActive && proofCapture != null && proofCapture.IsCapturing;
-        public string ActiveSessionId => proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
-        public string ActiveStreamId => proofCapture != null ? proofCapture.ActiveStreamId : string.Empty;
+#if UNITY_EDITOR
+        private bool _recordedExportSessionActive;
+        private string _recordedExportSessionId = string.Empty;
+        private string _recordedExportStreamId = string.Empty;
+        private bool _recordedExportMediaReady;
+        private string _recordedExportMediaNote = "recorded_export_media_ready";
+#endif
+
+        public bool IsSessionActive
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (_recordedExportSessionActive)
+                {
+                    return true;
+                }
+#endif
+                return _sessionActive && proofCapture != null && proofCapture.IsCapturing;
+            }
+        }
+
+        public string ActiveSessionId
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (_recordedExportSessionActive)
+                {
+                    return _recordedExportSessionId;
+                }
+#endif
+                return proofCapture != null ? proofCapture.ActiveSessionId : string.Empty;
+            }
+        }
+
+        public string ActiveStreamId
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (_recordedExportSessionActive)
+                {
+                    return _recordedExportStreamId;
+                }
+#endif
+                return proofCapture != null ? proofCapture.ActiveStreamId : string.Empty;
+            }
+        }
 
         public bool TryGetLiveMediaReadiness(out string note)
         {
             note = "live_media_not_ready";
+#if UNITY_EDITOR
+            if (_recordedExportSessionActive)
+            {
+                note = string.IsNullOrWhiteSpace(_recordedExportMediaNote)
+                    ? "recorded_export_media_ready"
+                    : _recordedExportMediaNote;
+                return _recordedExportMediaReady;
+            }
+#endif
             if (!IsSessionActive)
             {
                 note = "session_not_active";
@@ -91,6 +146,23 @@ namespace QuestBowlingStandalone.QuestApp
             note = "media_stream_ready";
             return true;
         }
+
+#if UNITY_EDITOR
+        public void InjectRecordedExportSessionState(
+            string sessionId,
+            string streamId,
+            bool mediaReady,
+            string mediaNote)
+        {
+            _recordedExportSessionActive = true;
+            _recordedExportSessionId = string.IsNullOrWhiteSpace(sessionId) ? "recorded-session" : sessionId.Trim();
+            _recordedExportStreamId = string.IsNullOrWhiteSpace(streamId) ? "session-stream" : streamId.Trim();
+            _recordedExportMediaReady = mediaReady;
+            _recordedExportMediaNote = string.IsNullOrWhiteSpace(mediaNote)
+                ? "recorded_export_media_ready"
+                : mediaNote.Trim();
+        }
+#endif
 
         [Serializable]
         private sealed class EncoderStatusSnapshot

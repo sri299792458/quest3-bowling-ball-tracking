@@ -129,7 +129,7 @@ namespace QuestBowlingStandalone.Editor
             ConfigureLiveResultReceiver(liveResultReceiver);
             ConfigureLaptopDiscovery(laptopDiscovery);
             ConfigureLaneLockResultRenderer(laneLockResultRenderer);
-            ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver, laneLockStateCoordinator);
+            ConfigureShotReplayRenderer(shotReplayRenderer, liveResultReceiver, laneLockStateCoordinator, eventCamera);
             ConfigureCoordinator(renderCoordinator, frameSource, proofCapture);
             ConfigureSessionController(sessionController, proofCapture, liveMetadataSender, liveResultReceiver, laptopDiscovery);
 
@@ -933,23 +933,27 @@ namespace QuestBowlingStandalone.Editor
         private static void ConfigureShotReplayRenderer(
             QuestBowlingStandalone.QuestApp.StandaloneQuestShotReplayRenderer shotReplayRenderer,
             QuestBowlingStandalone.QuestApp.StandaloneQuestLiveResultReceiver liveResultReceiver,
-            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator)
+            QuestBowlingStandalone.QuestApp.StandaloneQuestLaneLockStateCoordinator laneLockStateCoordinator,
+            Camera viewCamera)
         {
             var serializedObject = new SerializedObject(shotReplayRenderer);
             serializedObject.FindProperty("liveResultReceiver").objectReferenceValue = liveResultReceiver;
             serializedObject.FindProperty("laneLockCoordinator").objectReferenceValue = laneLockStateCoordinator;
             serializedObject.FindProperty("replayRoot").objectReferenceValue = null;
+            serializedObject.FindProperty("viewCamera").objectReferenceValue = viewCamera;
             serializedObject.FindProperty("lineWidthMeters").floatValue = 0.03f;
             serializedObject.FindProperty("markerRadiusMeters").floatValue = 0.10f;
             serializedObject.FindProperty("verticalOffsetMeters").floatValue = 0.035f;
-            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.50f;
-            serializedObject.FindProperty("calloutHorizontalOffsetMeters").floatValue = 0.34f;
-            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.040f;
-            serializedObject.FindProperty("calloutLeadSeconds").floatValue = 0.10f;
-            serializedObject.FindProperty("calloutHoldSeconds").floatValue = 0.55f;
+            serializedObject.FindProperty("calloutVerticalOffsetMeters").floatValue = 0.62f;
+            serializedObject.FindProperty("calloutHorizontalOffsetMeters").floatValue = 0.46f;
+            serializedObject.FindProperty("calloutCharacterSizeMeters").floatValue = 0.032f;
+            serializedObject.FindProperty("calloutLeadSeconds").floatValue = 0.04f;
+            serializedObject.FindProperty("calloutHoldSeconds").floatValue = 0.22f;
             serializedObject.FindProperty("ghostLineWidthMeters").floatValue = 0.016f;
             serializedObject.FindProperty("minReplayDurationSeconds").floatValue = 0.75f;
             serializedObject.FindProperty("maxReplayDurationSeconds").floatValue = 3.0f;
+            serializedObject.FindProperty("clearReplayAfterCompletion").boolValue = true;
+            serializedObject.FindProperty("replayCompletionHoldSeconds").floatValue = 4.0f;
             serializedObject.FindProperty("minAverageProjectionConfidence").floatValue = 0.20f;
             serializedObject.FindProperty("minOnLanePointFraction").floatValue = 0.80f;
             serializedObject.FindProperty("clearOnFailedShotResult").boolValue = false;
@@ -1002,6 +1006,7 @@ namespace QuestBowlingStandalone.Editor
             serializedObject.FindProperty("placementDistanceMeters").floatValue = 0.75f;
             serializedObject.FindProperty("pinchPressThreshold").floatValue = 0.70f;
             serializedObject.FindProperty("pinchReleaseThreshold").floatValue = 0.30f;
+            serializedObject.FindProperty("showRelockActionWhenLocked").boolValue = false;
             serializedObject.FindProperty("useStabilization").boolValue = true;
             serializedObject.FindProperty("smoothingSeconds").floatValue = 0.16f;
             serializedObject.FindProperty("positionDeadzoneMeters").floatValue = 0.012f;

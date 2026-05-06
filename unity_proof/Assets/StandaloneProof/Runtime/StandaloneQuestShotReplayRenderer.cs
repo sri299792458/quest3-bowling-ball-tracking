@@ -11,6 +11,7 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private StandaloneQuestLiveResultReceiver liveResultReceiver;
         [SerializeField] private StandaloneQuestLaneLockStateCoordinator laneLockCoordinator;
         [SerializeField] private Transform replayRoot;
+        [SerializeField] private Camera viewCamera;
 
         [Header("Replay Shape")]
         [SerializeField] private float lineWidthMeters = 0.03f;
@@ -19,11 +20,13 @@ namespace QuestBowlingStandalone.QuestApp
         [SerializeField] private float calloutVerticalOffsetMeters = 0.50f;
         [SerializeField] private float calloutHorizontalOffsetMeters = 0.34f;
         [SerializeField] private float calloutCharacterSizeMeters = 0.040f;
-        [SerializeField] private float calloutLeadSeconds = 0.10f;
-        [SerializeField] private float calloutHoldSeconds = 0.55f;
+        [SerializeField] private float calloutLeadSeconds = 0.04f;
+        [SerializeField] private float calloutHoldSeconds = 0.22f;
         [SerializeField] private float ghostLineWidthMeters = 0.016f;
         [SerializeField] private float minReplayDurationSeconds = 0.75f;
         [SerializeField] private float maxReplayDurationSeconds = 3.0f;
+        [SerializeField] private bool clearReplayAfterCompletion = true;
+        [SerializeField] private float replayCompletionHoldSeconds = 4.0f;
         [SerializeField, Range(0.0f, 1.0f)] private float minAverageProjectionConfidence = 0.20f;
         [SerializeField, Range(0.0f, 1.0f)] private float minOnLanePointFraction = 0.80f;
         [SerializeField] private bool clearOnFailedShotResult;
@@ -53,6 +56,7 @@ namespace QuestBowlingStandalone.QuestApp
         private Vector3 _laneUp = Vector3.up;
         private float _replayStartTime;
         private float _replayDurationSeconds = 1.0f;
+        private float _clearReplayAtTime = -1.0f;
         private bool _isReplaying;
 
         public string LastStatus { get; private set; } = string.Empty;
@@ -60,6 +64,11 @@ namespace QuestBowlingStandalone.QuestApp
         public bool HasReplay { get; private set; }
         public bool HasGhostReplay { get; private set; }
         public bool IsReplaying => _isReplaying;
+
+        public void SetViewCamera(Camera camera)
+        {
+            viewCamera = camera;
+        }
 
         private void Awake()
         {
@@ -93,26 +102,36 @@ namespace QuestBowlingStandalone.QuestApp
 
             if (_lineMaterial != null)
             {
-                Destroy(_lineMaterial);
+                DestroyUnityObject(_lineMaterial);
                 _lineMaterial = null;
             }
 
             if (_ghostLineMaterial != null)
             {
-                Destroy(_ghostLineMaterial);
+                DestroyUnityObject(_ghostLineMaterial);
                 _ghostLineMaterial = null;
             }
 
             if (_markerMaterial != null)
             {
-                Destroy(_markerMaterial);
+                DestroyUnityObject(_markerMaterial);
                 _markerMaterial = null;
             }
         }
 
         private void Update()
         {
-            if (!_isReplaying || _positions.Length == 0 || _markerObject == null)
+            if (!_isReplaying)
+            {
+                if (_clearReplayAtTime >= 0.0f && Time.time >= _clearReplayAtTime)
+                {
+                    ClearReplay("shot_replay_auto_cleared");
+                }
+
+                return;
+            }
+
+            if (_positions.Length == 0 || _markerObject == null)
             {
                 return;
             }
@@ -121,6 +140,8 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 _markerObject.transform.position = MarkerPositionAt(0.0f);
                 _isReplaying = false;
+                HideCallout();
+                ScheduleReplayAutoClear();
                 SetStatus("shot_replay_complete");
                 return;
             }
@@ -133,10 +154,8 @@ namespace QuestBowlingStandalone.QuestApp
             if (t >= 1.0f)
             {
                 _isReplaying = false;
-                if (_calloutObject != null)
-                {
-                    _calloutObject.SetActive(false);
-                }
+                HideCallout();
+                ScheduleReplayAutoClear();
                 SetStatus("shot_replay_complete");
             }
         }
@@ -237,6 +256,34 @@ namespace QuestBowlingStandalone.QuestApp
             return true;
         }
 
+        public void SetReplayPreviewTime(float normalizedTime)
+        {
+            if (!HasReplay || _positions.Length == 0 || _markerObject == null)
+            {
+                return;
+            }
+
+            var t = Mathf.Clamp01(normalizedTime);
+            _clearReplayAtTime = -1.0f;
+            _markerObject.SetActive(true);
+            _markerObject.transform.position = MarkerPositionAt(t);
+            if (_lineRenderer != null)
+            {
+                _lineRenderer.enabled = _positions.Length > 1;
+            }
+
+            if (t >= 1.0f)
+            {
+                HideCallout();
+            }
+            else
+            {
+                UpdateCallout(t);
+            }
+            _isReplaying = false;
+            SetStatus($"shot_replay_preview t={t:0.000}");
+        }
+
         private void StartReplay(string status)
         {
             if (_positions.Length == 0 || _markerObject == null)
@@ -247,14 +294,12 @@ namespace QuestBowlingStandalone.QuestApp
 
             _markerObject.SetActive(true);
             _markerObject.transform.position = MarkerPositionAt(0.0f);
+            _clearReplayAtTime = -1.0f;
             if (_lineRenderer != null)
             {
                 _lineRenderer.enabled = _positions.Length > 1;
             }
-            if (_calloutObject != null)
-            {
-                _calloutObject.SetActive(false);
-            }
+            HideCallout();
 
             _replayStartTime = Time.time;
             _isReplaying = true;
@@ -349,6 +394,7 @@ namespace QuestBowlingStandalone.QuestApp
             _milestones = Array.Empty<StandaloneShotStatMilestone>();
             _laneUp = Vector3.up;
             _isReplaying = false;
+            _clearReplayAtTime = -1.0f;
             HasReplay = false;
             ClearGhostReplay();
 
@@ -363,10 +409,7 @@ namespace QuestBowlingStandalone.QuestApp
                 _markerObject.SetActive(false);
             }
 
-            if (_calloutObject != null)
-            {
-                _calloutObject.SetActive(false);
-            }
+            HideCallout();
 
             SetStatus(string.IsNullOrWhiteSpace(reason) ? "shot_replay_cleared" : reason);
         }
@@ -390,6 +433,8 @@ namespace QuestBowlingStandalone.QuestApp
 
             liveResultReceiver.ShotResultReceived -= RenderShotResult;
             liveResultReceiver.ShotResultReceived += RenderShotResult;
+            liveResultReceiver.PipelineStatusReceived -= OnPipelineStatusReceived;
+            liveResultReceiver.PipelineStatusReceived += OnPipelineStatusReceived;
         }
 
         private void Unsubscribe()
@@ -400,6 +445,40 @@ namespace QuestBowlingStandalone.QuestApp
             }
 
             liveResultReceiver.ShotResultReceived -= RenderShotResult;
+            liveResultReceiver.PipelineStatusReceived -= OnPipelineStatusReceived;
+        }
+
+        private void OnPipelineStatusReceived(StandalonePipelineStatus status)
+        {
+            if (status == null || !ShouldClearReplayForPipelineStatus(status))
+            {
+                return;
+            }
+
+            if (!HasReplay && !HasGhostReplay && !_isReplaying)
+            {
+                return;
+            }
+
+            ClearReplay("new_shot_started:" + (status.state ?? string.Empty));
+        }
+
+        private static bool ShouldClearReplayForPipelineStatus(StandalonePipelineStatus status)
+        {
+            var state = (status.state ?? string.Empty).Trim().ToLowerInvariant();
+            if (state == "shot_open" || state == "shot_analyzing")
+            {
+                return true;
+            }
+
+#if UNITY_EDITOR
+            if (state == "recorded_export_processing_shot")
+            {
+                return true;
+            }
+#endif
+
+            return false;
         }
 
         private void EnsureRenderObjects()
@@ -462,7 +541,7 @@ namespace QuestBowlingStandalone.QuestApp
                 var markerCollider = _markerObject.GetComponent<Collider>();
                 if (markerCollider != null)
                 {
-                    Destroy(markerCollider);
+                    DestroyUnityObject(markerCollider);
                 }
             }
 
@@ -648,10 +727,16 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
+            if (normalizedTime <= 0.0f || normalizedTime >= 1.0f)
+            {
+                HideCallout();
+                return;
+            }
+
             var milestone = ActiveMilestone(normalizedTime);
             if (milestone == null || string.IsNullOrWhiteSpace(milestone.primaryValue))
             {
-                _calloutObject.SetActive(false);
+                HideCallout();
                 return;
             }
 
@@ -674,6 +759,14 @@ namespace QuestBowlingStandalone.QuestApp
             _calloutObject.SetActive(true);
         }
 
+        private void HideCallout()
+        {
+            if (_calloutObject != null)
+            {
+                _calloutObject.SetActive(false);
+            }
+        }
+
         private StandaloneShotStatMilestone ActiveMilestone(float normalizedTime)
         {
             StandaloneShotStatMilestone active = null;
@@ -686,6 +779,11 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 var milestone = _milestones[index];
                 if (milestone == null)
+                {
+                    continue;
+                }
+
+                if (!ShouldShowCalloutForMilestone(milestone))
                 {
                     continue;
                 }
@@ -707,6 +805,35 @@ namespace QuestBowlingStandalone.QuestApp
             return active;
         }
 
+        private static bool ShouldShowCalloutForMilestone(StandaloneShotStatMilestone milestone)
+        {
+            var board = milestone.board;
+            if (!float.IsFinite(board) || board < 1.0f || board > 39.0f)
+            {
+                return false;
+            }
+
+            var kind = (milestone.kind ?? string.Empty).Trim().ToLowerInvariant();
+            if (kind == "breakpoint")
+            {
+                return true;
+            }
+
+            var label = (milestone.label ?? string.Empty).Trim().ToLowerInvariant();
+            return label == "breakpoint";
+        }
+
+        private void ScheduleReplayAutoClear()
+        {
+            if (!clearReplayAfterCompletion)
+            {
+                _clearReplayAtTime = -1.0f;
+                return;
+            }
+
+            _clearReplayAtTime = Time.time + Mathf.Max(0.0f, replayCompletionHoldSeconds);
+        }
+
         private Vector3 ResolveCalloutHorizontalOffset(Vector3 anchor)
         {
             var distance = Mathf.Max(0.0f, calloutHorizontalOffsetMeters);
@@ -715,7 +842,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return Vector3.zero;
             }
 
-            var camera = Camera.main;
+            var camera = ResolveViewCamera();
             if (camera == null)
             {
                 return Vector3.zero;
@@ -738,7 +865,7 @@ namespace QuestBowlingStandalone.QuestApp
                 return;
             }
 
-            var camera = Camera.main;
+            var camera = ResolveViewCamera();
             if (camera == null)
             {
                 return;
@@ -753,6 +880,18 @@ namespace QuestBowlingStandalone.QuestApp
             // TextMesh reads from its local -Z side. Point local +Z away from the camera
             // so the user sees the front face instead of the mirrored back face.
             target.rotation = Quaternion.LookRotation(awayFromCamera.normalized, Vector3.up);
+        }
+
+        private Camera ResolveViewCamera()
+        {
+            if (viewCamera != null)
+            {
+                return viewCamera;
+            }
+
+            return Camera.main != null
+                ? Camera.main
+                : FindFirstObjectByType<Camera>();
         }
 
         private Vector3 ResolveLaneUp()
@@ -794,6 +933,23 @@ namespace QuestBowlingStandalone.QuestApp
                 color = color,
             };
             return material;
+        }
+
+        private static void DestroyUnityObject(UnityEngine.Object target)
+        {
+            if (target == null)
+            {
+                return;
+            }
+
+            if (Application.isPlaying)
+            {
+                Destroy(target);
+            }
+            else
+            {
+                DestroyImmediate(target);
+            }
         }
 
         private void SetStatus(string status)

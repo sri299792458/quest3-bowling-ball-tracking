@@ -66,13 +66,28 @@ namespace QuestBowlingStandalone.QuestApp
         private string _activeSessionId;
         private string _activeShotId;
         private volatile string _threadStatus;
+#if UNITY_EDITOR
+        private bool _recordedExportConnected;
+#endif
 
         public event Action<StandaloneShotResult> ShotResultReceived;
         public event Action<StandalonePipelineStatus> PipelineStatusReceived;
 
         public bool EnabledForAutoRun => enabledForAutoRun;
         public bool IsRunning => _readerThread != null && _readerThread.IsAlive;
-        public bool IsConnected => enabledForAutoRun && IsRunning && _isConnected;
+        public bool IsConnected
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (_recordedExportConnected)
+                {
+                    return true;
+                }
+#endif
+                return enabledForAutoRun && IsRunning && _isConnected;
+            }
+        }
         public bool IsPipelineReady => LastPipelineStatus != null && LastPipelineStatus.ready;
         public StandaloneShotResult LastShotResult { get; private set; }
         public StandalonePipelineStatus LastPipelineStatus { get; private set; }
@@ -83,6 +98,14 @@ namespace QuestBowlingStandalone.QuestApp
             host = targetHost ?? string.Empty;
             port = targetPort;
         }
+
+#if UNITY_EDITOR
+        public void InjectRecordedExportConnectionState(bool connected)
+        {
+            _recordedExportConnected = connected;
+            LastStatus = connected ? "recorded_export_result_connected" : "recorded_export_result_disconnected";
+        }
+#endif
 
         public bool TryBeginResultStream(string sessionId, string shotId, out string note)
         {
@@ -161,6 +184,45 @@ namespace QuestBowlingStandalone.QuestApp
             {
                 ProcessResultLine(line);
             }
+        }
+
+        public void InjectRecordedPipelineStatus(StandalonePipelineStatus status)
+        {
+            if (status == null)
+            {
+                LastStatus = "recorded_pipeline_status_missing";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            LastPipelineStatus = status;
+            LastStatus = status.ready ? "recorded_pipeline_status_ready" : "recorded_pipeline_status_busy";
+            DebugLog($"{LastStatus} state={status.state} reason={status.reason} windowId={status.windowId}");
+            PipelineStatusReceived?.Invoke(status);
+        }
+
+        public void InjectRecordedShotResult(StandaloneShotResult result)
+        {
+            if (result == null)
+            {
+                LastStatus = "recorded_shot_result_missing";
+                DebugLog(LastStatus);
+                return;
+            }
+
+            LastShotResult = result;
+            LastPipelineStatus = new StandalonePipelineStatus
+            {
+                state = result.success ? "shot_result_ready" : "shot_result_failed",
+                ready = true,
+                reason = result.success ? "shot_result_ready" : result.failureReason,
+                windowId = result.windowId,
+            };
+            LastStatus = result.success ? "recorded_shot_result_received" : "recorded_shot_result_failed";
+            var pointCount = result.trajectory != null ? result.trajectory.Length : 0;
+            DebugLog($"{LastStatus} windowId={result.windowId} trajectoryPoints={pointCount}");
+            ShotResultReceived?.Invoke(result);
+            PipelineStatusReceived?.Invoke(LastPipelineStatus);
         }
 
         private void OnDestroy()

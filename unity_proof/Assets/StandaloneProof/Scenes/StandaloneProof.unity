@@ -1798,17 +1798,20 @@ MonoBehaviour:
   liveResultReceiver: {fileID: 1545997011}
   laneLockCoordinator: {fileID: 1545997017}
   replayRoot: {fileID: 0}
+  viewCamera: {fileID: 1642275088}
   lineWidthMeters: 0.03
   markerRadiusMeters: 0.1
   verticalOffsetMeters: 0.035
-  calloutVerticalOffsetMeters: 0.5
-  calloutHorizontalOffsetMeters: 0.34
-  calloutCharacterSizeMeters: 0.04
-  calloutLeadSeconds: 0.1
-  calloutHoldSeconds: 0.55
+  calloutVerticalOffsetMeters: 0.62
+  calloutHorizontalOffsetMeters: 0.46
+  calloutCharacterSizeMeters: 0.032
+  calloutLeadSeconds: 0.04
+  calloutHoldSeconds: 0.22
   ghostLineWidthMeters: 0.016
   minReplayDurationSeconds: 0.75
   maxReplayDurationSeconds: 3
+  clearReplayAfterCompletion: 1
+  replayCompletionHoldSeconds: 4
   minAverageProjectionConfidence: 0.2
   minOnLanePointFraction: 0.8
   clearOnFailedShotResult: 0
@@ -1888,6 +1891,7 @@ MonoBehaviour:
   placementDistanceMeters: 0.75
   pinchPressThreshold: 0.7
   pinchReleaseThreshold: 0.3
+  showRelockActionWhenLocked: 0
   useStabilization: 1
   smoothingSeconds: 0.16
   positionDeadzoneMeters: 0.012

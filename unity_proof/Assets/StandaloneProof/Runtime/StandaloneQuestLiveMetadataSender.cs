@@ -74,10 +74,25 @@ namespace QuestBowlingStandalone.QuestApp
         private StreamWriter _writer;
         private string _activeSessionId;
         private string _activeShotId;
+#if UNITY_EDITOR
+        private bool _recordedExportConnected;
+#endif
 
         public event Action<string> MetadataStreamFailed;
         public bool EnabledForAutoRun => enabledForAutoRun;
-        public bool IsConnected => enabledForAutoRun && _writer != null && _client != null && _client.Connected;
+        public bool IsConnected
+        {
+            get
+            {
+#if UNITY_EDITOR
+                if (_recordedExportConnected)
+                {
+                    return true;
+                }
+#endif
+                return enabledForAutoRun && _writer != null && _client != null && _client.Connected;
+            }
+        }
         public string LastStatus { get; private set; } = string.Empty;
 
         public void SetEndpoint(string targetHost, int targetPort)
@@ -85,6 +100,14 @@ namespace QuestBowlingStandalone.QuestApp
             host = targetHost ?? string.Empty;
             port = targetPort;
         }
+
+#if UNITY_EDITOR
+        public void InjectRecordedExportConnectionState(bool connected)
+        {
+            _recordedExportConnected = connected;
+            LastStatus = connected ? "recorded_export_metadata_connected" : "recorded_export_metadata_disconnected";
+        }
+#endif
 
         public bool TryBeginSession(
             string sessionId,

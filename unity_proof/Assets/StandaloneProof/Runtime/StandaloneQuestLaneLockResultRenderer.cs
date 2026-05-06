@@ -339,10 +339,10 @@ namespace QuestBowlingStandalone.QuestApp
 
         private Material CreateColorMaterial(string materialName, Color color, bool transparent)
         {
-            var shader = Shader.Find("Unlit/Color");
+            var shader = transparent ? Shader.Find("Sprites/Default") : Shader.Find("Unlit/Color");
             if (shader == null)
             {
-                shader = Shader.Find("Sprites/Default");
+                shader = transparent ? Shader.Find("Unlit/Color") : Shader.Find("Sprites/Default");
             }
 
             var material = new Material(shader)

@@ -66,6 +66,7 @@ namespace QuestBowlingStandalone.QuestApp
         [Header("Input")]
         [SerializeField] private float pinchPressThreshold = 0.70f;
         [SerializeField] private float pinchReleaseThreshold = 0.30f;
+        [SerializeField] private bool showRelockActionWhenLocked;
 
         [Header("Stabilization")]
         [SerializeField] private bool useStabilization = true;
@@ -325,6 +326,18 @@ namespace QuestBowlingStandalone.QuestApp
                             readinessBlockerLabel: blockerLabel);
 
                     case StandaloneQuestLaneLockUiState.Locked:
+                        if (!showRelockActionWhenLocked)
+                        {
+                            return new StandaloneQuestLaneLockPresentation(
+                                string.Empty,
+                                primaryVisible: false,
+                                primaryInteractable: false,
+                                secondaryLabel: string.Empty,
+                                secondaryVisible: false,
+                                secondaryInteractable: false,
+                                readinessBlockerLabel: blockerLabel);
+                        }
+
                         return new StandaloneQuestLaneLockPresentation(
                             string.Empty,
                             primaryVisible: false,
@@ -379,6 +392,18 @@ namespace QuestBowlingStandalone.QuestApp
                         readinessBlockerLabel: "Confirm Lane");
 
                 case StandaloneQuestLaneLockUiState.Locked:
+                    if (!showRelockActionWhenLocked)
+                    {
+                        return new StandaloneQuestLaneLockPresentation(
+                            string.Empty,
+                            primaryVisible: false,
+                            primaryInteractable: false,
+                            secondaryLabel: string.Empty,
+                            secondaryVisible: false,
+                            secondaryInteractable: false,
+                            readinessBlockerLabel: string.Empty);
+                    }
+
                     return new StandaloneQuestLaneLockPresentation(
                         string.Empty,
                         primaryVisible: false,
@@ -408,6 +433,45 @@ namespace QuestBowlingStandalone.QuestApp
                         secondaryInteractable: false,
                         readinessBlockerLabel: "Place Lane");
             }
+        }
+
+        public bool ApplyRecordedLaneLock(StandaloneLaneLockResult result, out string note)
+        {
+            note = "recorded_lane_lock_invalid";
+            if (result == null)
+            {
+                return false;
+            }
+
+            if (!result.success)
+            {
+                note = string.IsNullOrWhiteSpace(result.failureReason)
+                    ? "recorded_lane_lock_failed"
+                    : result.failureReason;
+                Fail(note);
+                return false;
+            }
+
+            if (result.laneWidthMeters <= 0.0f || result.laneLengthMeters <= 0.0f)
+            {
+                note = "recorded_lane_lock_invalid_dimensions";
+                Fail(note);
+                return false;
+            }
+
+            _pendingResult = result;
+            _pendingResult.userConfirmed = true;
+            _pendingResult.requiresConfirmation = false;
+            _pendingResult.lockState = "Locked";
+            CurrentConfirmedLaneLockRequestId = _pendingResult.requestId ?? string.Empty;
+            _ignorePinchUntilReleased = false;
+            ResetStabilization();
+            ClearHeadsPreview();
+            laneRenderer?.RenderLaneLockResult(_pendingResult);
+            SetState(StandaloneQuestLaneLockUiState.Locked, "recorded_lane_locked");
+            SetStatus("recorded_lane_locked");
+            note = "recorded_lane_locked";
+            return true;
         }
 
         public void ResetLane(string reason)
@@ -1068,10 +1132,10 @@ namespace QuestBowlingStandalone.QuestApp
 
         private static Material CreateColorMaterial(string name, Color color, bool transparent)
         {
-            var shader = Shader.Find("Unlit/Color");
+            var shader = transparent ? Shader.Find("Sprites/Default") : Shader.Find("Unlit/Color");
             if (shader == null)
             {
-                shader = Shader.Find("Sprites/Default");
+                shader = transparent ? Shader.Find("Unlit/Color") : Shader.Find("Sprites/Default");
             }
 
             var material = new Material(shader)
