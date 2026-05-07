@@ -6,6 +6,8 @@ The documentation rule for this repo is simple: this README describes what the c
 
 ## Demo Video
 
+[![Quest 3 Bowling Ball Tracking final demo](docs/media/final_demo_thumbnail.png)](https://drive.google.com/file/d/1ChvX2wGKDNvMor3lKa0ZUYFAq08_IGWq/view?usp=sharing)
+
 [Watch the final narrated demo](https://drive.google.com/file/d/1ChvX2wGKDNvMor3lKa0ZUYFAq08_IGWq/view?usp=sharing).
 
 The demo shows lane placement, live ball tracking, trajectory replay, shot stats, session review, and the current far-lane tracking limitation.
