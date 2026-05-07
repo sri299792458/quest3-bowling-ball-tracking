@@ -6,11 +6,9 @@ The documentation rule for this repo is simple: this README describes what the c
 
 ## Demo Video
 
-[![Quest Bowling one-minute field demo](docs/media/quest_bowling_demo_1min_poster.jpg)](https://github.com/sri299792458/QuestBowlingStandalone/raw/master/docs/media/quest_bowling_demo_1min.mp4)
+[Watch the final narrated demo](https://drive.google.com/file/d/1ChvX2wGKDNvMor3lKa0ZUYFAq08_IGWq/view?usp=sharing).
 
-[Watch the one-minute field demo](https://github.com/sri299792458/QuestBowlingStandalone/raw/master/docs/media/quest_bowling_demo_1min.mp4).
-
-The clip is recreated from a recorded Quest session and shows lane placement, live ball tracking, trajectory replay, and shot stats.
+The demo shows lane placement, live ball tracking, trajectory replay, shot stats, session review, and the current far-lane tracking limitation.
 
 ## Current Pipeline
 
@@ -249,11 +247,7 @@ $unity = "C:\Program Files\Unity\Hub\Editor\6000.3.5f2\Editor\Unity.exe"
 
 The exporter uses `outbound_results.jsonl` timestamps, so trajectory overlays appear when the laptop actually published each shot result, not immediately after the throw.
 
-Reference presentation video:
-
-```text
-https://drive.google.com/file/d/1YwJZX4GWMRNxbYpMebWoycnXdIwR00Dp/view?usp=sharing
-```
+Final demo video: <https://drive.google.com/file/d/1ChvX2wGKDNvMor3lKa0ZUYFAq08_IGWq/view?usp=sharing>
 
 ## Core Runtime Invariants
 

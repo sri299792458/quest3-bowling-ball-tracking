@@ -1,0 +1,50 @@
+[
+  {
+    "file": "01_title.mp3",
+    "startSeconds": 0.8,
+    "scene": "Title",
+    "text": "Quest 3 Bowling Training Aid brings mixed-reality shot replay to a real bowling lane."
+  },
+  {
+    "file": "02_motivation.mp3",
+    "startSeconds": 11.2,
+    "scene": "Motivation",
+    "text": "A normal scoreboard tells you which pins fell. It does not tell you where the ball traveled, how fast it moved, or where it broke. Our goal was immediate coaching feedback: path, speed, breakpoint, entry board, and a replay that appears in the bowler's field of view."
+  },
+  {
+    "file": "03_lane_setup.mp3",
+    "startSeconds": 40.8,
+    "scene": "Lane setup",
+    "text": "Before tracking, the bowler pinch-and-holds the lane overlay and aligns it with the real foul line. The system only shows Shot Ready after the Quest stream, metadata, result channel, lane lock, and laptop pipeline are all synchronized."
+  },
+  {
+    "file": "04_pipeline.mp3",
+    "startSeconds": 63,
+    "scene": "Vision pipeline",
+    "text": "The laptop pipeline is deliberately split. YOLO finds a high-precision ball seed. SAM2 then tracks the mask through live frames, and lane geometry projects the measurements into real lane coordinates. That turns a camera track into a mixed-reality replay."
+  },
+  {
+    "file": "05_field_trials.mp3",
+    "startSeconds": 87.2,
+    "scene": "Field trials",
+    "text": "In field trials, the same live runtime handled several shot shapes: a straighter shot, a hook, and an edge or gutter case. Each result came from the same capture, tracking, projection, smoothing, and replay pipeline."
+  },
+  {
+    "file": "06_session_review.mp3",
+    "startSeconds": 111,
+    "scene": "Session review",
+    "text": "The headset also keeps previous shots available for review. That turns the replay into a coaching record, so the bowler can compare speed, entry board, entry angle, and breakpoint across the whole session."
+  },
+  {
+    "file": "07_limitation.mp3",
+    "startSeconds": 128.8,
+    "scene": "Limitation",
+    "text": "The main limitation is the final fifteen feet. The ball becomes tiny, so a few pixels of SAM2 mask drift can project into feet of lane-space error near the pins. The early and middle trajectory are much more reliable than pin-deck statistics."
+  },
+  {
+    "file": "08_acknowledgements.mp3",
+    "startSeconds": 148.4,
+    "scene": "Acknowledgements",
+    "text": "Thanks to our tools, datasets, classmates, and instructors for helping us build and test this prototype."
+  }
+]

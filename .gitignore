@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.pyc
+node_modules/
 
 # Unity / Android build clutter
 Library/
@@ -32,6 +33,41 @@ third_party/sam2/checkpoints/*.pt
 third_party/sam2/checkpoints/*.pth
 third_party/sam2/checkpoints/*.zip
 third_party/sam2/cache/
+
+# Remotion / frontend build outputs
+demo_video/out/
+demo_video/dist/
+demo_video/.cache/
+demo_video/public/video/quest_bowling_demo_1min.mp4
+
+# Final submission generated previews and extraction scratch files
+docs/final_submission/*.aux
+docs/final_submission/*.log
+docs/final_submission/*.out
+docs/final_submission/*_extracted.txt
+docs/final_submission/*_latex_extracted.txt
+docs/final_submission/Mixed-Reality-Final_Presentation.pptx.mp4
+docs/final_submission/POLISHED_VIDEO_DEMO_PLAN.md
+docs/final_submission/Quest_Bowling_Standalone_Technical_Report_1.pdf
+docs/final_submission/Quest_Bowling_Standalone_Technical_Report_Final.md
+docs/final_submission/build_final_report_pdf.py
+docs/final_submission/final_report_page_previews/
+docs/final_submission/report_page_previews/
+docs/final_submission/final_report_page_previews_contact.jpg
+docs/final_submission/original_report_page_previews_contact.jpg
+docs/final_submission/report_assets/from_original_draft/
+docs/final_submission/report_assets/hero_lane_replay_still.png
+docs/final_submission/report_assets/review_crop_candidates/
+docs/final_submission/report_assets/source_video_stills_candidates/
+docs/final_submission/report_assets/team_acknowledgements_photo.png
+docs/final_submission/report_assets/video_stills_candidates/
+docs/final_submission/report_assets/final_demo_contact_sheet.jpg
+docs/final_submission/report_assets/original_unique/original_unique_contact.jpg
+docs/final_submission/report_assets/original_unique/original_04.png
+docs/final_submission/report_assets/original_unique/original_04_clean.png
+docs/final_submission/report_assets/original_unique/original_05.jpeg
+docs/final_submission/report_assets/selected_stills_clean/contact.jpg
+docs/final_submission/report_assets/selected_video_stills_contact.jpg
 
 # OS/editor clutter
 .DS_Store
