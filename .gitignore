@@ -3,6 +3,7 @@
 venv/
 __pycache__/
 *.pyc
+node_modules/
 
 # Unity / Android build clutter
 Library/
@@ -32,6 +33,12 @@ third_party/sam2/checkpoints/*.pt
 third_party/sam2/checkpoints/*.pth
 third_party/sam2/checkpoints/*.zip
 third_party/sam2/cache/
+
+# Final-submission source artifacts live on branch final-submission-source.
+demo_video/
+docs/final_submission/*
+!docs/final_submission/
+!docs/final_submission/Quest_Bowling_Standalone_Technical_Report_Final.pdf
 
 # OS/editor clutter
 .DS_Store
