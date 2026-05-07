@@ -1,6 +1,6 @@
-# Quest Bowling Standalone
+# Quest 3 Bowling Ball Tracking
 
-Quest Bowling Standalone is a Quest 3 mixed-reality bowling replay prototype. The headset streams passthrough camera video and frame metadata to a laptop. The laptop detects the bowling ball, tracks it with YOLO and SAM2, reconstructs a lane-space trajectory, computes shot stats, and sends replay results back to the headset.
+Quest 3 Bowling Ball Tracking is a mixed-reality bowling training aid for Meta Quest 3 and a Windows laptop. The headset streams passthrough camera video and frame metadata to the laptop. The laptop detects the bowling ball with YOLO26s, tracks it with SAM2, reconstructs a lane-space trajectory, computes shot stats, and sends replay results back to the headset.
 
 The documentation rule for this repo is simple: this README describes what the current code does. Protocol files under `protocol/` are the wire contracts. Old planning docs and speculative design notes should not be treated as product truth.
 
